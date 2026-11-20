@@ -1,0 +1,31 @@
+
+
+  Red team PaprikaV2_3
+      POC R-01a: EXPLOITED | evil record at block 5; honest stake 0.25 slashed (PriorExistence); relayer net +0.124746997101511226 ETH after 0.000253002898488774 gas; relayer's own key still Active, record verdict None
+    ✔ R-01a relayer withholds an attestation, records the photo first, then slashes the honest device by prior existence
+      POC R-01b: EXPLOITED | viewer credit 0.125 ETH from the honest device; 0.125 ETH burned; no vote, no appeal
+    ✔ R-01b camera that captures offline and anchors at upload is slashed by whoever saw the photo first
+      POC R-02a: EXPLOITED | finder tx status 0 (reverted "has verdict"), copier tx status 1; copier credit 0.125 ETH, finder 0.0 ETH
+    ✔ R-02a prior-existence proof is not bound to the prover: a copier in the same block takes the reward
+      POC R-02b: EXPLOITED | finder's proof included (flag + verdict) but finder credit 0.0; forger's sybil credit 0.125 ETH: forger's loss capped at 0.125 ETH and the finder is paid nothing
+    ✔ R-02b the forger (holds its own key at level 0) front-runs a pending prior-existence proof with a misuse proof from a sybil
+      POC R-03: CONFIRMED | original recorded at 1115; copy recorded at 1316 with anchor 1104 < original: no objective proof either way; copy window = 256 blocks
+    ✔ R-03 forger evades prior existence by copying a recorded photo within 256 blocks, with an anchor older than the original record
+      POC R-04: CONFIRMED (mock push payment / blacklistable token) | settleAssertion reverts; device stake 0.14 + reserved 0.11 ETH stuck; prover credit 0.0
+    ✔ R-04 an upheld claim whose claimant refuses ETH can never settle: stake and the misuse prover's reward are locked forever (push-payment oracle)
+      POC R-05: CONFIRMED | revealClaim reverts (value sent to a non-payable assertTruth); the claimant's 0.11 ETH bond is then burnable by anyone via forfeitCommit
+    ✔ R-05 against an oracle with the real OOv3 bond interface (not payable, ERC-20 bond) every reveal reverts: the claim path is dead
+      POC R-06: CONFIRMED | stakeAtRisk 0.25 ETH but free stake a new challenger can win is 0.03 ETH; a third claim is refused ("stake < bond")
+    ✔ R-06 verify().stakeAtRisk includes bonds already handed to the oracle
+      POC H-1: HOLDS | 10 malformed signatures/keys rejected; cross-domain and cross-challenger replay rejected
+    ✔ H-1 signature edge cases are rejected (high s, s=0, r=0, r>=n, s=n/2+1, wrong length, (0,0) key, off-curve key, cross-domain replay)
+      POC H-2: HOLDS | blockhash window enforced; anchorBlock above 2^64 cannot be truncated into a valid one
+    ✔ H-2 anchor edge cases: current block, future block, 256 back accepted, 257 back rejected
+      POC H-3: HOLDS | balance 1.305 >= obligations 0.305 (forced 1 ETH is simply stranded; no equality check)
+    ✔ H-3 oracle boundary: callbacks from non-oracle, double callback, forced ETH; balance still covers obligations
+      POC H-4: HOLDS | only post-capture (or re-signed) anchors are exposed, see R-01
+    ✔ H-4 a griefer cannot flag an honest device whose anchor predates the photo becoming public
+
+
+  12 passing (432ms)
+
