@@ -129,8 +129,9 @@ flowchart TD
 | Accusa accolta | Segnalato; la foto è marcata come falso accertato | Riprende la cauzione e guadagna 0,125 ETH | Perde tutto il deposito (0,25 ETH) |
 | Accusa respinta | Non cambia nulla | Perde la cauzione (0,11 ETH) | Guadagna 0,055 ETH |
 
-Del denaro perso da chi ha torto, metà va a chi ha ragione e metà viene distrutta. Nessuno lo
-amministra.
+Del denaro perso da chi ha torto, metà va a chi ha ragione e metà viene distrutta: nessuno nel
+protocollo la incassa. (Con un arbitro come UMA, una parte di quella metà è la commissione che
+l'arbitro trattiene.)
 
 ### B. Prova che la chiave è uscita dal dispositivo
 
@@ -164,7 +165,9 @@ le sue foto.
 
 ## I casi, uno per uno
 
-Ogni riga è stata provata con un test: i numeri vengono dall'esecuzione, non da una stima.
+Ogni riga è stata provata con un test: i numeri vengono dall'esecuzione, non da una stima. La
+tabella completa, con il nome del test per ogni caso, è in
+[`contract/output/cases.md`](../contract/output/cases.md) (in inglese).
 
 | Caso | Che cosa succede |
 |---|---|
@@ -174,13 +177,13 @@ Ogni riga è stata provata con un test: i numeri vengono dall'esecuzione, non da
 | Attesto un'immagine generata | Il contratto la accetta: non può sapere che cos'è. Se qualcuno lo dimostra, perdo 0,25 ETH |
 | Qualcuno accusa una mia foto vera | Il contratto mi difende da solo. Accusa respinta: lui perde 0,11 ETH, io ne guadagno 0,055 |
 | Mi accuso da solo con un secondo conto per incassare | Perdo in ogni caso: metà di quello che viene tolto è distrutto |
-| So che mi stanno per scoprire e mi "auto-segnalo" con la prova B | Recupero metà deposito e ne perdo metà (0,125 ETH). Se l'accusa era già in busta chiusa, vince l'accusatore e io perdo tutto |
+| So che mi stanno per scoprire e mi "auto-segnalo" con la prova B | Recupero al massimo metà deposito e ne perdo almeno metà (0,125 ETH). Se l'accusa era già in busta chiusa, vince l'accusatore e io perdo tutto |
 | Qualcuno copia dalla rete la mia attestazione prima che sia confermata | Non serve a nulla: il record resta legato alla mia firma |
 | Qualcuno copia la prova o l'accusa di un altro | Non serve a nulla: entrambe nominano chi le ha fatte |
 | Accusa su una foto che il dispositivo non ha mai attestato | Rifiutata: l'accusatore perde la cauzione |
 | Mi rubano la chiave | Il ladro può far segnalare il dispositivo e prendersi 0,125 ETH del mio deposito |
 | Mi ritiro e aspetto 30 giorni senza contestazioni | Riprendo il deposito. Chi verifica vede che il deposito non è più in gioco |
-| Riempio di accuse finte i miei stessi record per bloccare gli altri | Costa 0,11 ETH a giro e ottiene solo un ritardo: dopo ogni decisione gli altri hanno tempo di contestare |
+| Riempio di accuse finte i miei stessi record per bloccare gli altri | Costa circa 0,11 ETH per ogni giro di decisioni e ottiene solo un ritardo: dopo ogni decisione gli altri hanno tempo di contestare |
 | Dispositivo segnalato con 100 record precedenti | Tutti e 100 restano leggibili, con la data della segnalazione accanto |
 
 ## I numeri
@@ -193,6 +196,15 @@ Ogni riga è stata provata con un test: i numeri vengono dall'esecuzione, non da
 | Attesa per ritirare il deposito | 30 giorni |
 | Tempo fra busta chiusa e apertura | da 1 a 50 blocchi |
 | Quanto può essere vecchio il blocco letto prima dello scatto | 256 blocchi |
+| Attesa dopo l'ultima contestazione prima di poter ritirare | 100 blocchi |
+
+| Operazione | Costo misurato (gas) |
+|---|---|
+| Registrazione | 146 mila |
+| Attestazione di una foto | 64 mila |
+| Accusa: busta chiusa, poi apertura | 68 mila, poi 385 mila |
+| Prova che la chiave è fuori | 95 mila |
+| Ritiro del deposito | 40 mila |
 
 Questi valori sono quelli del prototipo. Su una rete vera vanno scelti in base a quanto vale ciò
 che si vuole proteggere: vedi [3. Limiti e dipendenze](3-limiti-e-dipendenze.md).
