@@ -9,20 +9,21 @@ dispositivi e senza autorità centrali**. Proposta per la Track 1 di
 
 ## L'idea in tre righe
 
-1. Chi vuole attestare foto **registra il dispositivo e lascia un deposito**.
-2. Ogni foto viene **firmata dal dispositivo** e registrata sulla blockchain, con l'intervallo di
-   tempo in cui è stata firmata.
-3. Chiunque può **contestare**. Se una foto attestata viene dimostrata falsa, o se la chiave del
-   dispositivo risulta in mano ad altri, il dispositivo è segnalato e perde il deposito: metà va a
-   chi lo ha dimostrato.
+1. Chi vuole attestare foto **registra il dispositivo**, gratis.
+2. Ogni foto viene **firmata dal dispositivo** e registrata sulla blockchain con un **deposito**,
+   che torna indietro se nessuno la contesta entro un certo tempo.
+3. Chiunque può **accusare** una foto mettendo una cauzione uguale. Decide **UMA**. Se il falso è
+   dimostrato, chi accusa prende il deposito e il dispositivo è segnalato; altrimenti chi accusa
+   perde la cauzione.
 
 Nessuno amministra il contratto, nessuno decide chi può partecipare, nessun record viene mai
-cancellato.
+cancellato. Depositi, cauzioni e tempi non sono fissati nel codice: si scelgono quando il
+contratto viene pubblicato.
 
 ## Che cosa garantisce, e che cosa no
 
 Un record dimostra che un dispositivo registrato ha firmato **questo esatto file**, in **questo
-intervallo di tempo**, con **dei soldi in gioco**.
+intervallo di tempo**, e che chi l'ha attestato ha messo **dei soldi in gioco**.
 
 Non dimostra che il file viene da una fotocamera vera. È il prezzo di non dipendere dai
 produttori, ed è spiegato per intero in [`docs/3-limiti-e-dipendenze.md`](docs/3-limiti-e-dipendenze.md).
@@ -42,21 +43,20 @@ produttori, ed è spiegato per intero in [`docs/3-limiti-e-dipendenze.md`](docs/
 |---|---|
 | [`docs/`](docs/) | I tre documenti qui sopra, più gli [approfondimenti](docs/approfondimenti/) con le fonti |
 | [`proposal/`](proposal/) | La prima versione di Paprika, così com'è arrivata |
-| [`contract/`](contract/) | Il contratto finale (`Paprika.sol`), i suoi test e l'output dell'esecuzione |
-| [`prove/`](prove/) | Le prove a sostegno: la prima versione attaccata, il modello economico, i costi sulle reti |
+| [`contract/`](contract/) | Il contratto (`Paprika.sol`), i suoi test e l'output dell'esecuzione |
+| [`prove/`](prove/) | La prima versione scritta alla lettera e attaccata: la prova di che cosa non andava |
 | [`impl/mock/`](impl/mock/) | Il mock della demo, con gli screenshot |
 | [`slides/`](slides/) | La bozza del deck |
 | [`track/`](track/) | La traccia: PDF, slide, trascrizione |
 
 ## Stato
 
-- **Fatto:** protocollo definito; contratto scritto e provato con una suite di attacchi e con
-  test casuali; documenti; mock; bozza del deck.
-- **Da fare per la demo:** libreria del dispositivo (creare la chiave, firmare), comandi per
-  registrare, attestare, verificare e contestare, pagina web collegata al contratto, copione della
-  demo.
-- **Simulato nel prototipo:** il dispositivo (la chiave è creata dal programma), la blockchain
-  (Ethereum locale), l'arbitro (decidiamo noi l'esito, per mostrare i due casi).
+- **Fatto:** protocollo definito; documenti; mock dell'app e bozza delle slide.
+- **In corso:** contratto nella forma definitiva e prova con i contratti veri di UMA in locale.
+- **Da fare per la demo:** vedi le [issue](https://github.com/VincenzoImp/ixh26-paprika/issues),
+  in ordine di dipendenza.
+- **Dove gira:** tutto su una blockchain Ethereum locale. Simulati: la chiave del dispositivo
+  (creata dal programma) e il voto di UMA (l'esito lo inseriamo noi).
 
 ## Eseguire i test del contratto
 

@@ -1,216 +1,212 @@
 # 1. Come funziona Paprika
 
-Questa è la versione finale del protocollo, spiegata senza dare nulla per scontato.
-Per sapere che cosa è cambiato rispetto alla prima versione e perché, leggi
-[2. Che cosa è cambiato](2-cosa-e-cambiato.md).
+Questa è la versione definitiva del protocollo. Per sapere che cosa è cambiato rispetto alla
+prima versione e perché, leggi [2. Che cosa è cambiato](2-cosa-e-cambiato.md).
 
 ## In una frase
 
-Chi vuole attestare foto registra il proprio dispositivo e lascia un **deposito**. Ogni foto viene
-**firmata dal dispositivo** e registrata sulla blockchain. Se qualcuno dimostra che una foto
-attestata è un falso, il dispositivo viene **segnalato** e il deposito viene tolto: una parte va a
-chi ha fatto la contestazione.
+Ogni foto attestata è **firmata dal dispositivo** e ha un **deposito** in gioco. Chiunque può
+accusarla di essere un falso mettendo una cauzione uguale. Decide **UMA**. Chi ha torto perde i
+soldi. Se nessuno la accusa entro un certo tempo, il deposito torna indietro.
 
-Non ci sono produttori di dispositivi, comitati o amministratori. Chiunque può registrarsi,
-attestare, verificare e contestare.
+Non ci sono produttori di dispositivi, comitati o amministratori.
 
 ## Che cosa garantisce, e che cosa no
 
 | | |
 |---|---|
-| **Garantisce** | Questa esatta foto è stata firmata da questo dispositivo registrato, in questo intervallo di tempo. Il dispositivo ha dei soldi in gioco. Tutto quello che è stato deciso su quel dispositivo si può leggere, con la data. Nessuno può cancellare nulla. |
-| **Non garantisce** | Che la foto sia stata scattata da una fotocamera vera. Un dispositivo registrato può firmare anche un'immagine generata. Se lo fa, rischia il deposito: ma solo se qualcuno riesce a dimostrarlo. |
+| **Garantisce** | Questa esatta foto è stata firmata da questo dispositivo registrato, in questo intervallo di tempo. Chi l'ha attestata ha messo dei soldi in gioco. Tutto ciò che è stato deciso su quella foto e su quel dispositivo si può leggere, con la data. Nessuno può cancellare nulla. |
+| **Non garantisce** | Che la foto sia stata scattata da una fotocamera vera. Un dispositivo registrato può firmare anche un'immagine generata. Se lo fa rischia il deposito, ma solo se qualcuno riesce a dimostrarlo entro il tempo previsto. |
 
-Paprika quindi non è un rilevatore di falsi. È un registro pubblico in cui chi attesta una foto
-**ci mette la firma e i soldi**, e chiunque può chiamarlo a risponderne.
+## I parametri
+
+Nel contratto non ci sono valori fissi. Si scelgono quando il contratto viene pubblicato, e dopo
+non li può cambiare nessuno, perché il contratto non ha un amministratore.
+
+| Simbolo | Che cos'è |
+|---|---|
+| `B` | La somma che mette chi attesta una foto (deposito) e, uguale, chi la accusa (cauzione). UMA richiede che le due somme siano uguali |
+| `T_foto` | Per quanto tempo una foto può essere accusata dopo l'attestazione |
+| `T_reveal` | Quanto tempo ha chi accusa per completare l'accusa dopo averla depositata |
+| `f` | La parte della somma di chi perde che UMA trattiene come commissione. La fissa UMA, non noi (oggi è la metà) |
+
+Le somme sono in un token ERC-20 accettato da UMA, non in ETH: è così che funziona UMA.
 
 ## Le parole che usiamo
 
 | Parola | Significato |
 |---|---|
-| Dispositivo | La fotocamera o il telefono. Ha una sua chiave segreta con cui firma. |
-| Proprietario | Il conto Ethereum che registra il dispositivo e ci mette il deposito. |
-| Deposito | 0,25 ETH bloccati alla registrazione. Si perdono se il dispositivo viene segnalato. |
-| Record | La riga salvata sulla blockchain: quale foto, quale dispositivo, quando. |
-| Accusatore | Chiunque contesti una foto. Deve mettere una cauzione. |
-| Cauzione | 0,11 ETH che l'accusatore blocca. Li perde se l'accusa è infondata. |
-| Arbitro | Il servizio decentralizzato che decide se un'accusa è fondata. Non è una persona né un'azienda: è un voto pubblico (per esempio UMA). |
-| Segnalazione | Il "ban" della prima versione. Il dispositivo non può più attestare. I suoi record passati restano visibili. |
-| Relayer | Chiunque porti la firma del dispositivo sulla blockchain e paghi la commissione al suo posto. |
+| Dispositivo | La fotocamera o il telefono. Ha una chiave segreta con cui firma |
+| Record | La riga salvata sulla blockchain: quale foto, quale dispositivo, quando |
+| Hash della foto | L'impronta SHA-256 del file: cambia se cambia anche un solo pixel |
+| Hash del blocco | La sequenza di 32 byte che la blockchain calcola per ogni blocco. Non si può prevedere prima che il blocco esista |
+| Accusatore | Chiunque contesti una foto |
+| UMA | Il servizio decentralizzato che decide le accuse (Optimistic Oracle V3). Decide un voto pubblico di chi possiede il token UMA |
+| Segnalazione | Il "ban" della prima versione. Il dispositivo non può più attestare; i suoi record restano |
+| Commit–reveal | Fare un'accusa in due passaggi: prima se ne deposita solo l'impronta, poi la si rivela |
 
 ## Fase 1 — Registrazione
 
 ```mermaid
 flowchart TD
     Dev[Dispositivo] -->|"firma: questa chiave appartiene al conto X"| Acc[Conto del proprietario]
-    Acc -->|"chiave + firma + deposito di 0,25 ETH"| Contract(Contratto)
+    Acc -->|"chiave + firma"| Contract(Contratto)
     Contract -->|"firma valida, chiave mai vista"| Ok(Dispositivo registrato)
     Contract -->|"firma sbagliata, o chiave già usata"| No(Rifiutato)
 ```
 
 1. Il dispositivo crea la propria chiave.
-2. Con quella chiave firma una frase che dice "appartengo al conto X". Serve a dimostrare che chi
-   registra possiede davvero quel dispositivo.
-3. Il proprietario invia chiave e firma al contratto, insieme al deposito.
-4. Il contratto controlla la firma e registra il dispositivo.
+2. Con quella chiave firma un messaggio che contiene l'indirizzo del proprietario. Dimostra che
+   chi registra possiede davvero quella chiave.
+3. Il contratto controlla la firma e registra il dispositivo.
 
-Una chiave si può registrare **una volta sola**. Se viene segnalata, non rientra più.
+Registrarsi è gratuito. Una chiave si registra una volta sola: se viene segnalata non rientra più.
 
 ## Fase 2 — Attestazione di una foto
 
 ```mermaid
 flowchart TD
-    Dev[Dispositivo] --> Block(Legge il codice di un blocco recente)
-    Block --> Pic(Scatta la foto e ne calcola l'impronta)
-    Pic --> Sign("Firma: impronta della foto + codice del blocco")
-    Sign -->|"chiunque può portarla sulla blockchain"| Contract[Contratto]
+    Dev[Dispositivo] --> Block(Legge l'hash di un blocco recente)
+    Block --> Pic(Scatta la foto e ne calcola l'hash)
+    Pic --> Sign("Firma: hash della foto + hash del blocco")
+    Sign -->|"chi la invia blocca il deposito B"| Contract[Contratto]
     Contract --> Test{"Dispositivo attivo? Firma valida? Blocco recente?"}
     Test -->|No| Error(Rifiutato)
-    Test -->|Sì| Save("Record salvato: foto, dispositivo, intervallo di tempo")
+    Test -->|Sì| Save("Record salvato; deposito B bloccato per T_foto")
 ```
 
-1. Prima di scattare, il dispositivo legge il codice dell'ultimo blocco della blockchain. Quel
-   codice non si può conoscere in anticipo.
-2. Scatta la foto e ne calcola l'impronta (SHA-256).
-3. Firma insieme l'impronta e il codice del blocco.
-4. Chiunque può inviare quella firma al contratto. Il dispositivo non ha bisogno di avere ETH.
+1. Prima di scattare, il dispositivo legge l'hash dell'ultimo blocco.
+2. Scatta la foto e ne calcola l'hash.
+3. Firma insieme l'hash della foto e l'hash del blocco.
+4. Chi invia la firma al contratto blocca il deposito `B`. Può essere il proprietario o chiunque
+   altro per lui.
 5. Il contratto controlla che il dispositivo sia attivo, che la firma sia sua e che il blocco sia
    uno degli ultimi 256. Poi salva il record.
 
-**L'intervallo di tempo.** Dato che il codice del blocco non si poteva conoscere prima, la firma è
-stata fatta *dopo* quel blocco. Dato che il record è in un certo blocco, è stata fatta *prima* di
-quello. Il record dice quindi "firmata fra il blocco A e il blocco B".
+**L'intervallo di tempo.** L'hash del blocco non si poteva conoscere prima, quindi la firma è
+stata fatta *dopo* quel blocco. Il record è in un blocco successivo, quindi è stata fatta *prima*
+di quello.
 
-Non c'è una tariffa e non c'è una cassa comune. Si paga solo la normale commissione della
-blockchain.
+**Perché il deposito.** Senza, riempire il registro di attestazioni costerebbe solo la commissione
+della blockchain. Con il deposito, chi attesta N foto deve tenere bloccato N × `B` per il tempo
+`T_foto`.
 
-## Verifica
+## Fase 2 bis — Riprendere il deposito
 
-Chiunque, senza chiedere il permesso a nessuno:
+Se nessuno accusa la foto entro `T_foto`, chi ha messo il deposito lo riprende per intero. Il
+record resta per sempre: da quel momento chi verifica vede che la foto ha superato il periodo di
+contestazione.
 
-1. calcola l'impronta del file che ha in mano;
-2. chiede al contratto se esiste un record per quell'impronta e quel dispositivo.
+Per sicurezza il deposito si può riprendere solo dopo `T_foto + T_reveal`, così un'accusa
+depositata all'ultimo momento fa ancora in tempo a essere rivelata.
 
-Il contratto risponde con: l'intervallo di tempo, lo stato del dispositivo (attivo, ritirato,
-segnalato e da quando), quanto deposito è ancora in gioco, e se ci sono contestazioni aperte.
-
-Se nel file è cambiato anche un solo pixel, l'impronta è diversa e il record non si trova.
-
-## Fase 3 — Contestazione (il "ban" della prima versione)
-
-Ci sono due modi per far segnalare un dispositivo.
-
-### A. Accusa su una foto
-
-È l'idea della prima versione: qualcuno sostiene che una foto attestata è un falso, e una
-decisione decentralizzata stabilisce chi ha ragione.
+## Fase 3 — Accusa (il "ban" della prima versione)
 
 ```mermaid
 flowchart TD
-    Acc[Accusatore] -->|"1. busta chiusa + cauzione di 0,11 ETH"| Contract[Contratto]
-    Acc -->|"2. apre la busta: foto X del dispositivo Y, con le prove"| Contract
-    Contract -->|"3. difende il dispositivo in automatico, usando il suo deposito"| Arb[Arbitro]
-    Arb --> Choice{"Le prove dimostrano che la foto è un falso?"}
-    Choice -->|Sì| Ban("Dispositivo segnalato. Deposito perso: l'accusatore guadagna 0,125 ETH")
-    Choice -->|No| Nothing("Non succede nulla al dispositivo. L'accusatore perde la cauzione")
+    Acc[Accusatore] -->|"1. commit: impronta dell'accusa + cauzione B"| Contract[Contratto]
+    Acc -->|"2. reveal: foto, dispositivo, prove"| Contract
+    Contract -->|"3. porta l'accusa a UMA e la contesta con il deposito della foto"| UMA[UMA]
+    UMA --> Choice{"Le prove dimostrano che la foto è un falso?"}
+    Choice -->|Sì| Ban("Foto marcata come falso, dispositivo segnalato. L'accusatore vince")
+    Choice -->|No| Nothing("La foto resta valida. L'accusatore perde la cauzione")
 ```
 
-1. **Busta chiusa.** L'accusatore invia un impegno che non rivela quale foto contesta, con la
-   cauzione. Così il proprietario non può vedere l'accusa arrivare e muoversi prima.
-2. **Apertura.** Poco dopo l'accusatore rivela foto, dispositivo e prove.
-3. **Difesa automatica.** Il contratto contesta sempre l'accusa a nome del dispositivo, usando
-   una parte del suo deposito. Il proprietario non deve sorvegliare nulla: un'accusa non passa mai
-   "per silenzio".
-4. **Decisione.** L'arbitro decide guardando le prove. Se le prove non bastano a dimostrare il
-   falso, la risposta è no.
+### I due passaggi dell'accusa (commit–reveal)
 
-| Esito | Dispositivo | Accusatore | Proprietario |
+1. **Commit.** L'accusatore invia solo un'impronta, calcolata su: il proprio indirizzo, la foto,
+   il dispositivo, le prove e un numero segreto. Insieme blocca la cauzione `B`. Dall'impronta
+   nessuno può capire quale foto è sotto accusa.
+2. **Reveal.** Almeno un blocco dopo, ed entro `T_reveal`, invia i dati veri. Il contratto
+   ricalcola l'impronta e controlla che coincida.
+
+**A che cosa serve.** Su una blockchain una transazione è visibile a tutti prima di essere
+confermata. Se l'accusa si facesse in un passaggio solo, chiunque potrebbe copiarla e inviarla a
+proprio nome per prendersi il premio. Anche chi ha attestato il falso potrebbe farlo, per limitare
+la perdita. Con i due passaggi nessuno sa quale foto è accusata finché non è tardi per passare
+davanti.
+
+Chi fa il commit e poi non fa il reveal in tempo perde la cauzione.
+
+### Che cosa succede quando l'accusa arriva a UMA
+
+UMA vota solo sulle affermazioni che qualcuno contesta. Per questo il contratto fa due cose nello
+stesso momento: presenta a UMA l'accusa con la cauzione dell'accusatore, e la contesta usando il
+deposito della foto. Così ogni accusa arriva a un voto, e nessuna foto viene condannata solo
+perché chi l'ha attestata non stava guardando.
+
+UMA risponde alla domanda: *le prove allegate dimostrano che questa foto non è una vera cattura?*
+Per le regole di UMA la risposta è sì solo se la cosa si può verificare pubblicamente. Se le prove
+non bastano, la risposta è no.
+
+| Esito | Foto e dispositivo | Accusatore | Chi aveva messo il deposito |
 |---|---|---|---|
-| Accusa accolta | Segnalato; la foto è marcata come falso accertato | Riprende la cauzione e guadagna 0,125 ETH | Perde tutto il deposito (0,25 ETH) |
-| Accusa respinta | Non cambia nulla | Perde la cauzione (0,11 ETH) | Guadagna 0,055 ETH |
+| **Falso dimostrato** | La foto è marcata come falso. Il dispositivo è segnalato e non attesta più | Riprende `B` e riceve `B − f×B` | Perde `B` |
+| **Non dimostrato** | Non cambia nulla. La foto resta accusabile per il tempo che le rimaneva | Perde `B` | Tiene il deposito e riceve `B − f×B` |
 
-Del denaro perso da chi ha torto, metà va a chi ha ragione e metà viene distrutta: nessuno nel
-protocollo la incassa. (Con un arbitro come UMA, una parte di quella metà è la commissione che
-l'arbitro trattiene.)
+In entrambi i casi UMA trattiene `f×B` dalla somma di chi perde.
 
-### B. Prova che la chiave è uscita dal dispositivo
+Su una foto può esserci una sola accusa aperta alla volta. Il tempo passato sotto accusa non
+viene tolto da `T_foto`: accusarsi da soli per far scadere il tempo non funziona, e ogni giro
+costa `f×B`.
 
-La chiave di una fotocamera dovrebbe firmare solo foto. Se qualcuno riesce a far firmare a quella
-chiave un messaggio speciale, di un tipo che nessuna fotocamera firmerebbe, vuol dire che ha la
-chiave in mano: è stata copiata, rubata, prestata o venduta.
+### Revoca della chiave
 
-1. Chi ha la chiave firma il messaggio "questa chiave è fuori, pagate il conto Z".
-2. Lo invia al contratto, che controlla la firma. Non serve nessun arbitro.
-3. Il dispositivo viene segnalato. Il deposito viene diviso: 0,125 ETH a chi ha presentato la
-   prova, 0,125 ETH distrutti.
+Chi ha in mano la chiave di un dispositivo può farlo segnalare con una firma, senza UMA e senza
+soldi. Serve al proprietario a cui hanno rubato o copiato la chiave. Le foto già attestate e i
+loro depositi non vengono toccati.
 
-Questa regola serve a due cose. Rende rischioso prestare o vendere un dispositivo registrato,
-perché chi lo riceve può prendersi il deposito. E fa sì che chi trova una chiave rubata abbia
-convenienza a farla bloccare.
-
-### Che cosa succede dopo una segnalazione
+### Dopo una segnalazione
 
 - Il dispositivo non può più attestare.
-- I record già salvati **restano**. Accanto a ciascuno si legge che il dispositivo è stato
-  segnalato, in quale blocco e per quale motivo.
-- Chi verifica decide quanto fidarsi: per esempio può considerare validi i record precedenti a
-  un'accusa accolta su un'altra foto, e non fidarsi più di nulla se la chiave è risultata fuori
-  dal dispositivo.
+- I record già salvati restano, ciascuno con il proprio deposito e il proprio periodo di
+  contestazione.
+- Accanto a ogni record si legge che il dispositivo è stato segnalato, in quale blocco e perché.
 
-## Ritirare il deposito
+## Verifica
 
-Il proprietario può ritirarsi: il dispositivo smette subito di attestare e, dopo 30 giorni senza
-contestazioni aperte, il deposito torna indietro. In quei 30 giorni chiunque può ancora contestare
-le sue foto.
+Chiunque, senza chiedere il permesso a nessuno, calcola l'hash del file e chiede al contratto il
+record per quell'hash e quel dispositivo. La risposta dice:
+
+- l'intervallo di tempo in cui la foto è stata firmata;
+- lo stato della foto: attestata con deposito ancora bloccato, sotto accusa, periodo di
+  contestazione superato, oppure falso dimostrato;
+- lo stato del dispositivo: attivo, oppure segnalato, da quale blocco e perché.
+
+Se nel file è cambiato anche un solo pixel, l'hash è diverso e il record non si trova.
 
 ## I casi, uno per uno
 
-Ogni riga è stata provata con un test: i numeri vengono dall'esecuzione, non da una stima. La
-tabella completa, con il nome del test per ogni caso, è in
-[`contract/output/cases.md`](../contract/output/cases.md) (in inglese).
-
 | Caso | Che cosa succede |
 |---|---|
-| Registro un dispositivo, attesto una foto, la verifico | Il record viene salvato con il suo intervallo di tempo e chiunque lo ritrova |
-| Cambio un pixel e verifico | Nessun record: l'impronta è diversa |
-| Sono stato segnalato e rientro con una chiave nuova | Posso, ma mi serve un nuovo deposito di 0,25 ETH. La chiave vecchia è bruciata per sempre |
-| Attesto un'immagine generata | Il contratto la accetta: non può sapere che cos'è. Se qualcuno lo dimostra, perdo 0,25 ETH |
-| Qualcuno accusa una mia foto vera | Il contratto mi difende da solo. Accusa respinta: lui perde 0,11 ETH, io ne guadagno 0,055 |
-| Mi accuso da solo con un secondo conto per incassare | Perdo in ogni caso: metà di quello che viene tolto è distrutto |
-| So che mi stanno per scoprire e mi "auto-segnalo" con la prova B | Recupero al massimo metà deposito e ne perdo almeno metà (0,125 ETH). Se l'accusa era già in busta chiusa, vince l'accusatore e io perdo tutto |
-| Qualcuno copia dalla rete la mia attestazione prima che sia confermata | Non serve a nulla: il record resta legato alla mia firma |
-| Qualcuno copia la prova o l'accusa di un altro | Non serve a nulla: entrambe nominano chi le ha fatte |
-| Accusa su una foto che il dispositivo non ha mai attestato | Rifiutata: l'accusatore perde la cauzione |
-| Mi rubano la chiave | Il ladro può far segnalare il dispositivo e prendersi 0,125 ETH del mio deposito |
-| Mi ritiro e aspetto 30 giorni senza contestazioni | Riprendo il deposito. Chi verifica vede che il deposito non è più in gioco |
-| Riempio di accuse finte i miei stessi record per bloccare gli altri | Costa circa 0,11 ETH per ogni giro di decisioni e ottiene solo un ritardo: dopo ogni decisione gli altri hanno tempo di contestare |
-| Dispositivo segnalato con 100 record precedenti | Tutti e 100 restano leggibili, con la data della segnalazione accanto |
+| Attesto una foto e nessuno la accusa | Dopo `T_foto + T_reveal` riprendo `B`. Il record resta |
+| Cambio un pixel e verifico | Nessun record |
+| Attesto un falso e qualcuno lo dimostra | Perdo `B`. La foto è marcata, il dispositivo segnalato. L'accusatore guadagna `B − f×B` |
+| Attesto un falso e nessuno lo accusa in tempo | Riprendo `B`. Il falso resta attestato |
+| Qualcuno accusa una mia foto vera | UMA respinge. Lui perde `B`, io guadagno `B − f×B` |
+| Mi accuso da solo con un secondo conto | Perdo sempre `f×B`: la parte che UMA trattiene |
+| Sono stato segnalato e rientro con una chiave nuova | Posso, gratis. Ho perso il deposito di quella foto e la storia del dispositivo |
+| Qualcuno copia la mia attestazione prima che sia confermata | Il record resta legato alla firma del mio dispositivo. Il deposito lo ha messo lui, e lo riavrà lui |
+| Qualcuno copia il commit o il reveal di un altro | Non serve: l'impronta contiene l'indirizzo di chi accusa |
+| Accusa su una foto mai attestata, o fuori tempo | Rifiutata. Se l'accusatore non può più rivelare, perde la cauzione |
+| Seconda accusa mentre ce n'è una aperta sulla stessa foto | Deve aspettare l'esito della prima |
+| Mi rubano la chiave | Revoco la chiave: il dispositivo è segnalato e non attesta più |
+| Dispositivo segnalato con tanti record precedenti | Restano tutti leggibili, con la data della segnalazione accanto |
 
-## I numeri
+I numeri misurati per ciascun caso sono in
+[`contract/output/cases.md`](../contract/output/cases.md).
 
-| Parametro | Valore |
-|---|---|
-| Deposito del proprietario | 0,25 ETH |
-| Cauzione dell'accusatore | 0,11 ETH |
-| Quota di deposito a chi fa segnalare | 50% (il resto è distrutto) |
-| Attesa per ritirare il deposito | 30 giorni |
-| Tempo fra busta chiusa e apertura | da 1 a 50 blocchi |
-| Quanto può essere vecchio il blocco letto prima dello scatto | 256 blocchi |
-| Attesa dopo l'ultima contestazione prima di poter ritirare | 100 blocchi |
+## Che cosa gira nella demo
 
-| Operazione | Costo misurato (gas) |
-|---|---|
-| Registrazione | 146 mila |
-| Attestazione di una foto | 64 mila |
-| Accusa: busta chiusa, poi apertura | 68 mila, poi 385 mila |
-| Prova che la chiave è fuori | 95 mila |
-| Ritiro del deposito | 40 mila |
+Tutto gira su una blockchain Ethereum locale.
 
-Questi valori sono quelli del prototipo. Su una rete vera vanno scelti in base a quanto vale ciò
-che si vuole proteggere: vedi [3. Limiti e dipendenze](3-limiti-e-dipendenze.md).
+- **Vero:** il contratto di Paprika; i contratti di UMA (Optimistic Oracle V3), pubblicati in
+  locale così come sono; le firme; i depositi e i pagamenti.
+- **Simulato:** il dispositivo (la chiave è creata dal programma); il voto dei possessori del
+  token UMA, sostituito dallo strumento che UMA stessa usa sulle reti di prova: l'esito lo
+  inseriamo noi, per mostrare entrambi i casi.
 
 ## Dov'è il codice
 
 Il contratto è [`contract/contracts/Paprika.sol`](../contract/contracts/Paprika.sol), con i suoi
-test in [`contract/test/`](../contract/test/). Nella demo gira su una blockchain Ethereum locale,
-e l'arbitro è simulato: nessun voto vero ha luogo.
+test in [`contract/test/`](../contract/test/).
