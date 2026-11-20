@@ -1,69 +1,62 @@
-# Speaker notes: Paprika v2, first draft
+# Speaker notes: Paprika, first draft
 
 Five minutes, about 40 seconds per slide, 90 seconds for the demo. Numbers are the ones on the
-slides; their sources are in the comments of `deck-draft.tex`. Spec revision: v2.5.
+slides; their sources are in the comments of `deck-draft.tex`. Sources of truth: `docs/1-3`.
 
 ## 1. Title (30 s)
 
-Paprika is a registry of staked device keys with an open challenge, run by a contract that has no
-owner. Read the claim as written: a key signed a photo digest inside a block window, a stake stood
-behind the key and is forfeited when evidence against it is accepted, and everything decided about
-the key since is public. We do not claim that the photo came from a camera; for a self-registered
-key the guarantee is economic.
+Paprika is a public register in which whoever attests a photo puts a signature and money behind
+it. A record says that a registered device signed this exact file in a known block window, with a
+deposit at stake, and anyone can challenge it. We do not claim that the file came from a camera.
 
 ## 2. The problem (40 s)
 
 The brief's example is close to a solution but centralised: a single point of failure,
-cross-platform lock-in, retroactive censorship. Our starting idea was simpler than what we present,
-and on a local chain we broke it: a 1 ETH treasury drained in 21 self-report cycles, one ban erased
-100 of 100 earlier records, a copied transaction stole the origin. For each weakness we ask: is it
-removed, or only moved?
+cross-platform lock-in, retroactive censorship. We wrote our original proposal as a contract,
+exactly as described, and attacked it: a ban was evaded for free, a 1 ETH treasury was drained by
+self-accusation, a pending attestation was stolen, a device was banned for a photo it never
+attested. The three phases stayed; every phase was repaired.
 
 ## 3. The protocol (40 s)
 
-An account registers a P-256 device key with a stake; at level 0 that is all, at level 1 a bonded
-issuer, a device maker, also endorses the key. The device signs the photo digest with a recent
-block hash, anyone relays it, and the contract checks the signature. Anyone verifies by hashing the
-file and reading the chain. Anyone can challenge in two ways: a proof of key misuse, which the
-contract checks by itself, or a claim decided by vote.
+Register: the owner locks a 0.25 ETH deposit and the device key signs the owner's address, so
+nobody can register someone else's key. Attest: the device signs the file's hash together with a
+recent block hash, anyone relays it, and the record says "signed after block A and before block B".
+Challenge: an accusation against one photo, or a proof that the key left the device. Anyone
+verifies by hashing the file and asking the contract.
 
 ## 4. Removed or moved (45 s)
 
-The contract has no owner, no administrator, no upgrade path and no treasury, so that single point
-is removed; but claims move to the oracle's token vote, and at level 1 every issuer a verifier
-trusts is a trust root. Lock-in is removed for vendors; we still depend on one chain, a node, and
-at level 1 on the verifier's own issuer list. Retroactive censorship is narrowed, not removed:
-records are never erased and flags are dated, but whoever steals a key can prove its misuse and
-make its whole archive distrusted.
+There is no manufacturer, committee, owner or treasury, and no revocation list kept by anyone.
+Lock-in is removed for vendors; we still need one public chain and a node to read it. Records are
+never erased and flags carry their date, although a key thief can get a device flagged and
+verifiers may then distrust its archive. Trust is moved, not eliminated: to a decentralised arbiter
+for accusations, and to the deposit.
 
-## 5. The idea (50 s)
+## 5. The challenge mechanism (50 s)
 
-The device signature is checked on-chain with the P-256 precompile; the block hash inside it gives
-a not-before bound, the record's block a not-after bound. A capture key never signs anything else,
-so a signature on the "extracted" domain, naming the challenger, shows the key left its pipeline:
-the contract flags it with no vote. Other claims go to a vote that is always contested, so far
-tested only against an oracle mock. A third objective rule was tried, broken by an independent
-review with running exploits, and withdrawn. At level 1 the issuer's bounty is smaller than the
-owner's burned stake, so revoking your own key loses money. With a 0.25 ETH stake, deterrence covers
-forgeries worth roughly 4 to 40 dollars at an assumed 1 to 10 percent detection probability; the
-deposit-bound key idea is Kiayias and Tang's and Ruffing, Kate and Schröder's, and we only assemble it.
+An accusation starts as a sealed commitment with a 0.11 ETH bond, so the owner cannot see it
+coming; then the accuser reveals photo and evidence, and the contract contests it automatically
+with the device's deposit, so silence never flags anyone. If the arbiter upholds it, the accuser
+gets the bond back plus 0.125 ETH and the owner loses 0.25; if it rejects it, the accuser loses
+0.11 and the owner gains 0.055. The second way needs no arbiter: a signature on a message no camera
+would sign proves the key is out, and the deposit is split, 0.125 to the prover, 0.125 burned.
+Self-accusation always loses; the deposit-bound key idea is Kiayias and Tang's and Ruffing, Kate
+and Schröder's, and we only assemble it.
 
 ## 6. Demo (90 s)
 
-We register a simulated device key with a 0.25 ETH stake, sign a photo, let a relayer record it,
-and verify it with its block window. One changed pixel and there is no record. Then the key leaks:
-anyone proves misuse, the device is flagged, half the stake goes to the challenger and half is
-burned, and the old records stay visible, marked. Verifying again shows the flag's block and
-reason next to the earlier records. The demo runs on a local Ethereum EVM chain. The screenshot is a static mock-up whose
-labels predate the current parameters.
+We register a device with a 0.25 ETH deposit, attest a photo through a relayer, and verify it with
+its block window and the deposit at risk. One changed pixel and there is no record. A true
+accusation is upheld and the device is flagged; a false one is rejected and the accuser loses the
+bond. Verifying again shows that nothing was erased. All of this runs on a local Ethereum EVM
+chain, and the arbiter is simulated: we choose the outcome.
 
-## 7. Limits and deployment (45 s)
+## 7. Limits (45 s)
 
-A level-0 record does not prove physical origin, and level 1 only as far as the issuer is honest
-and trusted; the stake bounds the punishment, not the damage; claims wait days for a vote; records
-of a key are linkable; a photographed screen gives a genuine record; P-256 is not post-quantum. The
-demo runs on a local Ethereum EVM chain with software keys and simulated issuers; no public
-network is used. As a deployment estimate: the precompile answered on 12 public networks, and on
-the XRPL EVM sidechain an attestation would cost under a hundredth of a cent, but UMA is not
-deployed there. Design, code, documentation and slides were made with Claude Code
-under the team's direction; the log is in the repository.
+There is no proof of physical origin: a registered device can sign a generated image, and only
+fakes that leave public evidence are caught. The deposit deters only low-value fakes, roughly 4 to
+190 dollars at an assumed 1 to 50 percent detection probability and 3,000 dollars per ETH. We
+depend on the arbiter, 48 to 72 hours per accusation with UMA, and records of one device are
+linkable. It suits sale listings, recycled photos and small frauds, not news or legal evidence.
+Design, code, documentation and slides were made with Claude Code under the team's direction.

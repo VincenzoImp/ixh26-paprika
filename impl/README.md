@@ -1,36 +1,37 @@
-# impl/: demo page for Paprika v2
+# impl/: demo page for Paprika
 
 ## What is here
 
-`mock/ui-mock.html` is a **static, clickable mock** of the demo page for Paprika v2 (spec
-revision v2.5, contract `PaprikaCore` / `PaprikaV2_5`). It has no back end; it computes nothing. It exists so the
-team can agree on the look and the demo story before the real implementation, and compare it on
-equal terms with the ORIGO mock in the sibling repository (same layout, typography and colours).
+`mock/ui-mock.html` is a **static, clickable mock** of the demo page. It has no back end; it
+computes nothing. It exists so the team can agree on the look and the demo story before the real
+implementation, and compare it on equal terms with the ORIGO mock in the sibling repository
+(same layout, typography and colours). It follows the final protocol in
+`docs/1-come-funziona.md`: no manufacturers, no authority, no administrator.
 
-- **Device:** register a key at assurance level 0 (self-registered, economic guarantee only) or
-  level 1 (endorsed by a bonded issuer, with its bond and counters "keys endorsed / keys flagged
-  for misuse"); proof of possession; 0.25 ETH stake; registration transaction.
-- **Capture:** anchor block, digest, device signature, relayer, record `[not-before, not-after]`.
-- **Verify:** clean level-0 record; level-1 record whose outcome depends on the verifier's
-  "trusted issuers" list; one pixel changed; key flagged for misuse (both policies distrust the
-  whole archive); record with an upheld claim (policies diverge); "nothing erased" with event log.
-- **Challenge:** two panels: proof of key misuse (level 0: 0.125 to the challenger, 0.125
-  burned; level 1: plus the issuer's 0.1 bounty), and a claim by vote (commit, reveal, automatic
-  contest, simulated vote, both outcomes with money flows), marked "not in the live demo: oracle
-  mock". The proof of prior existence (v2.3–v2.4) was withdrawn in v2.5 and is not shown.
-- Hashes, addresses and block numbers are placeholders. Gas comes from the v2.4 gas table in
-  `experiments/p03-paprika-v2-hardened/README.md` (v2.5 not yet measured). Costs on public networks come from `experiments/p05-chain-options`
-  (computed there for v2's 86,026-gas attest, so they are upper bounds). "—" means not measured.
+- **Device:** device key, proof of possession, 0.25 ETH deposit, registration transaction.
+- **Capture:** recent block as anchor, digest, device signature, relayed by another account,
+  record with its block window.
+- **Verify:** clean record; one pixel changed (no record); device flagged after an upheld
+  accusation (photo marked as proven fake, earlier records still shown); device flagged because
+  its key left the device (records shown, archive no longer trusted); "nothing erased" history.
+- **Challenge:** (a) accuse a photo: sealed commitment and 0.11 ETH bond, reveal, automatic
+  defence with 0.11 ETH of the deposit, simulated arbiter, both outcomes with money flows (part
+  of the live demo, arbiter simulated); (b) prove the key left the device: decided by the
+  contract, 0.125 ETH to the prover, 0.125 ETH burned.
+- What a record shows: this registered device signed this exact file between block A and block B,
+  with a deposit at stake. It never shows that the file is a camera capture.
+- Hashes, addresses and block numbers are placeholders. Parameters come from
+  `docs/1-come-funziona.md`; gas and payouts from `contract/output/2026-11-20-run.txt`.
+  Only the registration gas (146,111) is measured there so far; other gas figures are "—".
 - `mock/mock-*.png`: one screenshot per screen/state (headless Chromium, 1280 px wide).
 
 ## How to open it
 
 Open `mock/ui-mock.html` in any browser, from disk; it uses no network resource. Each state has
-its own URL fragment, e.g. `ui-mock.html#verify-l1x`, `#challenge-commit`. Demo order:
-`#device-done` → `#capture-done` → `#verify-ok` → `#verify-pixel` → `#challenge-misuse` →
-`#verify-misuse` → `#challenge-commit` → `#challenge-pending` → `#challenge-rejected` →
-`#verify-history`. Extra states: `#device-done1`, `#verify-l1`, `#verify-l1x`,
-`#challenge-misuse1`, `#challenge-upheld`, `#verify-upheld`.
+its own URL fragment. Demo order: `#device-done` → `#capture-done` → `#verify-ok` →
+`#verify-pixel` → `#challenge-leaked` → `#verify-leaked` → `#challenge-commit` →
+`#challenge-reveal` → `#challenge-rejected` → `#verify-history`. Other outcome:
+`#challenge-upheld` → `#verify-upheld`.
 
 Screenshots were rendered with:
 
@@ -42,12 +43,12 @@ docker run --rm -v "$PWD/mock":/w --entrypoint chromium-browser zenika/alpine-ch
 
 ## What the real prototype adds
 
-- `PaprikaCore` / `PaprikaV2_5` deployed on a local Ethereum EVM chain (Hardhat, hardfork osaka,
-  P-256 precompile at `0x100`), with real transactions behind the device, capture, verify and
-  misuse-proof buttons. The claim-by-vote path runs only against an oracle mock and is not part of
-  the live demo.
-- Real SHA-256 of the file in the browser; real P-256 signatures by simulated device keys and
-  real issuer endorsements by simulated issuers (`TEST ONLY — NOT SECRET`).
-- `verify(H, keyId)` read from the chain (level, issuer, stake at risk, withdrawal block), and the
-  trusted-issuer policy applied in the page.
-- Still simulated: device keys, issuers, the chain (local), the oracle vote.
+- The `Paprika` contract (`contract/contracts/Paprika.sol`) on a local Ethereum EVM chain
+  (Hardhat), with real transactions behind every button: registration, attestation, accusation
+  (commit, reveal, automatic defence) and proof that a key left the device.
+- Real SHA-256 of the file in the browser and real P-256 signatures by a simulated device key
+  (`TEST ONLY — NOT SECRET`).
+- `verify` read from the chain: window, device status, flag block and reason, deposit at stake,
+  open challenges.
+- Still simulated: the device key (software), the chain (local), the arbiter (we choose the
+  outcome).

@@ -1,4 +1,4 @@
-% PAPRIKA v2 pitch deck (spec revision v2.5) - first draft (7 slides, 5 minutes).
+% PAPRIKA pitch deck - first draft (7 slides, 5 minutes). Final version: no manufacturers.
 % Same preamble, colours and layout as the sibling ORIGO draft (crypto/slides/draft/deck-draft.tex),
 % so the two decks can be compared on equal terms.
 % Build: pdflatex deck-draft.tex (twice). Coordinates are millimetres from the top-left corner
@@ -42,6 +42,8 @@
 \tikzset{flow/.style={-{Stealth[length=1.8mm]},line width=0.8pt,draw=ink}}
 \begin{document}
 
+% Sources: docs/1-come-funziona.md, docs/2-cosa-e-cambiato.md, docs/3-limiti-e-dipendenze.md,
+% contract/output/2026-11-20-run.txt, prove/*/README.md.
 
 % ============================================================ 1 Title
 \begin{frame}[plain]
@@ -49,15 +51,14 @@
   \fill[mint] (current page.north west) rectangle \at{78}{90};
   \node[anchor=north west,inner sep=0pt,font=\tiny\bfseries,text width=62mm,align=left] at \at{9}{10} {IXH26 $\cdot$ TRACK 1 $\cdot$ UNIVERSAL PHOTO-ORIGIN VALIDATION PROTOCOL};
   \node[anchor=north west,inner sep=0pt,font=\fontsize{40}{42}\selectfont\bfseries] at \at{8.4}{22} {PAPRIKA};
-  \node[anchor=north west,inner sep=0pt,font=\large\bfseries,text width=62mm,align=left] at \at{9}{42} {Staked device keys,\\ open challenge,\\ no owner.};
+  \node[anchor=north west,inner sep=0pt,font=\large\bfseries,text width=62mm,align=left] at \at{9}{42} {Signed photos,\\ money at stake,\\ no manufacturer.};
   \node[anchor=south west,inner sep=0pt,font=\tiny,text=ink!75] at \at{9}{84} {Team name $\cdot$ members};
-  \node[anchor=north west,inner sep=0pt,font=\tiny\bfseries,text=ink!75] at \at{87}{14} {WHAT A RECORD PROVES};
-  % Claim: spec/PROTOCOL.md section 1 (revision v2.4), shortened, not strengthened.
-  \node[anchor=north west,inner sep=0pt,font=\normalsize,text width=64mm,align=left] at \at{87}{19}
-    {The holder of device key $K$ \textbf{signed photo digest $H$} after block $b_0$ and before block $b_1$;\\[1.5mm]
-     $K$ was registered with a \textbf{stake $S$}, forfeited when evidence against $K$ or the record is accepted;\\[1.5mm]
-     and everything proven or decided about $K$ since is public, with its block.};
-  \card{87}{63}{64}{12}{rose}{\textbf{Not claimed:} that $H$ came from a camera. For a self-registered key the guarantee is economic.}
+  \node[anchor=north west,inner sep=0pt,font=\tiny\bfseries,text=ink!75] at \at{87}{18} {WHAT A RECORD PROVES};
+  % Claim: docs/3-limiti-e-dipendenze.md, "Come dirlo", item 1; docs/1-come-funziona.md, "Che cosa garantisce".
+  \node[anchor=north west,inner sep=0pt,font=\large,text width=64mm,align=left] at \at{87}{23}
+    {A \textbf{registered device signed this exact file} in a \textbf{known block window}, with a \textbf{deposit at stake}.\\[2mm]
+     \textbf{Anyone can challenge it.}};
+  \card{87}{60}{64}{12}{rose}{\textbf{Not claimed:} that the file came from a camera.}
 \end{tikzpicture}
 \end{frame}
 
@@ -69,16 +70,15 @@
     \textbf{Single point of failure.} ``Apple maintains central revocation lists. A compromised CA invalidates millions of devices.''\\[2mm]
     \textbf{Cross-platform lock-in.} ``Non-Apple devices cannot natively verify claims without relying on Apple servers.''\\[2mm]
     \textbf{Retroactive censorship.} ``Historic photos become unverifiable if central servers shut down or alter public keys.''}
-  \card{81}{27}{70}{47}{lemon}{\ct{Where we started: the original idea}
+  \card{81}{27}{70}{47}{lemon}{\ct{Our original proposal, attacked}
     Register a key $\cdot$ attest $\mathrm{SHA}(photo)$ for a fee into a treasury $\cdot$ ban a device when an oracle says a photo is fake.\\[1.5mm]
-    \textbf{We attacked it on a local chain:}\\[0.8mm]
-    $\bullet$ a 1\,ETH treasury drained in 21 self-report cycles % experiments/p01-paprika-baseline-attacks/README.md, attack 4
+    \textbf{Written as a contract, then attacked:}\\[0.8mm]
+    $\bullet$ a ban evaded for free with a new key\\[0.5mm]
+    $\bullet$ a 1\,ETH treasury drained by self-accusation % prove/originale-attaccato/README.md (attack 4: 1 ETH drained in 21 cycles); docs/2-cosa-e-cambiato.md
     \\[0.5mm]
-    $\bullet$ one ban made 100 of 100 earlier records unverifiable % p01 README, attack 6 (invalidates-past)
-    \\[0.5mm]
-    $\bullet$ a copied transaction stole the origin; random bytes verified as ``attested'' % p01 README, attacks 3 and 2
-    \\[1.5mm]
-    {\color{ink!70}Paprika v2 is the hardened version, attacked the same way.}}
+    $\bullet$ a pending attestation stolen from the mempool\\[0.5mm]
+    $\bullet$ a device banned for a photo it never attested\\[1.5mm]
+    {\color{ink!70}Same three phases; every phase repaired.}}
   \node[anchor=north west,inner sep=0pt,font=\scriptsize,text width=142mm,align=left] at \at{9}{79}
     {\textbf{Our test for each weakness:} is it \textbf{removed}, or only \textbf{moved} somewhere else?};
 \end{tikzpicture}
@@ -87,67 +87,68 @@
 % ============================================================ 3 Protocol
 \begin{frame}[plain]
 \begin{tikzpicture}[remember picture,overlay]
-  \head{The protocol $\cdot$ four steps, one contract}{Stake, sign, verify, challenge}
-  \card{9}{27}{33.5}{33}{sky}{\num{1} \textbf{\small REGISTER}\\[1mm] A P-256 device key, its signature on the owner's address, and a \textbf{stake}.\\[1mm]
-    \textbf{Level 0:} self-registered.\\ \textbf{Level 1:} also endorsed by a \textbf{bonded issuer}.}
-  \card{45.2}{27}{33.5}{33}{lilac}{\num{2} \textbf{\small SIGN \& RECORD}\\[1mm] The device signs the photo digest and a \textbf{recent block hash}. Anyone relays it; the contract checks the signature.\\[1mm] {\color{ink!70}$\Rightarrow$ record $(H, K, b_0, b_1)$}}
-  \card{81.4}{27}{33.5}{33}{mint}{\num{3} \textbf{\small VERIFY}\\[1mm] Anyone hashes the file and reads the chain: time window, level, flags, \textbf{stake still at risk}.\\[1mm] {\color{ink!70}$\Rightarrow$ no company server}}
-  \card{117.6}{27}{33.4}{33}{rose}{\num{4} \textbf{\small CHALLENGE}\\[1mm]
-    $\bullet$ proof of \textbf{key misuse}, checked by the contract\\[0.5mm] $\bullet$ committed \textbf{claim}, decided by vote\\[1mm] {\color{ink!70}$\Rightarrow$ flag $K$, slash $S$}}
-  \draw[flow] \at{42.5}{43} -- \at{45.2}{43};
-  \draw[flow] \at{78.7}{43} -- \at{81.4}{43};
-  \draw[flow] \at{114.9}{43} -- \at{117.6}{43};
-  \card{9}{66}{142}{14}{white}{\textbf{\color{accent}ON-CHAIN: ONE IMMUTABLE CONTRACT}\\[0.8mm]
-    A flag stops new records and erases nothing. Slashing: half the stake to the challenger, the rest burned. % alpha = 0.5: spec/PROTOCOL.md section 8
-    Measured gas: register 147\,k (level 0) / 182\,k (level 1), attest 64\,k. % experiments/p03-paprika-v2-hardened/README.md, "Gas, v2.4": 146,837 / 181,749 / 63,980
+  \head{The protocol $\cdot$ three phases, as in the original proposal}{Register, attest, challenge}
+  \card{9}{27}{33.5}{31}{sky}{\num{1} \textbf{\small REGISTER}\\[1mm] The owner locks a \textbf{0.25\,ETH deposit}; % docs/1-come-funziona.md, "I numeri"
+    the device key signs the owner's address (\textbf{proof of possession}).\\[1mm] {\color{ink!70}$\Rightarrow$ one key, once, ever}}
+  \card{45.2}{27}{33.5}{31}{lilac}{\num{2} \textbf{\small ATTEST}\\[1mm] The device signs the file's SHA-256 and a \textbf{recent block hash}. Anyone relays it; the contract checks the P-256 signature.\\[1mm] {\color{ink!70}$\Rightarrow$ signed after block $A$, before block $B$}}
+  \card{81.4}{27}{33.5}{31}{rose}{\num{3} \textbf{\small CHALLENGE}\\[1mm] An \textbf{accusation} against one photo, decided by a decentralised arbiter; or a \textbf{proof that the key left the device}.\\[1mm] {\color{ink!70}$\Rightarrow$ device flagged, deposit lost}}
+  \card{117.6}{27}{33.4}{31}{mint}{\textbf{\small VERIFY}\\[1mm] Anyone, without permission: hash the file, ask the contract.\\[1mm] Window, status, flags with their block, \textbf{deposit still at risk}.}
+  \draw[flow] \at{42.5}{42} -- \at{45.2}{42};
+  \draw[flow] \at{78.7}{42} -- \at{81.4}{42};
+  \draw[flow,dashed] \at{114.9}{42} -- \at{117.6}{42};
+  \card{9}{65}{142}{15}{white}{\textbf{\color{accent}ON-CHAIN: ONE CONTRACT, NO OWNER}\\[0.8mm]
+    No fee, no treasury: only the chain's gas, about 64\,k per attestation. % docs/3-limiti-e-dipendenze.md, ORIGO comparison table ("circa 64 mila")
+    A flag stops new attestations; earlier records stay readable, with the flag's block and reason.
+    After 30 days without open claims the owner can take the deposit back. % docs/1-come-funziona.md, "Ritirare il deposito"
     }
 \end{tikzpicture}
 \end{frame}
 
-% ============================================================ 4 What the contract does
+% ============================================================ 4 Removed or moved
 \begin{frame}[plain]
 \begin{tikzpicture}[remember picture,overlay]
   \head{Why a blockchain}{Removed, or moved?}
-  \card{9}{27}{92}{14.5}{rose}{\textbf{Single point of failure} $\rightarrow$ \textbf{No owner, no admin, no upgrade path, no CA.}\\ \textbf{Removed} for the contract. \textbf{Moved:} claims to the oracle's token vote; at level 1, each issuer a verifier trusts is a trust root.}
-  \card{9}{44}{92}{14.5}{peach}{\textbf{Cross-platform lock-in} $\rightarrow$ \textbf{Open admission; verifying needs chain data and SHA-256.}\\ \textbf{Removed} for vendors. Remains: one chain, a node to read it, and at level 1 the verifier's own list of issuers.}
-  \card{9}{61}{92}{14.5}{lemon}{\textbf{Retroactive censorship} $\rightarrow$ \textbf{Records are never erased; flags are dated.}\\ \textbf{Narrowed, not removed:} a thief who proves misuse of a stolen key makes its whole archive distrusted. The records stay; the trust goes.}
-  \card{105}{27}{46}{48.5}{white}{\ct{The contract's functions}
-    \num{1}\; \texttt{register}, \texttt{registerIssuer}\\[1.1mm]
-    \num{2}\; \texttt{attest} --- any relayer\\[1.1mm]
-    \num{3}\; \texttt{proveKeyMisuse} --- no vote\\[1.1mm]
-    \num{4}\; \texttt{requestUnbond}, \texttt{withdraw}\\[1.1mm]
-    \num{5}\; \texttt{commitClaim}, \texttt{revealClaim}\\[1.1mm]
-    \num{6}\; \texttt{verify} --- returns everything\\[1.4mm]
-    {\color{ink!70}No treasury: ETH leaves as a returned stake, a reward or a burn.}}
+  \card{9}{27}{92}{14.5}{rose}{\textbf{Single point of failure} $\rightarrow$ \textbf{No manufacturer, no committee, no owner, no treasury.}\\ \textbf{Removed:} no revocation list kept by anyone. \textbf{Moved:} accusations are decided by an external arbiter.}
+  \card{9}{44}{92}{14.5}{peach}{\textbf{Cross-platform lock-in} $\rightarrow$ \textbf{Anyone registers; verifying needs chain data and SHA-256.}\\ \textbf{Removed} for vendors. Remains: one public chain, and a node to read it.}
+  \card{9}{61}{92}{14.5}{lemon}{\textbf{Retroactive censorship} $\rightarrow$ \textbf{Records are never erased; flags are dated.}\\ \textbf{Removed} as erasure. A key thief can still get a device flagged, so verifiers may distrust its archive: the records stay.}
+  \card{105}{27}{46}{48.5}{white}{\ct{Where the trust goes}
+    \textbf{Not} to manufacturers, a committee, an administrator, or anyone watching the chain for owners.\\[1.5mm]
+    \textbf{To} a decentralised arbiter, for accusations; to the \textbf{deposit}, which the signer loses; to the chain itself.\\[1.5mm]
+    {\color{ink!70}Trust is moved, not eliminated.}}
   \node[anchor=north west,inner sep=0pt,font=\scriptsize,text width=142mm,align=left] at \at{9}{79}
-    {Measured: \textbf{100 of 100} earlier records returned after a flag; \textbf{0} invariant violations in 5\,$\times$\,5{,}000 random steps (v2.3; v2.4 pending). % p03 README: attack 6 (100/100, "as v2.3" for v2.4); v2.3 fuzz section (5 seeds x 5,000 steps, 0 violations); v2.4 fuzz result is still a placeholder
+    {Measured: a device flagged with \textbf{100} earlier records: all \textbf{100} still readable, with the flag's date. % docs/1-come-funziona.md, cases table (last row)
     };
 \end{tikzpicture}
 \end{frame}
 
-% ============================================================ 5 Crypto and economic idea
+% ============================================================ 5 Challenge mechanism
 \begin{frame}[plain]
 \begin{tikzpicture}[remember picture,overlay]
-  \head{The cryptographic and economic idea}{A key that incriminates itself}
-  \card{9}{24}{68}{26}{sky}{\ct{Signed on the device, checked on-chain}
-    \mbox{$\sigma = \mathrm{Sig}_K(\texttt{CAPTURE} \| \ldots \| K \| H \| \mathrm{blockhash}(b_0))$}\\[1mm]
-    \textbf{ECDSA P-256}, verified by the precompile at \texttt{0x100}.\\
-    \textbf{Not before} $b_0$: its hash is unpredictable earlier.\\ \textbf{Not after} $b_1$: the block holding the record.
+  \head{The cryptographic and economic idea}{Who pays when someone is wrong}
+  \card{9}{25}{80}{45}{lilac}{\ct{A. Accusation against one photo}
+    \num{1}\; \textbf{Sealed commitment} with a 0.11\,ETH bond: the owner cannot see it coming. % docs/1-come-funziona.md, "I numeri"
+    \\[0.8mm]
+    \num{2}\; Reveal: photo, device, public evidence.\\[0.8mm]
+    \num{3}\; The contract \textbf{contests it automatically} with the device's deposit: silence never flags anyone.\\[0.8mm]
+    \num{4}\; The arbiter decides; without public evidence, the answer is no.\\[1.5mm]
+    \renewcommand{\arraystretch}{1.25}
+    \begin{tabular}{@{}p{14mm}p{29mm}p{22mm}@{}}
+      & \textbf{Accuser} & \textbf{Owner}\\
+      \textbf{Upheld} & bond back, $+0.125$\,ETH & loses 0.25\,ETH\\
+      \textbf{Rejected} & loses 0.11\,ETH & $+0.055$\,ETH\\
+    \end{tabular} % docs/1-come-funziona.md, outcome table; measured in contract/output/2026-11-20-run.txt (+0.1245 and -0.1105 net of gas, owner +0.055)
     }
-  \card{81}{24}{70}{26}{lilac}{\ct{Two ways to challenge}
-    \textbf{Key misuse:} $\mathrm{Sig}_K(\texttt{EXTRACTED} \| \ldots \| \mathit{challenger})$ shows $K$ left the capture pipeline.\\[0.5mm]
-    \textbf{Claim:} committed, always contested, decided by vote; tested against an oracle mock only. Not a deepfake detector.}
-  \card{9}{54}{68}{20}{white}{\ct{Two assurance levels}
-    \textbf{Level 0:} self-registered; economic guarantee only.\\
-    \textbf{Level 1:} endorsed by an issuer bonded with 1\,ETH; a misuse proof also earns a 0.1\,ETH bounty. Bounty $<(1-\alpha)S$: self-revocation loses. % spec section 8: ISSUER_MIN_BOND 1, ISSUER_BOUNTY 0.1 < 0.125
-    }
-  \card{81}{54}{70}{20}{mint}{\ct{Incentives}
-    $S = 0.25$\,ETH, $\alpha = 50\%$, claim bond 0.11\,ETH. % spec/PROTOCOL.md section 8
-    Self-report loses $(1-\alpha)S$; no treasury. Deters a forgery only if $p(1-\alpha)S > G$: about 4--40\,USD at $p$ = 1--10\% (\textbf{assumed} inputs). % spec section 8 and experiments/p06-economic-model/README.md: p and G assumed, ETH = 3,000 USD assumed
-    }
-  \node[anchor=north west,inner sep=0pt,font=\tiny,text width=142mm,align=left] at \at{9}{76.5}
-    {\textbf{Withdrawn.} A third, objective challenge rule was tried, broken by an independent review with running exploits, and withdrawn.\\[0.6mm]
-     \textbf{Prior work.} Deposit-bound keys: Kiayias and Tang (CCS 2013, 2015); Ruffing, Kate and Schr\"oder (CCS 2015). We assemble; we do not claim the primitive.};
+  \card{93}{25}{58}{45}{sky}{\ct{B. The key left the device}
+    A camera key signs only photos. A signature on a special ``this key is out, pay account $Z$'' message proves someone holds the key.\\[1.2mm]
+    \textbf{No arbiter:} the contract checks the P-256 signature.\\[1.2mm]
+    Deposit split: \textbf{0.125\,ETH} to the prover, \textbf{0.125\,ETH} burned. % docs/1-come-funziona.md, section B; contract/output: prover +0.125
+    \\[1.2mm]
+    {\color{ink!70}Lending or selling a registered device hands over its deposit.}}
+  \node[anchor=north west,inner sep=0pt,font=\scriptsize,text width=142mm,align=left] at \at{9}{73.5}
+    {Half of the loser's money goes to the winner; the rest is burned or paid to the arbiter. \textbf{Self-accusation always loses:} five cost 0.63\,ETH. % contract/output/2026-11-20-run.txt: -0.626 (misuse path) / -0.629 (claim path) over 5 keys
+    };
+  \node[anchor=north west,inner sep=0pt,font=\tiny,text width=142mm,align=left] at \at{9}{79.5}
+    {\textbf{Prior work.} Deposit-bound keys: Kiayias and Tang (CCS 2013, 2015); Ruffing, Kate and Schr\"oder (CCS 2015). We assemble; we do not claim the primitive.};
 \end{tikzpicture}
 \end{frame}
 
@@ -164,37 +165,35 @@
     \node[font=\scriptsize,text=ink!60,align=center] at \at{51}{53} {Screenshot placeholder\\ (verify page of the running prototype)};
   }
   \card{97}{27}{54}{52}{white}{\ct{The 90-second story}
-    \num{1}\; Register a device key with a 0.25\,ETH stake % spec/PROTOCOL.md section 8 (MIN_STAKE)
-    \\[1.4mm]
-    \num{2}\; Sign a photo; a relayer records it; verify shows $[b_0, b_1]$\\[1.4mm]
-    \num{3}\; Change one pixel: no record\\[1.4mm]
-    \num{4}\; Extracted key: anyone proves misuse; flag, half the stake to the challenger, half burned; old records stay, marked % spec section 8, alpha = 0.5
-    \\[1.4mm]
-    \num{5}\; Verify again: the flag's block and reason, next to the earlier records}
-  \node[anchor=north west,inner sep=0pt,font=\tiny,text=ink!70,text width=142mm] at \at{9}{81} {Static mock-up; its labels and 0.1\,ETH stake predate the current parameters. Local Ethereum EVM chain; device key in software; no public network is used.};
+    \num{1}\; Register a device with a 0.25\,ETH deposit % docs/1-come-funziona.md, "I numeri"
+    \\[1mm]
+    \num{2}\; Attest a photo; a relayer submits it\\[1mm]
+    \num{3}\; Verify: block window, deposit at risk\\[1mm]
+    \num{4}\; Change one pixel: no record\\[1mm]
+    \num{5}\; True accusation: upheld, device flagged\\[1mm]
+    \num{6}\; False accusation: rejected, accuser loses the bond\\[1mm]
+    \num{7}\; Verify again: nothing erased}
+  \node[anchor=north west,inner sep=0pt,font=\tiny,text=ink!70,text width=142mm] at \at{9}{81} {Local Ethereum EVM chain; no public network. The arbiter is simulated: we choose the outcome. Static mock-up; its labels predate the final parameters.};
 \end{tikzpicture}
 \end{frame}
 
 % ============================================================ 7 Limits
 \begin{frame}[plain]
 \begin{tikzpicture}[remember picture,overlay]
-  \head{Honest limits and the road ahead}{What we do not claim}
-  \card{9}{25}{80}{42}{rose}{\ct{Limits (spec, section 9)}
-    $\bullet$ A level-0 record does not prove physical origin; level 1 only as far as the issuer is honest and trusted\\[0.4mm]
-    $\bullet$ The stake bounds the punishment, not the damage\\[0.4mm]
-    $\bullet$ Claims wait two to three days for a token vote we do not control % spec section 9, item 3
-    \\[0.4mm]
-    $\bullet$ An owner can self-slash first; a key thief can discredit a whole archive\\[0.4mm]
-    $\bullet$ Records of one key are linkable, and linked to its owner\\[0.4mm]
-    $\bullet$ Exact digests only; one transaction per photo\\[0.4mm]
-    $\bullet$ A re-photographed screen gives a genuine record\\[0.4mm]
-    $\bullet$ Not post-quantum; the contract cannot be patched}
-  \card{93}{25}{58}{17}{lemon}{\ct{Simulated in this demo}
-    Local Ethereum EVM chain (no public network) $\cdot$ device key in software $\cdot$ issuers simulated $\cdot$ claims tested against an oracle mock only}
-  \card{93}{45.5}{58}{21.5}{mint}{\ct{Path to deployment}
-    Demo: local Ethereum EVM chain. Estimate for later: the P-256 precompile answered on 12 public networks. % experiments/p05-chain-options/README.md section 1
-    XRPL EVM: under 0.0001\,USD per attestation; Ethereum: about 0.23\,USD. % p05 README section 3: 0.00006 / 0.225 USD at v2's 86,026 gas (v2.4 attest is 63,980), one gas-price sample, 2026-11-20 20:38 UTC
-    No UMA oracle on XRPL EVM yet. % p05 README section 2
+  \head{Honest limits}{What we do not claim}
+  \card{9}{25}{80}{43}{rose}{\ct{Limits}
+    $\bullet$ \textbf{No proof of physical origin:} a registered device can sign a generated image\\[0.5mm]
+    $\bullet$ Only fakes that leave \textbf{public evidence} are caught\\[0.5mm]
+    $\bullet$ The deposit deters only low-value fakes: about 4 to 190\,USD at a 1\% to 50\% detection probability, at an assumed 3{,}000\,USD per ETH % docs/3-limiti-e-dipendenze.md, "Quanto protegge il deposito"; prove/modello-economico/README.md (p and ETH price assumed)
+    \\[0.5mm]
+    $\bullet$ Depends on the arbiter: 48--72\,h per accusation with UMA; its security is the arbiter's % docs/3-limiti-e-dipendenze.md, "La dipendenza dall'arbitro"
+    \\[0.5mm]
+    $\bullet$ Records of one device are linkable\\[0.5mm]
+    $\bullet$ Exact file only; a photographed screen gives a regular record}
+  \card{93}{25}{58}{43}{mint}{\ct{What it is good for}
+    Contexts where a fake is worth little and often leaves traces: sale listings, recycled photos, small frauds.\\[1.2mm]
+    \textbf{Not} news, elections or legal evidence.\\[1.2mm]
+    {\color{ink!70}Deployment estimate: an attestation costs about 0.00006\,USD on the XRPL EVM sidechain, 0.23\,USD on Ethereum.} % prove/costi-sulle-reti/README.md (prices of 2026-11-20; computed at 86,026 gas)
     }
   \card{9}{71}{142}{9}{white}{\textbf{AI disclosure.} Design, code, documentation and these slides were produced with Claude Code (Anthropic) under the team's direction. Full log: \texttt{AI\_DISCLOSURE.md} in the repository.}
 \end{tikzpicture}

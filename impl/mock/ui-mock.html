@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>PAPRIKA v2 — demo mock (nothing is computed)</title>
+<html lang="en"><head><meta charset="utf-8"><title>PAPRIKA — demo mock (nothing is computed)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!-- Static clickable mock. Same visual language as the ORIGO mock (sibling repository, impl/mock/ui-mock.html).
-     Hashes, addresses and block numbers are placeholders. Gas and ETH figures come from
-     experiments/p03-paprika-v2-hardened (gas table of v2.4; v2.5 not yet measured) and experiments/p05-chain-options; "—" = not measured. -->
+     Hashes, addresses and block numbers are placeholders. Parameters from docs/1-come-funziona.md; gas and payouts
+     from contract/output/2026-11-20-run.txt; "—" = not measured yet. -->
 <style>
 :root{--ink:#14123a;--paper:#f8f6f1;--lilac:#e4dcfb;--lemon:#fff8b8;--mint:#c9f2d6;--rose:#ffd9d2;--sky:#dce6ff;--peach:#ffe6c2;--accent:#3b45b5;--line:#14123a22}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.45 "Helvetica Neue",Helvetica,Arial,sans-serif;padding-bottom:44px}
@@ -48,8 +48,6 @@ table{border-collapse:collapse;width:100%;font-size:13px}th{text-align:left;font
 td{padding:7px 8px;border-bottom:1.5px solid var(--line);vertical-align:top}.ok{color:#17703f;font-weight:700}.no{color:#b3261e;font-weight:700}.am{color:#a04a00;font-weight:700}
 td.mono{white-space:nowrap;word-break:normal}
 .note{font-size:12px;background:var(--lilac);border:2px solid var(--ink);border-radius:8px;padding:8px 12px;margin:0}
-.level{border:2px solid var(--ink);border-radius:12px;border-bottom-width:6px;background:var(--peach);padding:14px 18px}
-.level .bigt{font-size:20px}
 .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-size:13px}.kv dt{font-weight:700}.kv dd{margin:0}
 .flow{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:13px;border:2px solid var(--ink);border-radius:8px;padding:8px 12px;margin-top:10px;background:#fff}
 .flow .h{grid-column:1/3;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
@@ -60,11 +58,10 @@ td.mono{white-space:nowrap;word-break:normal}
 footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:2px solid var(--ink);padding:7px 28px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 footer b{text-transform:uppercase;font-size:11px;letter-spacing:.5px}
 .seg{display:flex;gap:8px;margin-top:4px}.seg button{flex:1;font-size:13px;padding:9px 10px}
-.chk{display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0;cursor:pointer}.chk input{width:auto;margin-top:3px}
 </style></head><body>
-<header><div><div class="logo">PAPRIKA</div><div class="sub">Photo-origin protocol v2 · bonded keys · demo</div></div>
+<header><div><div class="logo">PAPRIKA</div><div class="sub">Photo-origin protocol · deposits &amp; challenges · demo</div></div>
 <nav><a href="#device" data-v="device">1 · Device</a><a href="#capture" data-v="capture">2 · Capture</a><a href="#verify" data-v="verify">3 · Verify</a><a href="#challenge" data-v="challenge">4 · Challenge</a></nav></header>
-<div class="chainbar"><div><span class="dot"></span>Local Ethereum EVM chain (Hardhat, hardfork osaka) <span>· P-256 at 0x100 · block <b id="blk">131</b></span></div><div>PaprikaCore / PaprikaV2_5 <span class="mono">0x5FbD…0aa3</span></div><div>Oracle (mock OOv3) <span class="mono">0xe7f1…0512</span></div><div style="margin-left:auto">STATIC MOCK <span>— placeholder values, nothing is computed</span></div></div>
+<div class="chainbar"><div><span class="dot"></span>Local Ethereum EVM chain (Hardhat) <span>· block <b id="blk">131</b></span></div><div>Contract Paprika <span class="mono">0x5FbD…0aa3</span></div><div>Arbiter: simulated</div><div style="margin-left:auto">STATIC MOCK <span>— placeholder values, nothing is computed</span></div></div>
 <main>
 
 <!-- ============ 1. DEVICE ============ -->
@@ -73,48 +70,34 @@ footer b{text-transform:uppercase;font-size:11px;letter-spacing:.5px}
   <div class="card"><h2>Device key</h2>
    <dl class="kv">
     <dt>Device</dt><dd>demo-cam-A <span class="chip">Simulated device</span></dd>
-    <dt>Curve</dt><dd>ECDSA P-256 (curve of phone secure hardware)</dd>
+    <dt>Curve</dt><dd>ECDSA P-256</dd>
     <dt>Public key</dt><dd class="mono">x 0x6b17…c296 · y 0x4fe3…51f5</dd>
     <dt>Key id</dt><dd class="mono">SHA-256(x ‖ y) = 0x3a7f…c210</dd>
     <dt>Owner account</dt><dd class="mono">0xf39F…2266</dd>
    </dl>
-   <label class="f">Assurance level</label>
-   <div class="seg"><button data-l="0" onclick="go('device-'+(isDone()?'done':'l0'))">Level 0 · self-registered</button><button data-l="1" onclick="go('device-'+(isDone()?'done1':'l1'))">Level 1 · endorsed by an issuer</button></div>
-   <label class="f" for="stk">Stake to lock</label>
-   <div class="row" style="margin-top:0"><select id="stk"><option>0.25 ETH · MIN_STAKE</option><option>0.5 ETH</option></select><span class="d">unbonding period 30 days</span></div>
-   <div class="row"><button class="pri big" onclick="reg()">Register device &amp; lock stake</button></div>
-   <p class="d" style="margin-bottom:0">The device key is generated in software for the demo. At level 0 any key can register: no manufacturer, no administrator, no permission.</p>
+   <label class="f" for="stk">Deposit</label>
+   <div class="row" style="margin-top:0"><select id="stk"><option>0.25 ETH</option></select><span class="d">returned 30 days after the owner retires the device, if no challenge is open</span></div>
+   <div class="row"><button class="pri big" onclick="reg()">Register device &amp; lock deposit</button></div>
+   <p class="note" style="margin-top:14px"><b>No manufacturer or authority approves this device.</b> Anyone can register a key; what stands behind it is the deposit.</p>
   </div>
-  <div class="level" id="lv0"><h2>Assurance level of this key</h2>
-   <div class="bigt">Level 0 — self-registered key, economic guarantee only</div>
-   <div class="d" style="margin-top:6px">Records signed by this key prove who signed what, and when, and how much is at risk. They do <b>not</b> prove that the file came from a camera: a staked software key can sign any bytes.</div>
-  </div>
-  <div class="level" id="lv1" style="background:var(--sky)"><h2>Assurance level of this key</h2>
-   <div class="bigt">Level 1 — key endorsed by a bonded issuer</div>
-   <dl class="kv" style="margin-top:8px">
-    <dt>Issuer</dt><dd>Acme Devices (mock) <span class="mono">0xa0Ee…9720</span></dd>
-    <dt>Issuer bond</dt><dd>1 ETH (ISSUER_MIN_BOND) · pays a 0.1 ETH bounty per key proven misusable</dd>
-    <dt>Track record</dt><dd>keys endorsed <b>3</b> · keys flagged for misuse <b>0</b></dd>
-    <dt>Endorsement</dt><dd class="mono">"PAPRIKA/ENDORSE" ‖ chainId ‖ contract ‖ keyId</dd>
-   </dl>
-   <p class="note" style="margin-top:10px">This chain does not say who is a real device maker: the verifier chooses which issuers to trust. Anyone can become an issuer for 1 ETH. A level-1 record is only as good as its issuer's honesty and hardware.</p>
+  <div class="card"><h2>What a record from this device will show</h2>
+   <p style="margin:0">This registered device signed this exact file between block A and block B, with a deposit at stake.</p>
+   <p class="d" style="margin-bottom:0">It will <b>not</b> show that the file came from a camera: a registered device can sign a generated image. If it does and someone proves it, the deposit is lost.</p>
   </div>
  </div>
  <div class="stack">
   <div class="card"><h2>What happens when you press the button</h2><ol class="steps" id="dsteps">
-   <li class="wait"><div class="n">1</div><div><div class="t">Key pair generated on the device</div><div class="d">The private key never leaves the device. Only the public key is sent.</div></div><div class="mono r">0x3a7f…c210</div></li>
-   <li class="wait"><div class="n">2</div><div><div class="t">Proof of possession signed by the device</div><div class="d mono">"PAPRIKA/REGISTER" ‖ chainId ‖ contract ‖ keyId ‖ owner 0xf39F…2266</div><div class="d">Bound to the owner account, so a copied registration is useless and nobody can register someone else's key.</div></div><div class="d r">P-256</div></li>
-   <li class="wait l1only"><div class="n">+</div><div><div class="t">Issuer endorsement checked</div><div class="d">Acme Devices (mock) is active and signed the ENDORSE message for this key id.</div></div><div class="d r">ecrecover</div></li>
-   <li class="wait"><div class="n">3</div><div><div class="t">Stake locked in the contract</div><div class="d">0.25 ETH. Forfeited when evidence against this key or one of its records is accepted (Challenge tab); half goes to whoever presents it. There is no treasury.</div></div><div class="d r">0.25 ETH</div></li>
-   <li class="wait"><div class="n">4</div><div><div class="t">Registration transaction</div><div class="d">Contract checks: stake ≥ MIN_STAKE, the signature, key never seen before (a key registers once, ever). Device status: <span class="chip m">Active</span> <span class="chip" id="lvchip">Level 0</span></div></div><div class="r"><a class="tx">tx 0x8e2d…41b7</a><div class="d" id="reggas">146,837 gas</div><div class="d">block 12</div></div></li>
+   <li class="wait"><div class="n">1</div><div><div class="t">Key pair created on the device</div><div class="d">The private key stays on the device. Only the public key is sent.</div></div><div class="mono r">0x3a7f…c210</div></li>
+   <li class="wait"><div class="n">2</div><div><div class="t">Proof of possession signed by the device</div><div class="d mono">"PAPRIKA/REGISTER" ‖ chainId ‖ contract ‖ keyId ‖ owner 0xf39F…2266</div><div class="d">"This key belongs to account 0xf39F…2266": nobody can register a key it does not hold, and a copied registration is useless.</div></div><div class="d r">P-256</div></li>
+   <li class="wait"><div class="n">3</div><div><div class="t">Deposit locked in the contract</div><div class="d">0.25 ETH. Lost if the device is flagged; half goes to whoever brought the evidence, half is burned. There is no common fund.</div></div><div class="d r">0.25 ETH</div></li>
+   <li class="wait"><div class="n">4</div><div><div class="t">Registration transaction</div><div class="d">Contract checks: deposit, signature, key never seen before (a key registers once, ever). Device status: <span class="chip m">Active</span></div></div><div class="r"><a class="tx">tx 0x8e2d…41b7</a><div class="d">146,111 gas</div><div class="d">block 12</div></div></li>
   </ol>
   <div class="row"><button disabled id="dgo" onclick="go('capture')">Take a photo with this device →</button></div></div>
   <div class="card"><h2>Registered devices on this contract</h2>
-   <table><tr><th>Device</th><th>Key id</th><th>Owner</th><th>Level · issuer</th><th>Status</th></tr>
-   <tr id="regA" style="opacity:.38"><td>demo-cam-A</td><td class="mono">0x3a7f…c210</td><td class="mono">0xf39F…2266</td><td id="regAl">0 · —</td><td class="ok">Active since block 12</td></tr>
-   <tr><td>demo-cam-B</td><td class="mono">0x81c0…5e2a</td><td class="mono">0x90F7…b906</td><td>0 · —</td><td class="ok">Active since block 9</td></tr>
-   <tr><td>demo-cam-C</td><td class="mono">0xc7d2…19ab</td><td class="mono">0x14dC…9955</td><td>1 · Acme Devices</td><td class="ok">Active since block 10</td></tr></table>
-   <p class="d" style="margin-bottom:0">All stakes 0.25 ETH. demo-cam-B is a second honest device, used later for the false-claim scenario; demo-cam-C shows a level-1 record.</p></div>
+   <table><tr><th>Device</th><th>Key id</th><th>Owner</th><th>Deposit</th><th>Status</th></tr>
+   <tr id="regA" style="opacity:.38"><td>demo-cam-A</td><td class="mono">0x3a7f…c210</td><td class="mono">0xf39F…2266</td><td>0.25 ETH</td><td class="ok">Active since block 12</td></tr>
+   <tr><td>demo-cam-B</td><td class="mono">0x81c0…5e2a</td><td class="mono">0x90F7…b906</td><td>0.25 ETH</td><td class="ok">Active since block 9</td></tr></table>
+   <p class="d" style="margin-bottom:0">demo-cam-B is a second device, used for the accusation scenario.</p></div>
  </div>
 </section>
 
@@ -124,28 +107,22 @@ footer b{text-transform:uppercase;font-size:11px;letter-spacing:.5px}
   <div class="card"><h2>Camera</h2>
    <div class="cam"><b>live camera preview</b></div>
    <div class="row"><button class="pri big" onclick="capture()">Take photo &amp; sign</button><button>Load a file instead</button></div>
-   <div class="row"><label class="d" for="cdev">Signing device</label><select id="cdev"><option>demo-cam-A · 0x3a7f…c210 · Level 0</option></select></div>
-   <p class="d" style="margin-bottom:0"><span class="chip">Simulated device</span> The signature is made by a software P-256 key. The device needs no funded account: any relayer submits.</p>
+   <div class="row"><label class="d" for="cdev">Signing device</label><select id="cdev"><option>demo-cam-A · 0x3a7f…c210</option></select></div>
+   <p class="d" style="margin-bottom:0"><span class="chip">Simulated device</span> The signature is made by a software P-256 key. The device needs no ETH: another account relays it.</p>
   </div>
-  <div class="card"><h2>Cost of one attestation on public networks</h2>
-   <table><tr><th>Network</th><th>Attest (native)</th><th>USD</th><th>256-block window</th></tr>
-   <tr><td>XRPL EVM</td><td>6.75e-5 XRP</td><td>0.00006</td><td>24.5 min</td></tr>
-   <tr><td>Optimism</td><td>1.8e-7 ETH</td><td>0.00029</td><td>8.5 min</td></tr>
-   <tr><td>Ethereum</td><td>1.41e-4 ETH</td><td>0.225</td><td>51.7 min</td></tr></table>
-   <p class="d" style="margin-bottom:0">p05, gas price sampled once on 2026-11-20 20:38 UTC, computed for 86,026 gas (v2); the current attest uses 63,980 gas, so these are upper bounds. The stake is locked capital, not a fee.</p></div>
  </div>
  <div class="stack">
   <div class="card"><h2>What happens when you press the button</h2><ol class="steps" id="csteps">
-   <li class="wait"><div class="n">1</div><div><div class="t">Recent block fetched as anchor, before capture</div><div class="d">Its hash was unpredictable before block 128 existed, so the signature cannot be older. Must be one of the last 256 blocks.</div></div><div class="r"><div class="d">block 128</div><div class="mono">0x7ab3…e91c</div></div></li>
-   <li class="wait"><div class="n">2</div><div><div class="t">Digest of the photo</div><div class="d">Computed on the device. The photo file itself never leaves it.</div></div><div class="mono r">SHA-256 9f2c…a41b</div></li>
-   <li class="wait"><div class="n">3</div><div><div class="t">Device signs</div><div class="d mono">"PAPRIKA/CAPTURE" ‖ chainId ‖ contract ‖ keyId ‖ 9f2c…a41b ‖ blockhash(128)</div></div><div class="d r">P-256</div></li>
-   <li class="wait"><div class="n">4</div><div><div class="t">Relayer submits <span class="mono">attest(H, 128, keyId, sig)</span></div><div class="d">Relayer <span class="mono">0x7099…79C8</span> pays the gas. The record is bound to the device key, so whoever relays it changes nothing.</div></div><a class="tx">tx 0x4c1f…9a02</a></li>
-   <li class="wait"><div class="n">5</div><div><div class="t">Record stored</div><div class="d">Contract checked: device Active, anchor hash non-zero, signature (low-s), no earlier record for (photo, key).</div></div><div class="r"><div class="d">block 131</div><div class="d">63,980 gas</div></div></li>
+   <li class="wait"><div class="n">1</div><div><div class="t">Recent block read as anchor, before the shot</div><div class="d">Its hash could not be known before block 128 existed, so the signature was made after it. Must be one of the last 256 blocks.</div></div><div class="r"><div class="d">block 128</div><div class="mono">0x7ab3…e91c</div></div></li>
+   <li class="wait"><div class="n">2</div><div><div class="t">Digest of the photo</div><div class="d">Computed on the device. The photo file itself is not sent.</div></div><div class="mono r">SHA-256 9f2c…a41b</div></li>
+   <li class="wait"><div class="n">3</div><div><div class="t">Device signs digest + block hash</div><div class="d mono">"PAPRIKA/CAPTURE" ‖ chainId ‖ contract ‖ keyId ‖ 9f2c…a41b ‖ blockhash(128)</div></div><div class="d r">P-256</div></li>
+   <li class="wait"><div class="n">4</div><div><div class="t">Relayed by another account</div><div class="d"><span class="mono">0x7099…79C8</span> sends <span class="mono">attest(H, 128, keyId, sig)</span> and pays the fee. The record is bound to the device's signature, so who relays it changes nothing.</div></div><a class="tx">tx 0x4c1f…9a02</a></li>
+   <li class="wait"><div class="n">5</div><div><div class="t">Record stored</div><div class="d">Contract checked: device Active, anchor among the last 256 blocks, signature valid, no earlier record for (photo, device).</div></div><div class="r"><div class="d">block 131</div><div class="d">— gas</div></div></li>
   </ol></div>
   <div class="card" id="crec" style="opacity:.38"><h2>The resulting record</h2>
-   <table><tr><th>Photo digest</th><th>Key id</th><th>Level</th><th>Not before</th><th>Not after</th><th>Verdict</th></tr>
-   <tr><td class="mono">9f2c…a41b</td><td class="mono">0x3a7f…c210</td><td>0</td><td>block 128</td><td>block 131</td><td>none</td></tr></table>
-   <p class="note" style="margin-top:12px"><b>What this record proves:</b> the holder of key 0x3a7f…c210 signed this exact digest after block 128 and before block 131, and that key has 0.25 ETH at risk if evidence against it is accepted. <b>Not proven:</b> that the bytes are a camera capture.</p>
+   <table><tr><th>Photo digest</th><th>Device key</th><th>Not before</th><th>Not after</th><th>Verdict</th></tr>
+   <tr><td class="mono">9f2c…a41b</td><td class="mono">0x3a7f…c210</td><td>block 128</td><td>block 131</td><td>none</td></tr></table>
+   <p class="note" style="margin-top:12px"><b>What this record shows:</b> this registered device signed this exact file between block 128 and block 131, with a deposit of 0.25 ETH at stake. <b>Not shown:</b> that the file is a camera capture.</p>
    <div class="row"><button disabled id="cgo" onclick="go('verify-ok')">Verify this photo →</button></div></div>
  </div>
 </section>
@@ -154,215 +131,169 @@ footer b{text-transform:uppercase;font-size:11px;letter-spacing:.5px}
 <section class="view two" id="view-verify">
  <div class="stack">
   <div class="card"><h2>Photo to verify</h2>
-   <div class="cam small" id="vcam"><b>dropped image</b></div>
+   <div class="cam" id="vcam"><b>dropped image</b></div>
    <div class="d" style="margin-top:8px" id="vfile">photo-2026-11-21-104201.png · 1.8 MB</div>
    <div class="mono" id="vdig">SHA-256 9f2c…a41b</div>
-   <p class="d" style="margin-bottom:0">Drop any image here. Verification hashes the file in the browser and reads the chain: no account, no transaction.</p>
+   <p class="d" style="margin-bottom:0">Drop any image here. Verification hashes the file in the browser and reads the chain: no account, no transaction, no permission.</p>
   </div>
-  <div class="card"><h2>Your trusted issuers (verifier setting)</h2>
-   <label class="chk"><input type="checkbox" id="tAcme" onchange="trust()"><span><b>Acme Devices (mock)</b> <span class="mono">0xa0Ee…9720</span><br><span class="d">bond 1 ETH · endorsed 3 · flagged for misuse 0</span></span></label>
-   <label class="chk"><input type="checkbox" id="tBore" onchange="trust()"><span><b>Borealis Optics (mock)</b> <span class="mono">0xBcd4…4096</span><br><span class="d">bond 1 ETH · endorsed 1 · flagged for misuse 0</span></span></label>
-   <p class="d" style="margin-bottom:0">A key endorsed by an issuer not in this list is treated as level 0.</p></div>
   <div class="card"><h2>Scenario (mock)</h2>
    <div class="row" style="margin-top:0">
-    <button data-s="ok" onclick="go('verify-ok')">Clean record (level 0)</button>
-    <button data-s="l1" onclick="go('verify-l1')">Level-1 record</button>
+    <button data-s="ok" onclick="go('verify-ok')">Clean record</button>
     <button data-s="pixel" onclick="go('verify-pixel')">Change one pixel</button>
-    <button data-s="misuse" onclick="go('verify-misuse')">Key flagged for misuse</button>
-    <button data-s="upheld" onclick="go('verify-upheld')">Record with upheld claim</button>
+    <button data-s="upheld" onclick="go('verify-upheld')">Accusation upheld</button>
+    <button data-s="leaked" onclick="go('verify-leaked')">Key left the device</button>
     <button data-s="history" onclick="go('verify-history')">Nothing erased</button>
    </div></div>
  </div>
  <div>
-  <!-- clean, level 0 -->
+  <!-- clean -->
   <div class="st" id="v-ok"><div class="stack">
-   <div class="verdict"><div class="seal">✓</div><div><div class="bigt">Record found · level 0 · key in good standing</div><div class="d">Signed by self-registered key 0x3a7f…c210 between block 128 and block 131 · 0.25 ETH at risk · no flag. Economic guarantee only: this does not show the file is a camera capture.</div></div></div>
+   <div class="verdict"><div class="seal">✓</div><div><div class="bigt">Record found · device in good standing</div><div class="d">This registered device signed this exact file between block 128 and block 131, with 0.25 ETH at stake. Not a proof of camera capture.</div></div></div>
    <div class="card"><h2>What was checked</h2><ol class="steps">
     <li class="done"><div class="n">1</div><div><div class="t">Digest of this file</div><div class="d">Computed here, in the browser</div></div><div class="mono r">9f2c…a41b</div></li>
-    <li class="done"><div class="n">2</div><div><div class="t">Record found for (digest, key)</div><div class="d">The contract checked the device's P-256 signature when it stored the record</div></div><a class="tx">tx 0x4c1f…9a02</a></li>
-    <li class="done"><div class="n">3</div><div><div class="t">Key 0x3a7f…c210 · Active · Level 0 · no issuer</div><div class="d">Self-registered by 0xf39F…2266 in block 12.</div></div><div class="d r">no flag</div></li>
-    <li class="done"><div class="n">4</div><div><div class="t">Stake at risk: 0.25 ETH · challenge window open</div><div class="d">Stake not withdrawn, no unbonding requested: this record can still be challenged.</div></div><div class="d r">withdrawn: never</div></li>
+    <li class="done"><div class="n">2</div><div><div class="t">Record found for (digest, device) · window [128, 131]</div><div class="d">The contract checked the device's signature when it stored the record</div></div><a class="tx">tx 0x4c1f…9a02</a></li>
+    <li class="done"><div class="n">3</div><div><div class="t">Device 0x3a7f…c210 · Active</div><div class="d">Registered by 0xf39F…2266 in block 12. Never flagged.</div></div><div class="d r">no flag</div></li>
+    <li class="done"><div class="n">4</div><div><div class="t">Deposit still at stake: 0.25 ETH · open challenges: 0</div><div class="d">Not withdrawn, no retirement requested: this record can still be challenged.</div></div><div class="d r">withdrawn: never</div></li>
    </ol></div>
    <div class="timeline"><h2>Status timeline</h2><div class="bar"><i style="left:4%"></i><i style="left:38%"></i><i style="left:54%"></i><b class="win" style="left:38%;width:16%"></b><em style="left:4%">registered</em><em style="left:38%">not before</em><em style="left:54%">not after</em><em style="left:92%">now</em><span style="left:4%">block 12</span><span style="left:38%">block 128</span><span style="left:54%">block 131</span><span style="left:92%">block 131 · no events</span></div></div>
   </div></div>
-  <!-- level 1 -->
-  <div class="st" id="v-l1"><div class="stack">
-   <div class="verdict" id="l1v"><div class="seal" id="l1seal">✓</div><div><div class="bigt" id="l1t">Record found · level 1, trusted issuer</div><div class="d" id="l1d">Signed by key 0xc7d2…19ab, endorsed by Acme Devices (in your list) · window [133, 136] · 0.25 ETH stake + issuer bond at risk · no flag</div></div></div>
-   <div class="card"><h2>What was checked</h2><ol class="steps">
-    <li class="done"><div class="n">1</div><div><div class="t">Digest of this file</div></div><div class="mono r">7e10…c3d2</div></li>
-    <li class="done"><div class="n">2</div><div><div class="t">Record found · window [133, 136]</div></div><a class="tx">tx 0x3d77…b1e0</a></li>
-    <li class="done"><div class="n">3</div><div><div class="t">Key 0xc7d2…19ab · Active · Level 1 on chain</div><div class="d">Endorsed by issuer 0xa0Ee…9720 (Acme Devices): bond 1 ETH, active, not exiting · keys endorsed 3 · flagged for misuse 0</div></div><div class="d r">stake 0.25 ETH</div></li>
-    <li id="l1chk" class="done"><div class="n">4</div><div><div class="t" id="l1ct">Issuer is in your trusted list</div><div class="d" id="l1cd">Your policy accepts this record at level 1: the issuer vouches the key is hardware-bound, with a bond and a public track record behind it.</div></div><div class="d r" id="l1cr">level 1</div></li>
-   </ol></div>
-   <p class="note">Level 1 links the record to hardware only as far as the issuer is honest and its hardware holds. The chain records that the issuer is bonded; it does not say the issuer is a real device maker.</p>
-  </div></div>
   <!-- one pixel -->
   <div class="st" id="v-pixel"><div class="stack">
-   <div class="verdict bad"><div class="seal">✕</div><div><div class="bigt">No record for this file</div><div class="d">No key ever signed this exact file. One changed pixel is enough.</div></div></div>
+   <div class="verdict bad"><div class="seal">✕</div><div><div class="bigt">No record for this file</div><div class="d">No registered device ever signed this exact file. One changed pixel is enough.</div></div></div>
    <div class="card"><h2>What was checked</h2><ol class="steps">
     <li class="done"><div class="n">1</div><div><div class="t">Digest of this file</div><div class="d">Computed here, in the browser</div></div><div class="mono r">03be…77c0</div></li>
-    <li class="bad"><div class="n">2</div><div><div class="t">No record for this digest, under any key</div><div class="d">The signed photo has digest 9f2c…a41b. This file differs. Matching is exact: a re-encoded or cropped copy is also "no record".</div></div><div class="d r">—</div></li>
+    <li class="bad"><div class="n">2</div><div><div class="t">No record for this digest, under any device</div><div class="d">The signed photo has digest 9f2c…a41b. This file differs. Matching is exact: a re-compressed or cropped copy is also "no record".</div></div><div class="d r">—</div></li>
    </ol></div>
-  </div></div>
-  <!-- misuse -->
-  <div class="st" id="v-misuse"><div class="stack">
-   <div class="verdict flag"><div class="seal">!</div><div><div class="bigt">Record found · key flagged for misuse</div><div class="d">Record still here, unchanged. Key 0x3a7f…c210 (level 0) was proven usable outside a capture pipeline at block 140, after this record.</div></div></div>
-   <div class="card"><h2>What was checked</h2><ol class="steps">
-    <li class="done"><div class="n">1</div><div><div class="t">Digest of this file</div></div><div class="mono r">9f2c…a41b</div></li>
-    <li class="done"><div class="n">2</div><div><div class="t">Record found · window [128, 131]</div><div class="d">Nothing about the record changed. Recorded before the flag: yes.</div></div><a class="tx">tx 0x4c1f…9a02</a></li>
-    <li class="flag"><div class="n">3</div><div><div class="t">Key Flagged · reason KeyMisuse · block 140</div><div class="d">A signature by this key on the EXTRACTED domain was presented. The key can no longer attest.</div></div><a class="tx">tx 0xa9d2…10c4</a></li>
-    <li class="bad"><div class="n">4</div><div><div class="t">Stake forfeited</div><div class="d">Reward escrowed for 50 blocks (REVEAL_WINDOW), then 0.125 ETH to the challenger and 0.125 ETH burned.</div></div><div class="d r">paid block 190</div></li>
-   </ol></div>
-   <div class="card"><h2>Verifier policy · your choice, not the contract's</h2>
-    <table><tr><th>Policy</th><th>Rule</th><th>This record</th></tr>
-    <tr><td><b>strict</b></td><td>Distrust every record of a flagged key</td><td class="no">distrust</td></tr>
-    <tr><td><b>time-scoped</b></td><td>Keep records made before the flag, unless the reason is KeyMisuse: the time of extraction is unknown</td><td class="no">distrust</td></tr></table>
-    <p class="note" style="margin-top:10px">For KeyMisuse both policies distrust the key's whole archive: the records stay, the trust in them goes. The policies diverge for ClaimUpheld: see “Record with upheld claim”.</p></div>
   </div></div>
   <!-- upheld -->
   <div class="st" id="v-upheld"><div class="stack">
-   <div class="verdict bad"><div class="seal">✕</div><div><div class="bigt">Record found · claim upheld against it</div><div class="d">Verdict Upheld by the oracle's vote. Key 0x81c0…5e2a (level 0) flagged (ClaimUpheld) at block 151. The record is kept, with its verdict.</div></div></div>
+   <div class="verdict bad"><div class="seal">✕</div><div><div class="bigt">Record found · proven fake</div><div class="d">An accusation against this photo was upheld by the arbiter. Device 0x81c0…5e2a flagged at block 151. The record is kept, with its verdict.</div></div></div>
    <div class="card"><h2>What was checked</h2><ol class="steps">
     <li class="done"><div class="n">1</div><div><div class="t">Digest of this file</div></div><div class="mono r">5d03…e8a4</div></li>
     <li class="done"><div class="n">2</div><div><div class="t">Record found · window [133, 135]</div></div><a class="tx">tx 0x2b90…77ae</a></li>
-    <li class="bad"><div class="n">3</div><div><div class="t">Verdict on this record: Upheld</div><div class="d">Claim committed block 144, revealed block 146, contested automatically, upheld by vote. Evidence hash 0xe7a2…3f01.</div></div><a class="tx">tx 0x61cc…d0e3</a></li>
-    <li class="flag"><div class="n">4</div><div><div class="t">Key Flagged · reason ClaimUpheld · block 151</div><div class="d">Stake slashed; stake at risk now 0 ETH.</div></div><div class="d r">slashed</div></li>
+    <li class="bad"><div class="n">3</div><div><div class="t">This photo: marked as proven fake</div><div class="d">Sealed accusation block 144, revealed block 146, defended automatically, upheld (simulated arbiter). Evidence hash 0xe7a2…3f01.</div></div><a class="tx">tx 0x61cc…d0e3</a></li>
+    <li class="flag"><div class="n">4</div><div><div class="t">Device flagged · accusation upheld · block 151</div><div class="d">Deposit still at stake: 0 ETH (lost) · open challenges: 0. The device cannot attest again.</div></div><div class="d r">flagged</div></li>
    </ol></div>
-   <div class="card"><h2>Verifier policy</h2>
-    <table><tr><th>Policy</th><th>This record (verdict Upheld)</th><th>Other record of this key, block 120 (before flag)</th></tr>
+   <div class="card"><h2>Earlier records of this device · still shown</h2>
+    <table><tr><th>Photo digest</th><th>Window</th><th>Verdict</th><th>Note</th></tr>
+    <tr><td class="mono">c40a…17e2</td><td>[118, 120]</td><td>none</td><td class="am">recorded before the flag (block 151)</td></tr>
+    <tr><td class="mono">5d03…e8a4</td><td>[133, 135]</td><td class="no">proven fake</td><td>this file</td></tr></table>
+    <p class="d" style="margin-bottom:0">The verifier decides: it may keep earlier records of a device flagged over another photo, or distrust them all.</p></div>
+  </div></div>
+  <!-- key left the device -->
+  <div class="st" id="v-leaked"><div class="stack">
+   <div class="verdict flag"><div class="seal">!</div><div><div class="bigt">Record found · archive no longer trusted</div><div class="d">The key of device 0x3a7f…c210 was proven to have left the device at block 140, after this record. Records still shown; since nobody knows when the key left, none of them can be relied on.</div></div></div>
+   <div class="card"><h2>What was checked</h2><ol class="steps">
+    <li class="done"><div class="n">1</div><div><div class="t">Digest of this file</div></div><div class="mono r">9f2c…a41b</div></li>
+    <li class="done"><div class="n">2</div><div><div class="t">Record found · window [128, 131]</div><div class="d">Nothing about the record changed. Recorded before the flag: yes.</div></div><a class="tx">tx 0x4c1f…9a02</a></li>
+    <li class="flag"><div class="n">3</div><div><div class="t">Device flagged · key left the device · block 140</div><div class="d">Someone presented the key's signature on the special message no camera signs. The device cannot attest again.</div></div><a class="tx">tx 0xa9d2…10c4</a></li>
+    <li class="bad"><div class="n">4</div><div><div class="t">Deposit still at stake: 0 ETH · open challenges: 0</div><div class="d">0.125 ETH to the prover (paid after 50 blocks), 0.125 ETH burned.</div></div><div class="d r">lost</div></li>
+   </ol></div>
+   <div class="card"><h2>Verifier's choice</h2>
+    <table><tr><th>Policy</th><th>This record</th><th>Other records of this device</th></tr>
     <tr><td><b>strict</b></td><td class="no">distrust</td><td class="no">distrust</td></tr>
-    <tr><td><b>time-scoped</b></td><td class="no">distrust</td><td class="ok">keep: recorded before the flag</td></tr></table></div>
+    <tr><td><b>time-scoped</b></td><td class="no">distrust</td><td class="no">distrust: the time the key left is unknown</td></tr></table></div>
   </div></div>
   <!-- history -->
   <div class="st" id="v-history"><div class="stack">
    <div class="verdict idle"><div class="seal">≡</div><div><div class="bigt">Nothing was erased</div><div class="d">Every record and every decision is still on chain, with its block. Flags are added next to records; they never remove them.</div></div></div>
    <div class="card"><h2>All records · exactly what an outside observer sees</h2>
-    <table><tr><th>Photo digest</th><th>Key</th><th>Lvl</th><th>Window</th><th>Verdict</th><th>Key status now</th></tr>
-    <tr><td class="mono">9f2c…a41b</td><td class="mono">0x3a7f…c210</td><td>0</td><td>[128, 131]</td><td>none</td><td class="am">Flagged · KeyMisuse · 140</td></tr>
-    <tr><td class="mono">5d03…e8a4</td><td class="mono">0x81c0…5e2a</td><td>0</td><td>[133, 135]</td><td>none (claim rejected)</td><td class="ok">Active · 0.25 + 0.055 ETH</td></tr>
-    <tr><td class="mono">7e10…c3d2</td><td class="mono">0xc7d2…19ab</td><td>1</td><td>[133, 136]</td><td>none</td><td class="ok">Active · 0.25 ETH</td></tr></table></div>
+    <table><tr><th>Photo digest</th><th>Device</th><th>Window</th><th>Verdict</th><th>Device now · deposit at stake · open challenges</th></tr>
+    <tr><td class="mono">9f2c…a41b</td><td class="mono">0x3a7f…c210</td><td>[128, 131]</td><td>none</td><td class="am">Flagged (key left) at 140 · 0 · 0</td></tr>
+    <tr><td class="mono">c40a…17e2</td><td class="mono">0x81c0…5e2a</td><td>[118, 120]</td><td>none</td><td class="ok">Active · 0.305 ETH · 0</td></tr>
+    <tr><td class="mono">5d03…e8a4</td><td class="mono">0x81c0…5e2a</td><td>[133, 135]</td><td>none (accusation rejected)</td><td class="ok">Active · 0.305 ETH · 0</td></tr></table></div>
    <div class="card"><h2>Event log</h2>
     <table><tr><th>Block</th><th>Event</th><th>Tx</th></tr>
-    <tr><td>9–12</td><td>demo-cam-B, demo-cam-C (Acme), demo-cam-A registered, 0.25 ETH staked each</td><td class="mono">0x1f4a…</td></tr>
-    <tr><td>131</td><td>Record 9f2c…a41b by demo-cam-A</td><td class="mono">0x4c1f…</td></tr>
-    <tr><td>135–136</td><td>Records 5d03…e8a4 by demo-cam-B, 7e10…c3d2 by demo-cam-C</td><td class="mono">0x2b90…</td></tr>
-    <tr><td>140</td><td>demo-cam-A Flagged (KeyMisuse); reward escrowed for 50 blocks</td><td class="mono">0xa9d2…</td></tr>
-    <tr><td>144</td><td>Claim commitment (target hidden), bond 0.11 ETH</td><td class="mono">0x5e09…</td></tr>
-    <tr><td>146</td><td>Claim revealed on 5d03…e8a4; contested by the contract with 0.11 ETH reserved from demo-cam-B's stake</td><td class="mono">0x61cc…</td></tr>
-    <tr><td>151</td><td>Claim rejected by vote; claimant's bond lost (half to demo-cam-B, half burned)</td><td class="mono">0x77b5…</td></tr>
-    <tr><td>190</td><td>demo-cam-A stake settled: 0.125 ETH to challenger, 0.125 ETH burned</td><td class="mono">0x0c3e…</td></tr></table></div>
+    <tr><td>9, 12</td><td>demo-cam-B, demo-cam-A registered, 0.25 ETH deposit each</td><td class="mono">0x1f4a…</td></tr>
+    <tr><td>120–135</td><td>Records c40a…17e2, 5d03…e8a4 (demo-cam-B), 9f2c…a41b (demo-cam-A)</td><td class="mono">0x4c1f…</td></tr>
+    <tr><td>140</td><td>demo-cam-A flagged: key left the device; reward held for 50 blocks</td><td class="mono">0xa9d2…</td></tr>
+    <tr><td>144</td><td>Sealed accusation (target hidden), bond 0.11 ETH</td><td class="mono">0x5e09…</td></tr>
+    <tr><td>146</td><td>Accusation revealed on 5d03…e8a4; contract defends with 0.11 ETH of demo-cam-B's deposit</td><td class="mono">0x61cc…</td></tr>
+    <tr><td>151</td><td>Accusation rejected (simulated arbiter); accuser's bond lost: 0.055 to demo-cam-B, 0.055 burned</td><td class="mono">0x77b5…</td></tr>
+    <tr><td>190</td><td>demo-cam-A deposit settled: 0.125 ETH to the prover, 0.125 ETH burned</td><td class="mono">0x0c3e…</td></tr></table></div>
   </div></div>
  </div>
 </section>
 
 <!-- ============ 4. CHALLENGE ============ -->
 <section class="view half" id="view-challenge">
- <!-- (a) misuse -->
- <div class="card"><h2>(a) Proof of key misuse · by the contract</h2>
-  <p class="d" style="margin-top:0">A key inside a capture pipeline signs only capture records. A signature on the EXTRACTED domain proves it can be used outside it. No vote.</p>
-  <label class="f">Device</label><div class="seg" style="margin-top:0"><button data-m="misuse" onclick="go('challenge-misuse')">demo-cam-A · L0</button><button data-m="misuse1" onclick="go('challenge-misuse1')">demo-cam-C · L1</button></div>
-  <label class="f">Message the key must have signed</label><div class="mono note" style="background:#fff">"PAPRIKA/EXTRACTED" ‖ chainId ‖ contract ‖ keyId ‖ challenger 0x3C44…93BC</div>
-  <label class="f" for="msig">Signature by the device key (paste)</label><textarea id="msig">0x9d41c0e5…7f3a20bb (64 bytes, r ‖ s, low-s)</textarea>
-  <div class="row"><button class="warn" onclick="go('challenge-misuse')">Submit proof of misuse</button></div>
-  <div id="ma" class="st">
-   <ol class="steps" style="margin-top:10px">
-    <li class="done"><div class="n">1</div><div><div class="t">Signature valid</div><div class="d">Names the challenger: a copied proof is worthless.</div></div><div class="d r">116,471 gas</div></li>
-    <li class="flag"><div class="n">2</div><div><div class="t" id="mat">demo-cam-A Flagged · KeyMisuse · block 140</div><div class="d">Cannot attest again. Records stay readable, with the flag. Reward escrowed 50 blocks, then paid (settleStake, 70,895 gas).</div></div><a class="tx">tx 0xa9d2…</a></li>
-   </ol>
-   <div class="split"><div style="width:50%;background:var(--mint)">0.125 → challenger</div><div style="width:50%;background:var(--rose)">0.125 → burned</div></div>
-   <div class="flow" id="bounty" style="background:var(--sky)"><div class="h">Level 1: issuer bounty</div>
-    <div>Stake share to challenger</div><div class="ok">+ 0.125 ETH</div>
-    <div>Bounty from Acme's bond</div><div class="ok">+ 0.1 ETH</div>
-    <div>Challenger total</div><div class="ok"><b>0.225 ETH</b></div>
-    <div>Acme: keys flagged for misuse</div><div class="am">0 → 1</div></div>
-   <div class="row"><button onclick="go('verify-misuse')">See the record now →</button></div>
+ <!-- (a) accuse -->
+ <div class="card"><h2>(a) Accuse a photo · <span class="chip p">arbiter simulated</span></h2>
+  <p class="d" style="margin-top:0">Someone claims an attested photo is a fake and brings public evidence (e.g. the same image published elsewhere earlier). The arbiter decides on the evidence; if it does not prove the fake, the answer is no. Not a fake detector.</p>
+  <label class="f">Photo · device</label><select style="width:100%"><option>5d03…e8a4 · demo-cam-B 0x81c0…5e2a · window [133, 135]</option></select>
+  <label class="f" for="ev">Evidence (hash of the published evidence)</label><input id="ev" value="0xe7a2…3f01">
+  <div class="row"><button class="pri" onclick="go('challenge-commit')">1 · Seal &amp; send bond</button><button class="pri" id="rvb" disabled onclick="go('challenge-reveal')">2 · Reveal</button></div>
+  <ol class="steps" style="margin-top:12px">
+   <li id="a1" class="wait"><div class="n">1</div><div><div class="t">Sealed commitment + bond 0.11 ETH · block 144</div><div class="d">Says neither which photo nor which device: the owner cannot see the accusation coming and act first.</div></div><div class="d r">— gas</div></li>
+   <li id="a2" class="wait"><div class="n">2</div><div><div class="t">Reveal: photo, device, evidence · block 146</div><div class="d">Within 1 to 50 blocks of the commitment.</div></div><div class="d r">— gas</div></li>
+   <li id="a3" class="wait"><div class="n">3</div><div><div class="t">The contract defends the device automatically</div><div class="d">0.11 ETH of demo-cam-B's deposit set against the bond. The owner does nothing: an accusation never wins by silence.</div></div><div class="d r">same tx</div></li>
+   <li id="a4" class="wait"><div class="n">4</div><div><div class="t">Arbiter decision</div><div class="d" id="a4d">Simulated: we choose the outcome. A real decentralised vote takes 48 to 72 hours.</div></div><div class="d r" id="a4r">pending</div></li>
+  </ol>
+  <div class="row" id="vbtn"><button class="warn" onclick="go('challenge-upheld')">Evidence proves the fake</button><button class="good" onclick="go('challenge-rejected')">Evidence does not prove it</button></div>
+  <div id="out-uph" class="st">
+   <div class="flow" style="background:var(--rose)"><div class="h">Upheld · device flagged, photo marked as proven fake</div>
+    <div>Accuser: bond back, plus</div><div class="ok">+ 0.125 ETH</div>
+    <div>Owner of demo-cam-B: whole deposit</div><div class="no">− 0.25 ETH</div>
+    <div>Burned (incl. the arbiter's fee)</div><div>0.125 ETH</div></div>
+   <div class="row"><button onclick="go('verify-upheld')">See the record now →</button></div>
+  </div>
+  <div id="out-rej" class="st">
+   <div class="flow" style="background:var(--mint)"><div class="h">Rejected · nothing changes for the device</div>
+    <div>Accuser: bond lost</div><div class="no">− 0.11 ETH</div>
+    <div>Owner of demo-cam-B (added to its deposit)</div><div class="ok">+ 0.055 ETH</div>
+    <div>Burned (arbiter's fee)</div><div>0.055 ETH</div></div>
+   <div class="row"><button onclick="go('verify-history')">Show that nothing was erased →</button></div>
   </div>
  </div>
- <!-- (c) claim -->
- <div class="card"><h2>(b) Claim against a record · by vote <span class="chip r">not in the live demo: oracle mock</span></h2>
-  <p class="d" style="margin-top:0">For public evidence a contract cannot check (e.g. an earlier publication elsewhere). Not a detector of well-made synthetic images. Specified and tested against an oracle mock only; it is not part of the live demo.</p>
-  <label class="f">Record</label><select style="width:100%;font-size:12px"><option>5d03…e8a4 · demo-cam-B · [133, 135]</option></select>
-  <label class="f" for="ev">Evidence hash</label><input id="ev" value="0xe7a2…3f01">
-  <div class="row"><span class="d">Bond <b>0.11 ETH</b></span><button class="pri" onclick="go('challenge-commit')">1 · Commit</button><button class="pri" id="rvb" disabled onclick="go('challenge-pending')">2 · Reveal</button></div>
-  <div id="cb" class="st">
-   <ol class="steps" style="margin-top:10px">
-    <li class="done"><div class="n">1</div><div><div class="t">Commitment · block 144</div><div class="d mono">keccak256(claimant, H, keyId, evidence, salt)</div><div class="d">Names neither device nor record: an owner cannot tell it is targeted.</div></div><div class="d r">67,903 gas</div></li>
-    <li id="cb2" class="wait"><div class="n">2</div><div><div class="t">Reveal · block 146 (within 50 blocks)</div><div class="d">Claim opened on the oracle and contested at once by the contract, 0.11 ETH reserved from demo-cam-B's stake: never upheld by silence.</div></div><div class="d r">385,241 gas</div></li>
-    <li id="cb3" class="wait"><div class="n">3</div><div><div class="t">Oracle vote</div><div class="d" id="cb3d">Pending. Simulated here; on UMA a contested claim takes two to three days.</div></div><div class="d r" id="cb3r">pending</div></li>
+ <!-- (b) key left -->
+ <div class="card"><h2>(b) Prove the key left the device · decided by the contract</h2>
+  <p class="d" style="margin-top:0">A camera key should sign only photos. A signature on a special message that no camera signs proves someone holds the key outside the device: copied, stolen, lent or sold. No arbiter.</p>
+  <label class="f">Device</label><select style="width:100%"><option>demo-cam-A · 0x3a7f…c210 · Active · deposit 0.25 ETH</option></select>
+  <label class="f">Special message (names the challenger)</label><div class="mono note" style="background:#fff">"PAPRIKA/EXTRACTED" ‖ chainId ‖ contract ‖ keyId ‖ pay 0x3C44…93BC</div>
+  <label class="f" for="msig">Signature by the device key (paste)</label><textarea id="msig">0x9d41c0e5…7f3a20bb (64 bytes, r ‖ s)</textarea>
+  <div class="row"><button class="warn big" onclick="go('challenge-leaked')">Submit proof</button></div>
+  <div id="ma" class="st">
+   <ol class="steps" style="margin-top:12px">
+    <li class="done"><div class="n">1</div><div><div class="t">Signature valid · decided at once</div><div class="d">The message names 0x3C44…93BC: a copied proof is useless to anyone else.</div></div><div class="d r">— gas</div></li>
+    <li class="flag"><div class="n">2</div><div><div class="t">demo-cam-A flagged · key left the device · block 140</div><div class="d">Cannot attest again. Its records stay readable, with the flag. The reward is held for 50 blocks (an accusation sealed earlier would come first), then paid.</div></div><a class="tx">tx 0xa9d2…10c4</a></li>
    </ol>
-   <div class="row" id="vbtn"><button class="good" onclick="go('challenge-rejected')">Vote: reject</button><button class="warn" onclick="go('challenge-upheld')">Vote: uphold</button></div>
-   <div id="out-rej" class="st">
-    <div class="flow" style="background:var(--mint)"><div class="h">Rejected · 131,327 gas</div>
-     <div>Claimant</div><div class="no">− 0.11 bond</div>
-     <div>demo-cam-B: reserved bond released</div><div>0.11</div>
-     <div>demo-cam-B: half the claimant's bond</div><div class="ok">+ 0.055</div>
-     <div>Burned (oracle)</div><div>0.055</div>
-     <div>Status · verdict</div><div>Active · none</div></div>
-    <div class="row"><button onclick="go('verify-history')">Nothing was erased →</button></div>
-   </div>
-   <div id="out-uph" class="st">
-    <div class="flow" style="background:var(--rose)"><div class="h">Upheld · 238,938 gas</div>
-     <div>Claimant: own bond back</div><div>0.11</div>
-     <div>Claimant: half the device's dispute bond</div><div class="ok">+ 0.055</div>
-     <div>Claimant: 50% of remaining stake</div><div class="ok">+ 0.07</div>
-     <div>Burned</div><div>0.055 + 0.07</div>
-     <div>Status · verdict</div><div>Flagged (ClaimUpheld) · Upheld</div></div>
-    <div class="row"><button onclick="go('verify-upheld')">See the record now →</button></div>
-   </div>
+   <div class="split"><div style="width:50%;background:var(--mint)">0.125 ETH → prover</div><div style="width:50%;background:var(--rose)">0.125 ETH → burned</div></div>
+   <p class="d">Lending or selling a registered device is risky: whoever gets the key can take half the deposit. An owner who flags itself still loses half.</p>
+   <div class="row"><button onclick="go('verify-leaked')">See the record now →</button></div>
   </div>
  </div>
 </section>
 </main>
-<footer><b>Real in the prototype:</b> PaprikaCore / PaprikaV2_5, on-chain P-256 checks, gas (measured on v2.4) · <b>Simulated:</b> device keys · issuers · local chain · oracle vote (mock; claim path not in the live demo)</footer>
+<footer><b>Real:</b> contract, signature checks, deposits and payouts on a local chain · <b>Simulated:</b> the device key (software), the chain (local), the arbiter (we choose the outcome)</footer>
 <script>
-const B={device:12,capture:131,'verify-ok':131,'verify-l1':136,'verify-l1x':136,'verify-pixel':131,'verify-misuse':140,'verify-upheld':151,'verify-history':190,challenge:135,'challenge-misuse':140,'challenge-misuse1':140,'challenge-commit':144,'challenge-pending':146,'challenge-rejected':151,'challenge-upheld':151};
+const B={device:12,capture:131,'verify-ok':131,'verify-pixel':131,'verify-upheld':151,'verify-leaked':140,'verify-history':190,challenge:143,'challenge-commit':144,'challenge-reveal':146,'challenge-upheld':151,'challenge-rejected':151,'challenge-leaked':140};
 function go(v){location.hash=v}
 function $(i){return document.getElementById(i)}
-let L=0;
-function isDone(){return !$('dgo').disabled}
 function show(){const full=(location.hash||'#device').slice(1),i=full.indexOf('-'),v=i<0?full:full.slice(0,i),s=i<0?'':full.slice(i+1);
   for(const e of document.querySelectorAll('.view'))e.classList.toggle('on',e.id==='view-'+v);
   for(const a of document.querySelectorAll('nav a'))a.classList.toggle('on',a.dataset.v===v);
   $('blk').textContent=B[full]||B[v]||131;
-  if(v==='device'){L=(s==='l1'||s==='done1')?1:0;level();if(s.startsWith('done'))steps('dsteps',0,regEnd);else unreg()}
+  if(v==='device'&&s==='done')steps('dsteps',0,()=>{$('dgo').disabled=false;$('regA').style.opacity=1});
   if(v==='capture'&&s==='done')steps('csteps',0,()=>{$('cgo').disabled=false;$('crec').style.opacity=1});
   if(v==='verify')vstate(s||'ok');
   if(v==='challenge')cstate(s);
   scrollTo(0,0)}
-function level(){$('lv0').style.display=L?'none':'block';$('lv1').style.display=L?'block':'none';
-  for(const b of document.querySelectorAll('[data-l]'))b.classList.toggle('sel',+b.dataset.l===L);
-  for(const e of document.querySelectorAll('.l1only'))e.style.display=L?'grid':'none';
-  $('lvchip').textContent='Level '+L;$('reggas').textContent=L?'181,749 gas':'146,837 gas';$('regAl').textContent=L?'1 · Acme Devices':'0 · —'}
-function steps(id,delay,end){const li=[...document.querySelectorAll('#'+id+' li')].filter(e=>e.style.display!=='none');li.forEach(e=>e.className=e.className.replace(/\b(done|wait)\b/,'')+' wait');
-  li.forEach((e,i)=>setTimeout(()=>{e.className=e.className.replace('wait','done');if(i===li.length-1)end()},delay*(i+1)))}
-function regEnd(){$('dgo').disabled=false;$('regA').style.opacity=1}
-function unreg(){$('dgo').disabled=true;$('regA').style.opacity=.38;for(const e of document.querySelectorAll('#dsteps li'))e.className=e.className.replace('done','wait')}
-function reg(){steps('dsteps',600,()=>{regEnd();history.replaceState(null,'','#device-done'+(L?'1':''))})}
+function steps(id,delay,end){const li=[...document.querySelectorAll('#'+id+' li')];li.forEach(e=>e.className='wait');
+  li.forEach((e,i)=>setTimeout(()=>{e.className='done';if(i===li.length-1)end()},delay*(i+1)))}
+function reg(){steps('dsteps',600,()=>{$('dgo').disabled=false;$('regA').style.opacity=1})}
 function capture(){steps('csteps',600,()=>{$('cgo').disabled=false;$('crec').style.opacity=1})}
-function vstate(s){const lvl=s==='l1'||s==='l1x';
-  for(const e of document.querySelectorAll('#view-verify .st'))e.classList.toggle('on',e.id==='v-'+(lvl?'l1':s));
-  for(const b of document.querySelectorAll('[data-s]'))b.classList.toggle('sel',b.dataset.s===(lvl?'l1':s));
-  if(lvl){$('tAcme').checked=s==='l1';l1view(s==='l1')}
-  const f={ok:['9f2c…a41b','photo-2026-11-21-104201.png · 1.8 MB'],l1:['7e10…c3d2','street-2026-11-21.jpg · 2.1 MB'],l1x:['7e10…c3d2','street-2026-11-21.jpg · 2.1 MB'],pixel:['03be…77c0','photo-2026-11-21-104201-edited.png · one pixel changed'],misuse:['9f2c…a41b','photo-2026-11-21-104201.png · 1.8 MB'],upheld:['5d03…e8a4','harbour-2026-11-21.jpg · 2.4 MB'],history:['9f2c…a41b','photo-2026-11-21-104201.png · 1.8 MB']}[s]||['—',''];
+function vstate(s){for(const e of document.querySelectorAll('#view-verify .st'))e.classList.toggle('on',e.id==='v-'+s);
+  for(const b of document.querySelectorAll('[data-s]'))b.classList.toggle('sel',b.dataset.s===s);
+  const f={ok:['9f2c…a41b','photo-2026-11-21-104201.png · 1.8 MB'],pixel:['03be…77c0','photo-2026-11-21-104201-edited.png · one pixel changed'],upheld:['5d03…e8a4','harbour-2026-11-21.jpg · 2.4 MB'],leaked:['9f2c…a41b','photo-2026-11-21-104201.png · 1.8 MB'],history:['9f2c…a41b','photo-2026-11-21-104201.png · 1.8 MB']}[s]||['—',''];
   $('vdig').textContent='SHA-256 '+f[0];$('vfile').textContent=f[1];$('vcam').classList.toggle('px',s==='pixel')}
-function trust(){const h=location.hash.slice(1);if(h==='verify-l1'||h==='verify-l1x')go($('tAcme').checked?'verify-l1':'verify-l1x')}
-function l1view(t){$('l1v').className='verdict'+(t?'':' flag');$('l1seal').textContent=t?'✓':'0';
-  $('l1t').textContent=t?'Record found · level 1, trusted issuer':'Record found · treated as level 0: issuer not in your list';
-  $('l1d').textContent=t?'Signed by key 0xc7d2…19ab, endorsed by Acme Devices (in your list) · window [133, 136] · 0.25 ETH stake + issuer bond at risk · no flag':'Signed by key 0xc7d2…19ab, endorsed by Acme Devices, which you do not trust · window [133, 136] · 0.25 ETH at risk · economic guarantee only';
-  $('l1chk').className=t?'done':'flag';$('l1ct').textContent=t?'Issuer is in your trusted list':'Issuer is not in your trusted list';
-  $('l1cd').textContent=t?'Your policy accepts this record at level 1: the issuer vouches the key is hardware-bound, with a bond and a public track record behind it.':'Your policy treats the key as self-registered: the record shows who signed what and when, and the stake at risk, not a camera capture.';
-  $('l1cr').textContent=t?'level 1':'as level 0'}
-function cstate(s){const claim=['commit','pending','rejected','upheld'].includes(s);
-  $('ma').classList.toggle('on',s==='misuse'||s==='misuse1'||claim);
-  for(const b of document.querySelectorAll('[data-m]'))b.classList.toggle('sel',b.dataset.m===(s==='misuse1'?'misuse1':'misuse'));
-  $('bounty').style.display=s==='misuse1'?'grid':'none';
-  $('mat').textContent=s==='misuse1'?'demo-cam-C Flagged · KeyMisuse · block 140':'demo-cam-A Flagged · KeyMisuse · block 140';
-  $('cb').classList.toggle('on',claim);$('rvb').disabled=s!=='commit';
-  $('cb2').className=claim&&s!=='commit'?'done':'wait';
-  $('out-rej').classList.toggle('on',s==='rejected');$('out-uph').classList.toggle('on',s==='upheld');$('vbtn').style.display=s==='pending'?'flex':'none';
-  $('cb3').className=s==='rejected'?'done':s==='upheld'?'bad':'wait';
-  $('cb3r').textContent=(s==='rejected'||s==='upheld')?'block 151':'pending';
-  $('cb3d').textContent=s==='rejected'?'Voters rejected the claim (simulated vote).':s==='upheld'?'Voters upheld the claim (simulated vote).':'Pending. Simulated here; on UMA a contested claim takes two to three days.'}
+function cstate(s){const k=['commit','reveal','upheld','rejected'].indexOf(s),done=k>=0;
+  $('a1').className=done?'done':'wait';$('a2').className=k>=1?'done':'wait';$('a3').className=k>=1?'done':'wait';
+  $('a4').className=s==='upheld'?'bad':s==='rejected'?'done':'wait';
+  $('a4r').textContent=k>=2?'block 151':'pending';
+  $('a4d').textContent=s==='upheld'?'Simulated arbiter: the evidence proves the fake.':s==='rejected'?'Simulated arbiter: the evidence does not prove it.':'Simulated: we choose the outcome. A real decentralised vote takes 48 to 72 hours.';
+  $('rvb').disabled=s!=='commit';$('vbtn').style.display=s==='reveal'?'flex':'none';
+  $('out-uph').classList.toggle('on',s==='upheld');$('out-rej').classList.toggle('on',s==='rejected');
+  $('ma').classList.toggle('on',s==='leaked')}
 addEventListener('hashchange',show);show();
 </script>
 </body></html>
