@@ -1,54 +1,45 @@
-# impl/: demo page for Paprika
+# impl/: Paprika demo app
 
 ## What is here
 
-`mock/ui-mock.html` is a **static, clickable mock** of the demo page. It has no back end; it
-computes nothing. It exists so the team can agree on the look and the demo story before the real
-implementation, and compare it on equal terms with the ORIGO mock in the sibling repository
-(same layout, typography and colours). It follows the final protocol in
-`docs/1-come-funziona.md`: no manufacturers, no authority, no administrator.
+`mock/ui-mock.html` is a **static, clickable preview of the live demo app**: the screens the team
+will click through in the 90-second demo. It has no back end and computes nothing. It follows the
+final protocol in `docs/1-come-funziona.md` and keeps the visual language of the ORIGO mock in
+the sibling repository.
 
-- **Device:** device key, proof of possession, 0.25 ETH deposit, registration transaction.
-- **Capture:** recent block as anchor, digest, device signature, relayed by another account,
-  record with its block window.
-- **Verify:** clean record; one pixel changed (no record); device flagged after an upheld
-  accusation (photo marked as proven fake, earlier records still shown); device flagged because
-  its key left the device (records shown, archive no longer trusted); "nothing erased" history.
-- **Challenge:** (a) accuse a photo: sealed commitment and 0.11 ETH bond, reveal, automatic
-  defence with 0.11 ETH of the deposit, simulated arbiter, both outcomes with money flows (part
-  of the live demo, arbiter simulated); (b) prove the key left the device: decided by the
-  contract, 0.125 ETH to the prover, 0.125 ETH burned.
-- What a record shows: this registered device signed this exact file between block A and block B,
-  with a deposit at stake. It never shows that the file is a camera capture.
-- Hashes, addresses and block numbers are placeholders. Parameters come from
-  `docs/1-come-funziona.md`; gas and payouts from `contract/output/2026-11-20-run.txt`.
-  Only the registration gas (146,111) is measured there so far; other gas figures are "—".
-- `mock/mock-*.png`: one screenshot per screen/state (headless Chromium, 1280 px wide).
+- **Header on every screen:** local Ethereum chain, block number, Paprika and UMA Optimistic
+  Oracle V3 addresses; parameter chips (B, challenge period, reveal period, UMA fee f), marked
+  "set at deployment" (the app reads them from the contract; the mock shows placeholders);
+  balances in a test ERC-20 token for Photographer, Accuser and UMA Store; local time with the
+  demo control "Advance time by one challenge period".
+- **Device:** key, proof of possession, free registration. **Capture:** block hash, photo hash,
+  device signature, token approval + attest with deposit B, record with block window and lock
+  time. **Verify:** attested; one pixel changed; under accusation; unchallenged (deposit
+  returned); proven fake; device flagged (fake proven / key revoked) with other records listed.
+  **Accuse:** commit, reveal, UMA vote (simulated with UMA's mock oracle), settle with the flows
+  in B and f. **Deposits:** refunds enabled after the period, one refunded. **Revoke key:** no
+  money moves. **Activity log** of the session's transactions on every screen.
+- `mock/mock-<screen>-<state>.png`: one screenshot per state.
+- `mock/DEMO.md`: the 90-second click path and what the audience should notice.
 
 ## How to open it
 
-Open `mock/ui-mock.html` in any browser, from disk; it uses no network resource. Each state has
-its own URL fragment. Demo order: `#device-done` → `#capture-done` → `#verify-ok` →
-`#verify-pixel` → `#challenge-leaked` → `#verify-leaked` → `#challenge-commit` →
-`#challenge-reveal` → `#challenge-rejected` → `#verify-history`. Other outcome:
-`#challenge-upheld` → `#verify-upheld`.
+Open `mock/ui-mock.html` in a browser, from disk (no network). Each state has a URL fragment,
+e.g. `#capture-done`, `#verify-pixel`, `#accuse-vote`, `#accuse-rejected`, `#deposits-advanced`.
 
 Screenshots were rendered with:
 
 ```
 docker run --rm -v "$PWD/mock":/w --entrypoint chromium-browser zenika/alpine-chrome \
-  --headless --no-sandbox --hide-scrollbars --window-size=1280,1100 \
+  --headless --no-sandbox --hide-scrollbars --window-size=1280,1200 \
   --screenshot=/w/mock-verify-ok.png "file:///w/ui-mock.html#verify-ok"
 ```
 
-## What the real prototype adds
+## What the real app adds
 
-- The `Paprika` contract (`contract/contracts/Paprika.sol`) on a local Ethereum EVM chain
-  (Hardhat), with real transactions behind every button: registration, attestation, accusation
-  (commit, reveal, automatic defence) and proof that a key left the device.
-- Real SHA-256 of the file in the browser and real P-256 signatures by a simulated device key
-  (`TEST ONLY — NOT SECRET`).
-- `verify` read from the chain: window, device status, flag block and reason, deposit at stake,
-  open challenges.
-- Still simulated: the device key (software), the chain (local), the arbiter (we choose the
-  outcome).
+- Real transactions against `contract/contracts/Paprika.sol` and UMA's Optimistic Oracle V3
+  contracts deployed on a local Ethereum chain; parameters and balances read from the chain.
+- Real SHA-256 of the file in the browser and real P-256 signatures by a software device key.
+- The UMA vote entered through UMA's mock oracle; time advanced with the local chain's
+  time-travel call.
+- Simulated: the device key (software) and UMA's token-holder vote (outcome entered by us).

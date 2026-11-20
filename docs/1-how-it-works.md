@@ -1,212 +1,209 @@
-# 1. Come funziona Paprika
+# 1. How Paprika works
 
-Questa è la versione definitiva del protocollo. Per sapere che cosa è cambiato rispetto alla
-prima versione e perché, leggi [2. Che cosa è cambiato](2-cosa-e-cambiato.md).
+This is the final version of the protocol. To find out what changed from the first version, and
+why, read [2. What changed](2-what-changed.md).
 
-## In una frase
+## In one sentence
 
-Ogni foto attestata è **firmata dal dispositivo** e ha un **deposito** in gioco. Chiunque può
-accusarla di essere un falso mettendo una cauzione uguale. Decide **UMA**. Chi ha torto perde i
-soldi. Se nessuno la accusa entro un certo tempo, il deposito torna indietro.
+Every attested photo is **signed by the device** and has a **deposit** at stake. Anyone can
+accuse it of being a fake by putting up an equal bond. **UMA** decides. Whoever is wrong loses
+the money. If nobody accuses it within a set time, the deposit goes back.
 
-Non ci sono produttori di dispositivi, comitati o amministratori.
+There are no device makers, committees or administrators.
 
-## Che cosa garantisce, e che cosa no
+## What it guarantees, and what it does not
 
 | | |
 |---|---|
-| **Garantisce** | Questa esatta foto è stata firmata da questo dispositivo registrato, in questo intervallo di tempo. Chi l'ha attestata ha messo dei soldi in gioco. Tutto ciò che è stato deciso su quella foto e su quel dispositivo si può leggere, con la data. Nessuno può cancellare nulla. |
-| **Non garantisce** | Che la foto sia stata scattata da una fotocamera vera. Un dispositivo registrato può firmare anche un'immagine generata. Se lo fa rischia il deposito, ma solo se qualcuno riesce a dimostrarlo entro il tempo previsto. |
+| **Guarantees** | This exact photo was signed by this registered device, in this time window. Whoever attested it put money at stake. Everything that was decided about that photo and that device can be read, with the date. Nobody can delete anything. |
+| **Does not guarantee** | That the photo was taken by a real camera. A registered device can also sign a generated image. If it does, it risks the deposit, but only if someone manages to prove it within the set time. |
 
-## I parametri
+## The parameters
 
-Nel contratto non ci sono valori fissi. Si scelgono quando il contratto viene pubblicato, e dopo
-non li può cambiare nessuno, perché il contratto non ha un amministratore.
+There are no fixed values in the contract. They are chosen when the contract is published, and
+after that nobody can change them, because the contract has no administrator.
 
-| Simbolo | Che cos'è |
+| Symbol | What it is |
 |---|---|
-| `B` | La somma che mette chi attesta una foto (deposito) e, uguale, chi la accusa (cauzione). UMA richiede che le due somme siano uguali |
-| `T_foto` | Per quanto tempo una foto può essere accusata dopo l'attestazione |
-| `T_reveal` | Quanto tempo ha chi accusa per completare l'accusa dopo averla depositata |
-| `f` | La parte della somma di chi perde che UMA trattiene come commissione. La fissa UMA, non noi (oggi è la metà) |
+| `B` | The amount put up by whoever attests a photo (deposit) and, the same amount, by whoever accuses it (bond). UMA requires the two amounts to be equal |
+| `T_photo` | How long a photo can be accused after it is attested |
+| `T_reveal` | How much time the accuser has to complete the accusation after filing it |
+| `f` | The share of the loser's amount that UMA keeps as a fee. UMA sets it, not us (today it is half) |
 
-Le somme sono in un token ERC-20 accettato da UMA, non in ETH: è così che funziona UMA.
+The amounts are in an ERC-20 token accepted by UMA, not in ETH: this is how UMA works.
 
-## Le parole che usiamo
+## The words we use
 
-| Parola | Significato |
+| Word | Meaning |
 |---|---|
-| Dispositivo | La fotocamera o il telefono. Ha una chiave segreta con cui firma |
-| Record | La riga salvata sulla blockchain: quale foto, quale dispositivo, quando |
-| Hash della foto | L'impronta SHA-256 del file: cambia se cambia anche un solo pixel |
-| Hash del blocco | La sequenza di 32 byte che la blockchain calcola per ogni blocco. Non si può prevedere prima che il blocco esista |
-| Accusatore | Chiunque contesti una foto |
-| UMA | Il servizio decentralizzato che decide le accuse (Optimistic Oracle V3). Decide un voto pubblico di chi possiede il token UMA |
-| Segnalazione | Il "ban" della prima versione. Il dispositivo non può più attestare; i suoi record restano |
-| Commit–reveal | Fare un'accusa in due passaggi: prima se ne deposita solo l'impronta, poi la si rivela |
+| Device | The camera or the phone. It has a secret key that it signs with |
+| Record | The row saved on the blockchain: which photo, which device, when |
+| Photo hash | The SHA-256 fingerprint of the file: it changes if even a single pixel changes |
+| Block hash | The 32-byte sequence that the blockchain computes for each block. It cannot be predicted before the block exists |
+| Accuser | Anyone who challenges a photo |
+| UMA | The decentralized service that decides accusations (Optimistic Oracle V3). A public vote by the holders of the UMA token decides |
+| Flag | The "ban" of the first version. The device can no longer attest; its records stay |
+| Commit-reveal | Making an accusation in two steps: first you file only its fingerprint, then you reveal it |
 
-## Fase 1 — Registrazione
-
-```mermaid
-flowchart TD
-    Dev[Dispositivo] -->|"firma: questa chiave appartiene al conto X"| Acc[Conto del proprietario]
-    Acc -->|"chiave + firma"| Contract(Contratto)
-    Contract -->|"firma valida, chiave mai vista"| Ok(Dispositivo registrato)
-    Contract -->|"firma sbagliata, o chiave già usata"| No(Rifiutato)
-```
-
-1. Il dispositivo crea la propria chiave.
-2. Con quella chiave firma un messaggio che contiene l'indirizzo del proprietario. Dimostra che
-   chi registra possiede davvero quella chiave.
-3. Il contratto controlla la firma e registra il dispositivo.
-
-Registrarsi è gratuito. Una chiave si registra una volta sola: se viene segnalata non rientra più.
-
-## Fase 2 — Attestazione di una foto
+## Phase 1 — Registration
 
 ```mermaid
 flowchart TD
-    Dev[Dispositivo] --> Block(Legge l'hash di un blocco recente)
-    Block --> Pic(Scatta la foto e ne calcola l'hash)
-    Pic --> Sign("Firma: hash della foto + hash del blocco")
-    Sign -->|"chi la invia blocca il deposito B"| Contract[Contratto]
-    Contract --> Test{"Dispositivo attivo? Firma valida? Blocco recente?"}
-    Test -->|No| Error(Rifiutato)
-    Test -->|Sì| Save("Record salvato; deposito B bloccato per T_foto")
+    Dev[Device] -->|"signs: this key belongs to account X"| Acc[Owner's account]
+    Acc -->|"key + signature"| Contract(Contract)
+    Contract -->|"valid signature, key never seen"| Ok(Device registered)
+    Contract -->|"wrong signature, or key already used"| No(Rejected)
 ```
 
-1. Prima di scattare, il dispositivo legge l'hash dell'ultimo blocco.
-2. Scatta la foto e ne calcola l'hash.
-3. Firma insieme l'hash della foto e l'hash del blocco.
-4. Chi invia la firma al contratto blocca il deposito `B`. Può essere il proprietario o chiunque
-   altro per lui.
-5. Il contratto controlla che il dispositivo sia attivo, che la firma sia sua e che il blocco sia
-   uno degli ultimi 256. Poi salva il record.
+1. The device creates its own key.
+2. With that key it signs a message that contains the owner's address. This proves that whoever
+   registers really holds that key.
+3. The contract checks the signature and registers the device.
 
-**L'intervallo di tempo.** L'hash del blocco non si poteva conoscere prima, quindi la firma è
-stata fatta *dopo* quel blocco. Il record è in un blocco successivo, quindi è stata fatta *prima*
-di quello.
+Registering is free. A key can be registered only once: if it is flagged, it cannot come back.
 
-**Perché il deposito.** Senza, riempire il registro di attestazioni costerebbe solo la commissione
-della blockchain. Con il deposito, chi attesta N foto deve tenere bloccato N × `B` per il tempo
-`T_foto`.
-
-## Fase 2 bis — Riprendere il deposito
-
-Se nessuno accusa la foto entro `T_foto`, chi ha messo il deposito lo riprende per intero. Il
-record resta per sempre: da quel momento chi verifica vede che la foto ha superato il periodo di
-contestazione.
-
-Per sicurezza il deposito si può riprendere solo dopo `T_foto + T_reveal`, così un'accusa
-depositata all'ultimo momento fa ancora in tempo a essere rivelata.
-
-## Fase 3 — Accusa (il "ban" della prima versione)
+## Phase 2 — Attesting a photo
 
 ```mermaid
 flowchart TD
-    Acc[Accusatore] -->|"1. commit: impronta dell'accusa + cauzione B"| Contract[Contratto]
-    Acc -->|"2. reveal: foto, dispositivo, prove"| Contract
-    Contract -->|"3. porta l'accusa a UMA e la contesta con il deposito della foto"| UMA[UMA]
-    UMA --> Choice{"Le prove dimostrano che la foto è un falso?"}
-    Choice -->|Sì| Ban("Foto marcata come falso, dispositivo segnalato. L'accusatore vince")
-    Choice -->|No| Nothing("La foto resta valida. L'accusatore perde la cauzione")
+    Dev[Device] --> Block(Reads the hash of a recent block)
+    Block --> Pic(Takes the photo and computes its hash)
+    Pic --> Sign("Signs: photo hash + block hash")
+    Sign -->|"whoever sends it locks the deposit B"| Contract[Contract]
+    Contract --> Test{"Device active? Signature valid? Block recent?"}
+    Test -->|No| Error(Rejected)
+    Test -->|Yes| Save("Record saved; deposit B locked for T_photo")
 ```
 
-### I due passaggi dell'accusa (commit–reveal)
+1. Before taking the photo, the device reads the hash of the latest block.
+2. It takes the photo and computes its hash.
+3. It signs the photo hash and the block hash together.
+4. Whoever sends the signature to the contract locks the deposit `B`. This can be the owner or
+   anyone else on the owner's behalf.
+5. The contract checks that the device is active, that the signature is the device's, and that
+   the block is one of the last 256. Then it saves the record.
 
-1. **Commit.** L'accusatore invia solo un'impronta, calcolata su: il proprio indirizzo, la foto,
-   il dispositivo, le prove e un numero segreto. Insieme blocca la cauzione `B`. Dall'impronta
-   nessuno può capire quale foto è sotto accusa.
-2. **Reveal.** Almeno un blocco dopo, ed entro `T_reveal`, invia i dati veri. Il contratto
-   ricalcola l'impronta e controlla che coincida.
+**The time window.** The block hash could not be known in advance, so the signature was made
+*after* that block. The record is in a later block, so the signature was made *before* that one.
 
-**A che cosa serve.** Su una blockchain una transazione è visibile a tutti prima di essere
-confermata. Se l'accusa si facesse in un passaggio solo, chiunque potrebbe copiarla e inviarla a
-proprio nome per prendersi il premio. Anche chi ha attestato il falso potrebbe farlo, per limitare
-la perdita. Con i due passaggi nessuno sa quale foto è accusata finché non è tardi per passare
-davanti.
+**Why the deposit.** Without it, filling the registry with attestations would cost only the
+blockchain fee. With the deposit, whoever attests N photos must keep N × `B` locked for the time
+`T_photo`.
 
-Chi fa il commit e poi non fa il reveal in tempo perde la cauzione.
+## Phase 2b — Taking the deposit back
 
-### Che cosa succede quando l'accusa arriva a UMA
+If nobody accuses the photo within `T_photo`, the depositor takes the whole deposit back. The
+record stays forever: from then on, whoever checks sees that the photo has passed the challenge
+period.
 
-UMA vota solo sulle affermazioni che qualcuno contesta. Per questo il contratto fa due cose nello
-stesso momento: presenta a UMA l'accusa con la cauzione dell'accusatore, e la contesta usando il
-deposito della foto. Così ogni accusa arriva a un voto, e nessuna foto viene condannata solo
-perché chi l'ha attestata non stava guardando.
+To be safe, the deposit can be taken back only after `T_photo + T_reveal`, so that an accusation
+filed at the last moment still has time to be revealed.
 
-UMA risponde alla domanda: *le prove allegate dimostrano che questa foto non è una vera cattura?*
-Per le regole di UMA la risposta è sì solo se la cosa si può verificare pubblicamente. Se le prove
-non bastano, la risposta è no.
+## Phase 3 — Accusation (the "ban" of the first version)
 
-| Esito | Foto e dispositivo | Accusatore | Chi aveva messo il deposito |
+```mermaid
+flowchart TD
+    Acc[Accuser] -->|"1. commit: fingerprint of the accusation + bond B"| Contract[Contract]
+    Acc -->|"2. reveal: photo, device, evidence"| Contract
+    Contract -->|"3. takes the accusation to UMA and disputes it with the photo's deposit"| UMA[UMA]
+    UMA --> Choice{"Does the evidence prove the photo is a fake?"}
+    Choice -->|Yes| Ban("Photo marked as fake, device flagged. The accuser wins")
+    Choice -->|No| Nothing("The photo stays valid. The accuser loses the bond")
+```
+
+### The two steps of the accusation (commit-reveal)
+
+1. **Commit.** The accuser sends only a fingerprint, computed from: their own address, the photo,
+   the device, the evidence and a secret number. At the same time they lock the bond `B`. From the
+   fingerprint nobody can tell which photo is being accused.
+2. **Reveal.** At least one block later, and within `T_reveal`, they send the real data. The
+   contract recomputes the fingerprint and checks that it matches.
+
+**What it is for.** On a blockchain, a transaction is visible to everyone before it is confirmed.
+If the accusation were made in a single step, anyone could copy it and send it in their own name
+to take the reward. Even whoever attested the fake could do this, to limit the loss. With the two
+steps, nobody knows which photo is accused until it is too late to jump ahead.
+
+Whoever makes the commit and then does not make the reveal in time loses the bond.
+
+### What happens when the accusation reaches UMA
+
+UMA votes only on claims that someone disputes. That is why the contract does two things at the
+same moment: it submits the accusation to UMA with the accuser's bond, and it disputes it using
+the photo's deposit. This way every accusation reaches a vote, and no photo is condemned just
+because whoever attested it was not watching.
+
+UMA answers the question: *does the attached evidence prove that this photo is not a real
+capture?* Under UMA's rules the answer is yes only if the matter can be checked publicly. If the
+evidence is not enough, the answer is no.
+
+| Outcome | Photo and device | Accuser | Depositor |
 |---|---|---|---|
-| **Falso dimostrato** | La foto è marcata come falso. Il dispositivo è segnalato e non attesta più | Riprende `B` e riceve `B − f×B` | Perde `B` |
-| **Non dimostrato** | Non cambia nulla. La foto resta accusabile per il tempo che le rimaneva | Perde `B` | Tiene il deposito e riceve `B − f×B` |
+| **Proven fake** | The photo is marked as fake. The device is flagged and no longer attests | Gets `B` back and receives `B − f×B` | Loses `B` |
+| **Not proven** | Nothing changes. The photo can still be accused for the time it had left | Loses `B` | Keeps the deposit and receives `B − f×B` |
 
-In entrambi i casi UMA trattiene `f×B` dalla somma di chi perde.
+In both cases UMA keeps `f×B` from the loser's amount.
 
-Su una foto può esserci una sola accusa aperta alla volta. Il tempo passato sotto accusa non
-viene tolto da `T_foto`: accusarsi da soli per far scadere il tempo non funziona, e ogni giro
-costa `f×B`.
+A photo can have only one open accusation at a time. The time spent under accusation is not
+subtracted from `T_photo`: accusing yourself to run out the clock does not work, and each round
+costs `f×B`.
 
-### Revoca della chiave
+### Key revocation
 
-Chi ha in mano la chiave di un dispositivo può farlo segnalare con una firma, senza UMA e senza
-soldi. Serve al proprietario a cui hanno rubato o copiato la chiave. Le foto già attestate e i
-loro depositi non vengono toccati.
+Whoever holds a device's key can have the device flagged with a signature, without UMA and without
+money. This is for an owner whose key was stolen or copied. Photos already attested and their
+deposits are not touched.
 
-### Dopo una segnalazione
+### After a flag
 
-- Il dispositivo non può più attestare.
-- I record già salvati restano, ciascuno con il proprio deposito e il proprio periodo di
-  contestazione.
-- Accanto a ogni record si legge che il dispositivo è stato segnalato, in quale blocco e perché.
+- The device can no longer attest.
+- The records already saved stay, each with its own deposit and its own challenge period.
+- Next to each record you can read that the device was flagged, in which block and why.
 
-## Verifica
+## Verification
 
-Chiunque, senza chiedere il permesso a nessuno, calcola l'hash del file e chiede al contratto il
-record per quell'hash e quel dispositivo. La risposta dice:
+Anyone, without asking anyone's permission, computes the hash of the file and asks the contract
+for the record for that hash and that device. The answer tells:
 
-- l'intervallo di tempo in cui la foto è stata firmata;
-- lo stato della foto: attestata con deposito ancora bloccato, sotto accusa, periodo di
-  contestazione superato, oppure falso dimostrato;
-- lo stato del dispositivo: attivo, oppure segnalato, da quale blocco e perché.
+- the time window in which the photo was signed;
+- the state of the photo: attested with the deposit still locked, under accusation, challenge
+  period passed, or proven fake;
+- the state of the device: active, or flagged, from which block and why.
 
-Se nel file è cambiato anche un solo pixel, l'hash è diverso e il record non si trova.
+If even a single pixel in the file changed, the hash is different and the record is not found.
 
-## I casi, uno per uno
+## The cases, one by one
 
-| Caso | Che cosa succede |
+| Case | What happens |
 |---|---|
-| Attesto una foto e nessuno la accusa | Dopo `T_foto + T_reveal` riprendo `B`. Il record resta |
-| Cambio un pixel e verifico | Nessun record |
-| Attesto un falso e qualcuno lo dimostra | Perdo `B`. La foto è marcata, il dispositivo segnalato. L'accusatore guadagna `B − f×B` |
-| Attesto un falso e nessuno lo accusa in tempo | Riprendo `B`. Il falso resta attestato |
-| Qualcuno accusa una mia foto vera | UMA respinge. Lui perde `B`, io guadagno `B − f×B` |
-| Mi accuso da solo con un secondo conto | Perdo sempre `f×B`: la parte che UMA trattiene |
-| Sono stato segnalato e rientro con una chiave nuova | Posso, gratis. Ho perso il deposito di quella foto e la storia del dispositivo |
-| Qualcuno copia la mia attestazione prima che sia confermata | Il record resta legato alla firma del mio dispositivo. Il deposito lo ha messo lui, e lo riavrà lui |
-| Qualcuno copia il commit o il reveal di un altro | Non serve: l'impronta contiene l'indirizzo di chi accusa |
-| Accusa su una foto mai attestata, o fuori tempo | Rifiutata. Se l'accusatore non può più rivelare, perde la cauzione |
-| Seconda accusa mentre ce n'è una aperta sulla stessa foto | Deve aspettare l'esito della prima |
-| Mi rubano la chiave | Revoco la chiave: il dispositivo è segnalato e non attesta più |
-| Dispositivo segnalato con tanti record precedenti | Restano tutti leggibili, con la data della segnalazione accanto |
+| I attest a photo and nobody accuses it | After `T_photo + T_reveal` I take `B` back. The record stays |
+| I change one pixel and check | No record |
+| I attest a fake and someone proves it | I lose `B`. The photo is marked, the device flagged. The accuser earns `B − f×B` |
+| I attest a fake and nobody accuses it in time | I take `B` back. The fake stays attested |
+| Someone accuses a real photo of mine | UMA rejects it. They lose `B`, I earn `B − f×B` |
+| I accuse myself with a second account | I always lose `f×B`: the share UMA keeps |
+| I was flagged and come back with a new key | I can, for free. I lost the deposit on that photo and the device's history |
+| Someone copies my attestation before it is confirmed | The record stays tied to my device's signature. They put up the deposit, and they will get it back |
+| Someone copies another person's commit or reveal | It does not help: the fingerprint contains the accuser's address |
+| Accusation on a photo never attested, or out of time | Rejected. If the accuser can no longer reveal, they lose the bond |
+| Second accusation while one is open on the same photo | It must wait for the outcome of the first |
+| My key is stolen | I revoke the key: the device is flagged and no longer attests |
+| Flagged device with many earlier records | They all stay readable, with the date of the flag next to them |
 
-I numeri misurati per ciascun caso sono in
+The numbers measured for each case are in
 [`contract/output/cases.md`](../contract/output/cases.md).
 
-## Che cosa gira nella demo
+## What runs in the demo
 
-Tutto gira su una blockchain Ethereum locale.
+Everything runs on a local Ethereum blockchain.
 
-- **Vero:** il contratto di Paprika; i contratti di UMA (Optimistic Oracle V3), pubblicati in
-  locale così come sono; le firme; i depositi e i pagamenti.
-- **Simulato:** il dispositivo (la chiave è creata dal programma); il voto dei possessori del
-  token UMA, sostituito dallo strumento che UMA stessa usa sulle reti di prova: l'esito lo
-  inseriamo noi, per mostrare entrambi i casi.
+- **Real:** the Paprika contract; the UMA contracts (Optimistic Oracle V3), published locally just
+  as they are; the signatures; the deposits and the payments.
+- **Simulated:** the device (the key is created by the program); the vote of the UMA token
+  holders, replaced by the tool that UMA itself uses on test networks: we enter the outcome
+  ourselves, to show both cases.
 
-## Dov'è il codice
+## Where the code is
 
-Il contratto è [`contract/contracts/Paprika.sol`](../contract/contracts/Paprika.sol), con i suoi
-test in [`contract/test/`](../contract/test/).
+The contract is [`contract/contracts/Paprika.sol`](../contract/contracts/Paprika.sol), with its
+tests in [`contract/test/`](../contract/test/).

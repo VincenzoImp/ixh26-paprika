@@ -1,26 +1,26 @@
-# Dichiarazione sull'uso dell'intelligenza artificiale
+# Statement on the use of artificial intelligence
 
-Le regole della Track 1 (slide 13) permettono qualunque strumento di AI, a patto di dichiarare
-**quale strumento è stato usato, come e dove**. Questa è la dichiarazione per questo repository.
+The Track 1 rules (slide 13) allow any AI tool, as long as you declare **which tool was used,
+how and where**. This is the statement for this repository.
 
-## In sintesi
+## Summary
 
-| Ambito | Strumento | Come | Dove | Ruolo delle persone |
+| Area | Tool | How | Where | Role of the people |
 |---|---|---|---|---|
-| Idea del protocollo | Nessuno | La prima versione di Paprika è del team | `proposal/PAPRIKA.md` | Ideazione |
-| Revisione e modifiche al protocollo | Claude Code (modello Claude Fable 5.2) con sotto-agenti Claude (modello Claude Opus) | Ha scritto la prima versione come contratto e l'ha attaccata; ha proposto ogni modifica della versione finale; ha fatto rivedere il risultato da sotto-agenti che non conoscevano le conclusioni | `docs/`, `prove/` | Direzione e vincoli del team: nessuna dipendenza dai produttori, demo su blockchain locale, documenti in italiano semplice. Approvazione finale del team: da completare |
-| Codice | Claude Code con sotto-agenti Claude Opus | Ha scritto il contratto, i test e il modello economico, e li ha eseguiti | `contract/`, `prove/` | Nessuna revisione riga per riga finora |
-| Documentazione | Claude Code (Claude Fable 5.2) | Ha scritto i documenti e la pagina iniziale | `README.md`, `docs/` | Richiesta e indicazioni del team; rilettura: da completare |
-| Ricerca | Sotto-agenti Claude Opus | Ricerca sul web con fonti indicate; un campione ricontrollato da Claude Code | `docs/approfondimenti/` | Nessuna |
-| Preparazione del pitch | Sotto-agenti Claude Opus | Bozza del deck con note, mock della demo | `slides/`, `impl/mock/` | Non ancora rivisti |
+| Idea of the protocol | None | The first version of Paprika is the team's work | `proposal/PAPRIKA.md` | Idea |
+| Review of and changes to the protocol | Claude Code (model Claude Fable 5.2) with Claude sub-agents (model Claude Opus) | It wrote the first version as a contract and attacked it; it proposed every change in the final version; it had the result reviewed by sub-agents that did not know the conclusions | `docs/`, `evidence/` | Direction and constraints from the team: no dependency on device makers, demo on a local blockchain, documents in plain Italian. Final approval by the team: still to be done |
+| Code | Claude Code with Claude Opus sub-agents | It wrote the contract, the tests and the economic model, and ran them | `contract/`, `evidence/` | No line-by-line review so far |
+| Documentation | Claude Code (Claude Fable 5.2) | It wrote the documents and the front page | `README.md`, `docs/` | Request and directions from the team; proofreading: still to be done |
+| Research | Claude Opus sub-agents | Web research with sources listed; a sample checked again by Claude Code | `docs/background/` | None |
+| Pitch preparation | Claude Opus sub-agents | Draft of the deck with notes, mock of the demo | `slides/`, `impl/mock/` | Not yet reviewed |
 
-## Registro
+## Log
 
-| Data e ora (CET) | Strumento | Che cosa ha fatto | Intervento umano |
+| Date and time (CET) | Tool | What it did | Human input |
 |---|---|---|---|
-| 20 novembre 2026, 21:18–22:10 | Claude Code (Claude Fable 5.2) e sotto-agenti Claude Opus | Revisione critica della prima versione; contratto scritto alla lettera e attaccato; ricerca su arbitri decentralizzati, incentivi, rilevazione dei falsi; prima versione rinforzata | Richiesta di Vincenzo Imperati: validare la proposta, trovarne le falle, proporre miglioramenti |
-| 20 novembre 2026, 22:10–23:05 | Gli stessi | Più revisioni del contratto, ciascuna attaccata e corretta; modello economico; revisione indipendente con attacchi eseguibili; giurie simulate; mock e bozza del deck | Indicazione di Vincenzo Imperati: la demo gira su una blockchain Ethereum locale |
-| 20 novembre 2026, 23:05–23:59 | Gli stessi | Versione finale senza produttori; repository ripulito dalle versioni intermedie; documenti riscritti in italiano semplice | Indicazione del team: Paprika non deve dipendere dai produttori; una sola versione finale, spiegata in modo comprensibile e confrontabile con la prima |
+| 20 November 2026, 21:18–22:10 | Claude Code (Claude Fable 5.2) and Claude Opus sub-agents | Critical review of the first version; contract written word for word and attacked; research on decentralized arbiters, incentives, fake detection; first strengthened version | Request from Vincenzo Imperati: validate the proposal, find its flaws, propose improvements |
+| 20 November 2026, 22:10–23:05 | The same | Several revisions of the contract, each one attacked and fixed; economic model; independent review with attacks that can be run; simulated juries; mock and draft of the deck | Direction from Vincenzo Imperati: the demo runs on a local Ethereum blockchain |
+| 20 November 2026, 23:05–23:59 | The same | Final version with no device makers; repository cleaned of the intermediate versions; documents rewritten in plain Italian | Direction from the team: Paprika must not depend on device makers; a single final version, explained in a way that is easy to understand and to compare with the first one |
 
-Le versioni intermedie e i rapporti completi dei sotto-agenti sono nella cronologia git, sotto
-l'etichetta `iterazioni-complete`.
+The intermediate versions and the full reports of the sub-agents are in the git history, under
+the tag `iterazioni-complete`.

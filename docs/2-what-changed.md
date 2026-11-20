@@ -1,124 +1,124 @@
-# 2. Che cosa è cambiato rispetto alla prima versione, e perché
+# 2. What changed from the first version, and why
 
-La prima versione è in [`proposal/PAPRIKA.md`](../proposal/PAPRIKA.md), intatta.
-La versione definitiva è spiegata in [1. Come funziona](1-come-funziona.md).
+The first version is in [`proposal/PAPRIKA.md`](../proposal/PAPRIKA.md), unchanged.
+The final version is explained in [1. How it works](1-how-it-works.md).
 
-## In breve
+## In short
 
-**L'idea è la stessa.** Tre fasi (registrazione, attestazione, ban), aperto a tutti, basato sugli
-incentivi economici, deciso da UMA, senza un'autorità centrale e senza produttori.
+**The idea is the same.** Three phases (registration, attestation, ban), open to everyone, based on
+economic incentives, decided by UMA, with no central authority and no manufacturers.
 
-**Sono cambiati i dettagli di ogni fase**, perché nella prima versione ciascuna aveva un buco che
-si poteva sfruttare. Li abbiamo trovati scrivendo il contratto esattamente come descritto nella
-proposta e provando ad attaccarlo: i test sono in
-[`prove/originale-attaccato/`](../prove/originale-attaccato/).
+**The details of each phase changed**, because in the first version each one had a hole that
+could be exploited. We found them by writing the contract exactly as the proposal describes it and
+trying to attack it: the tests are in
+[`evidence/original-under-attack/`](../evidence/original-under-attack/).
 
-| Fase | Quanto è cambiata |
+| Phase | How much it changed |
 |---|---|
-| 1. Registrazione | Stessa idea. In più il dispositivo deve firmare la richiesta |
-| 2. Attestazione | Ora il dispositivo firma. La tariffa diventa un deposito che torna indietro |
-| 3. Ban | Stessa idea: qualcuno accusa, UMA decide, chi ha ragione è premiato. Cambiano le regole su soldi, tempi ed effetti |
+| 1. Registration | Same idea. In addition, the device must sign the request |
+| 2. Attestation | Now the device signs. The fee becomes a deposit that comes back |
+| 3. Ban | Same idea: someone accuses, UMA decides, whoever is right is rewarded. The rules on money, timing and effects change |
 
-I simboli (`B`, `T_foto`, `T_reveal`, `f`) sono spiegati nel documento 1.
+The symbols (`B`, `T_photo`, `T_reveal`, `f`) are explained in document 1.
 
-## Fase 1 — Registrazione
+## Phase 1 — Registration
 
-> *Prima versione:* "To register a device, an Ethereum account needs to register it, with its own
+> *First version:* "To register a device, an Ethereum account needs to register it, with its own
 > public key. The registration fails if the device is banned."
 
-| Che cosa non andava | Che cosa succedeva nel test | Com'è ora |
+| What was wrong | What happened in the test | How it is now |
 |---|---|---|
-| Bastava conoscere una chiave pubblica per registrarla | Chiunque poteva registrare la chiave di un altro, farla bannare e renderla inutilizzabile per sempre | Il dispositivo deve **firmare** la richiesta: si registra solo chi possiede davvero la chiave |
+| Knowing a public key was enough to register it | Anyone could register someone else's key, get it banned and make it unusable forever | The device must **sign** the request: only whoever really holds the key can register |
 
-**Rimasto com'era:** registrarsi è gratuito, e un dispositivo bannato non si registra di nuovo.
+**Kept as it was:** registering is free, and a banned device cannot register again.
 
-**Un limite che resta, e che conviene sapere.** Dato che registrarsi è gratuito, chi viene bannato
-può creare una chiave nuova e rientrare. Il ban gli costa il deposito della foto accusata e la
-storia del dispositivo, non l'accesso. La punizione vera è il deposito per foto della fase 2.
+**A limit that remains, and that is worth knowing.** Since registering is free, someone who gets
+banned can create a new key and come back. The ban costs them the deposit of the accused photo and
+the history of the device, not access. The real punishment is the per-photo deposit of phase 2.
 
-## Fase 2 — Attestazione
+## Phase 2 — Attestation
 
-> *Prima versione:* "The device takes a picture. It asks for attestation to be recorded. The smart
-> contract saves the attestation if the device is not banned." Con una tariffa pagata al tesoro.
+> *First version:* "The device takes a picture. It asks for attestation to be recorded. The smart
+> contract saves the attestation if the device is not banned." With a fee paid to the treasury.
 
-| Che cosa non andava | Che cosa succedeva nel test | Com'è ora |
+| What was wrong | What happened in the test | How it is now |
 |---|---|---|
-| Il dispositivo inviava solo l'hash della foto: la sua chiave non firmava nulla | Chi osservava la rete copiava la richiesta prima che fosse confermata e la inviava a proprio nome. Risultava lui l'autore, e la richiesta onesta veniva rifiutata | Il dispositivo **firma** l'hash della foto. Il contratto controlla la firma. Copiare la richiesta non cambia chi ha firmato |
-| Si sapeva solo che la foto esisteva *prima* di un certo blocco | Si poteva attestare oggi una foto vecchia di anni | Il dispositivo firma anche l'**hash di un blocco recente**: il record dice "firmata *dopo* il blocco A e *prima* del blocco B" |
-| La tariffa finiva in un tesoro, da cui si pagavano le ricompense | Chi si accusava da solo svuotava il tesoro (vedi fase 3). E qualcuno avrebbe dovuto amministrarlo | Al posto della tariffa c'è un **deposito `B` per ogni foto**. Non va in un tesoro: resta legato a quella foto. Torna indietro dopo `T_foto` se nessuno la accusa; va a chi la accusa se il falso viene dimostrato |
+| The device sent only the photo hash: its key signed nothing | Someone watching the network copied the request before it was confirmed and sent it in their own name. They appeared as the author, and the honest request was rejected | The device **signs** the photo hash. The contract checks the signature. Copying the request does not change who signed |
+| We only knew that the photo existed *before* a certain block | You could attest today a photo that was years old | The device also signs the **hash of a recent block**: the record says "signed *after* block A and *before* block B" |
+| The fee went into a treasury, from which rewards were paid | Someone who accused themselves emptied the treasury (see phase 3). And someone would have had to manage it | Instead of the fee there is a **deposit `B` for each photo**. It does not go into a treasury: it stays tied to that photo. It comes back after `T_photo` if nobody accuses it; it goes to whoever accuses it if the fake is proven |
 
-**Perché un deposito e non una tariffa.** Una tariffa deve finire da qualche parte: in un tesoro
-(che qualcuno amministra e che si può svuotare) oppure distrutta. Un deposito frena lo spam allo
-stesso modo, perché chi attesta molte foto deve tenere bloccati molti soldi, ma non crea una cassa
-comune e non costa nulla a chi è onesto.
+**Why a deposit and not a fee.** A fee must end up somewhere: in a treasury (which someone manages
+and which can be emptied) or destroyed. A deposit holds back spam just as well, because whoever
+attests many photos must keep a lot of money locked, but it does not create a common fund and it
+costs nothing to honest people.
 
-## Fase 3 — Ban
+## Phase 3 — Ban
 
-> *Prima versione:* "A user claims an irregular device exists. The claim is checked in decentralized
+> *First version:* "A user claims an irregular device exists. The claim is checked in decentralized
 > fashion (in this example using UMA but it could be something else). Ban and a reward are issued
 > or not depending on the case."
 
-UMA resta l'arbitro. La prima versione però lasciava aperte quasi tutte le domande pratiche.
+UMA stays the judge. But the first version left almost all the practical questions open.
 
-| Che cosa non andava | Che cosa succedeva nel test | Com'è ora |
+| What was wrong | What happened in the test | How it is now |
 |---|---|---|
-| La ricompensa veniva pagata dal tesoro | Una sola persona controllava un dispositivo e un conto accusatore: attestava una cosa qualunque, si accusava da sola e incassava, svuotando il tesoro | La ricompensa è **il deposito della foto accusata**. Accusarsi da soli fa sempre perdere la commissione di UMA |
-| L'accusa non era legata a un record | Un dispositivo veniva bannato per una foto che non aveva mai attestato | Si può accusare solo una foto che quel dispositivo ha attestato, ed entro `T_foto` |
-| Lo stesso dispositivo poteva essere premiato più volte | Più ricompense per una sola foto | Un deposito si perde una volta sola |
-| Chi accusava pagava una "tariffa UMA" | In UMA non esiste una tariffa per chi accusa: esiste una cauzione, che si perde se si ha torto | L'accusatore blocca una **cauzione `B`**, uguale al deposito. La perde se l'accusa è respinta |
-| In UMA un'affermazione che nessuno contesta vale come vera | Un dispositivo onesto il cui proprietario non guardava veniva bannato | Il contratto porta l'accusa a UMA e **la contesta nello stesso momento** con il deposito della foto: ogni accusa arriva a un voto |
-| L'accusa era visibile a tutti prima di essere confermata | Chiunque poteva copiarla e inviarla a proprio nome; anche chi aveva attestato il falso, per limitare la perdita | L'accusa si fa in **due passaggi (commit–reveal)**: prima l'impronta, poi i dati |
-| Non era scritto che cosa succede alle foto già attestate dopo un ban | Se il ban le cancellava: un solo errore rendeva inverificabili tutte le foto oneste di quel dispositivo. Se non le cancellava: la foto giudicata falsa restava "attestata" come le altre | La foto accusata è **marcata come falso**. Il dispositivo è **segnalato** e non attesta più. Le altre foto restano com'erano. Nulla viene cancellato |
-| Non era scritto chi controlla il contratto | Chi controllava l'arbitro poteva muovere i soldi del tesoro | Il contratto **non ha proprietario** e non si può modificare. Non c'è tesoro |
+| The reward was paid from the treasury | A single person controlled a device and an accuser account: they attested anything, accused themselves and collected, emptying the treasury | The reward is **the deposit of the accused photo**. Accusing yourself always makes you lose the UMA fee |
+| The accusation was not tied to a record | A device was banned for a photo it had never attested | You can only accuse a photo that this device attested, and within `T_photo` |
+| The same device could be rewarded more than once | Several rewards for a single photo | A deposit is lost only once |
+| The accuser paid a "UMA fee" | In UMA there is no fee for the accuser: there is a bond, which is lost if you are wrong | The accuser locks a **bond `B`**, equal to the deposit. They lose it if the accusation is rejected |
+| In UMA a claim that nobody disputes counts as true | An honest device whose owner was not watching got banned | The contract takes the accusation to UMA and **disputes it at the same moment** with the photo's deposit: every accusation goes to a vote |
+| The accusation was visible to everyone before it was confirmed | Anyone could copy it and send it in their own name; even whoever had attested the fake, to limit the loss | The accusation is made in **two steps (commit–reveal)**: first the fingerprint, then the data |
+| It was not written what happens to photos already attested after a ban | If the ban deleted them: a single mistake made all the honest photos of that device impossible to verify. If it did not delete them: the photo judged fake stayed "attested" like the others | The accused photo is **marked as fake**. The device is **flagged** and no longer attests. The other photos stay as they were. Nothing is deleted |
+| It was not written who controls the contract | Whoever controlled the judge could move the treasury's money | The contract **has no owner** and cannot be changed. There is no treasury |
 
-### Come usiamo UMA, in concreto
+### How we use UMA, in practice
 
-UMA funziona così: qualcuno fa un'affermazione e mette una cauzione; se qualcuno la contesta
-mettendo una cauzione uguale, decide un voto; chi perde lascia la cauzione, che va a chi vince
-meno una commissione per UMA.
+UMA works like this: someone makes a claim and puts up a bond; if someone disputes it by putting up
+an equal bond, a vote decides; whoever loses leaves their bond, which goes to the winner minus a
+fee for UMA.
 
-Nella versione definitiva:
+In the final version:
 
-1. L'affermazione portata a UMA è l'**accusa**: "le prove allegate dimostrano che questa foto non
-   è una vera cattura". La cauzione è quella dell'accusatore.
-2. Il contratto la **contesta subito** con il deposito della foto. Per questo deposito e cauzione
-   devono essere uguali: lo richiede UMA.
-3. UMA vota. Per le sue regole risponde sì solo a ciò che si può verificare pubblicamente.
-4. UMA paga chi vince; il contratto marca la foto e segnala il dispositivo, oppure lascia tutto
-   com'era.
+1. The claim taken to UMA is the **accusation**: "the attached evidence proves that this photo is
+   not a real capture". The bond is the accuser's.
+2. The contract **disputes it right away** with the photo's deposit. This is why deposit and bond
+   must be equal: UMA requires it.
+3. UMA votes. Under its rules it answers yes only to what can be checked publicly.
+4. UMA pays the winner; the contract marks the photo and flags the device, or leaves everything as
+   it was.
 
-Abbiamo scelto che a dover essere dimostrata sia l'accusa, non la foto. Se fosse il contrario,
-chi attesta dovrebbe dimostrare che la propria foto è vera, cosa che nessuno può fare, e
-qualunque accusa vincerebbe.
+We chose that what must be proven is the accusation, not the photo. If it were the other way
+round, whoever attests would have to prove that their photo is real, which nobody can do, and any
+accusation would win.
 
-### La domanda posta a UMA
+### The question asked to UMA
 
-La prima versione chiedeva: *"la foto A è falsa?"*. Guardando solo i pixel, un falso ben fatto non
-si distingue: lo dice la traccia stessa ("indistinguishable from genuine camera captures"). Per
-questo la domanda è diventata: *"le prove allegate lo dimostrano?"*. Un'accusa viene accolta solo
-quando porta prove che chiunque può controllare, per esempio la stessa immagine già pubblicata
-prima della data del record. Un falso che non lascia prove di questo tipo non viene preso.
+The first version asked: *"is photo A fake?"*. Looking only at the pixels, a well-made fake cannot
+be told apart: the track itself says so ("indistinguishable from genuine camera captures").
+This is why the question became: *"does the attached evidence prove it?"*. An accusation is
+accepted only when it brings evidence that anyone can check, for example the same image already
+published before the date of the record. A fake that leaves no evidence of this kind is not caught.
 
-### La revoca della chiave (nuova)
+### Key revocation (new)
 
-Nella prima versione non c'era. Chi ha in mano la chiave di un dispositivo può farlo segnalare con
-una firma. Serve al proprietario a cui hanno rubato o copiato la chiave: senza, una chiave rubata
-resterebbe attiva.
+It was not in the first version. Whoever holds a device's key can get the device flagged with a
+signature. This is for the owner whose key was stolen or copied: without it, a stolen key would
+stay active.
 
-## Che cosa non è cambiato
+## What did not change
 
-- Le tre fasi e il loro ordine.
-- Chiunque può registrare un dispositivo, gratis e senza chiedere il permesso a nessuno.
-- Nessun produttore di dispositivi, nessuna autorità che accredita, nessun comitato.
-- Il contratto rifiuta registrazione e attestazione di un dispositivo bannato.
-- Chiunque può accusare, e chi ha ragione viene premiato.
-- Decide UMA.
-- La sicurezza poggia sugli incentivi economici.
+- The three phases and their order.
+- Anyone can register a device, for free and without asking anyone for permission.
+- No device manufacturer, no authority that accredits, no committee.
+- The contract rejects registration and attestation of a banned device.
+- Anyone can accuse, and whoever is right is rewarded.
+- UMA decides.
+- Security rests on economic incentives.
 
-## Le tre debolezze della traccia, prima e dopo
+## The three weaknesses from the track, before and after
 
-| Debolezza (slide 10) | Prima versione | Versione definitiva |
+| Weakness (slide 10) | First version | Final version |
 |---|---|---|
-| Single point of failure | Nessuna autorità che certifica, ma un tesoro e un contratto di cui non si sapeva chi avesse le chiavi | Nessun proprietario, nessun tesoro, nessuna lista di revoca tenuta da qualcuno. Resta la dipendenza da UMA per le accuse |
-| Cross-platform lock-in | Rimossa: chiunque registra e verifica | Rimossa, come prima |
-| Retroactive censorship | Dipendeva da che cosa faceva il ban, che non era scritto | I record non si cancellano; le decisioni hanno una data e riguardano una foto alla volta |
+| Single point of failure | No authority that certifies, but a treasury and a contract where nobody knew who held the keys | No owner, no treasury, no revocation list kept by someone. The dependence on UMA for accusations remains |
+| Cross-platform lock-in | Removed: anyone registers and verifies | Removed, as before |
+| Retroactive censorship | Depended on what the ban did, which was not written | Records are not deleted; decisions have a date and concern one photo at a time |

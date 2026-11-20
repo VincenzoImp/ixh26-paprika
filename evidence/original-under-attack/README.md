@@ -1,14 +1,14 @@
-# La prima versione, messa alla prova
+# The first version, put to the test
 
-**In breve (italiano).** Qui la proposta originale è stata scritta come contratto, *esattamente*
-com'era descritta, e poi attaccata con 24 test. Serve a mostrare che cosa non andava: è la prova
-dietro ogni riga di [`docs/2-cosa-e-cambiato.md`](../../docs/2-cosa-e-cambiato.md).
+**In short.** Here the original proposal was written as a contract, *exactly* as it was
+described, and then attacked with 24 tests. It shows what was wrong: it is the proof behind
+every line of [`docs/2-what-changed.md`](../../docs/2-what-changed.md).
 
-Risultati principali: il ban si elude gratis con una chiave nuova; si attesta qualunque file;
-un'attestazione in attesa si può rubare; chi si accusa da solo svuota il tesoro; un dispositivo
-viene bannato per una foto mai attestata.
+Main results: the ban is avoided for free with a new key; any file can be attested; a pending
+attestation can be stolen; someone who accuses themselves drains the treasury; a device is
+banned for a photo that was never attested.
 
-Per rieseguire: `npm install && npx hardhat test`. Il resto di questo file è in inglese.
+To run it again: `npm install && npx hardhat test`. The rest of this file is the original English text.
 
 ---
 

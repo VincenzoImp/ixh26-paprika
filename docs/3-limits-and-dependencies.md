@@ -1,105 +1,105 @@
-# 3. Limiti e dipendenze
+# 3. Limits and dependencies
 
-Paprika non dipende da produttori di dispositivi. Questa scelta ha un prezzo, e qui lo scriviamo
-per intero: da che cosa dipende invece, che cosa non riesce a fare, e come si confronta con ORIGO
-proprio su questo punto. I simboli (`B`, `T_foto`, `T_reveal`, `f`) sono spiegati nel
-[documento 1](1-come-funziona.md).
+Paprika does not depend on device makers. This choice has a price, and here we write it out in
+full: what it depends on instead, what it cannot do, and how it compares with ORIGO on exactly
+this point. The symbols (`B`, `T_photo`, `T_reveal`, `f`) are explained in
+[document 1](1-how-it-works.md).
 
-## Da chi dipende Paprika
+## Who Paprika depends on
 
-| Da chi | Dipende? | In che modo |
+| On whom | Depends? | How |
 |---|---|---|
-| Produttori di dispositivi | **No** | Nessuno certifica i dispositivi. Chiunque registra una chiave |
-| Un comitato o un'autorità che accredita | **No** | Non esiste |
-| Un amministratore del contratto | **No** | Il contratto non ha proprietario e non si può modificare |
-| Un tesoro o una cassa comune | **No** | Non esiste. I soldi sono solo depositi e cauzioni dei singoli |
-| Qualcuno che sorvegli la blockchain per difendere gli onesti | **No** | Ogni accusa arriva a un voto: nessuna foto è condannata per silenzio |
-| **UMA** | **Sì** | Decide le accuse. È la dipendenza principale: vedi sotto |
-| **La blockchain** | **Sì** | Custodisce record e depositi. Deve essere una rete pubblica perché le garanzie valgano |
-| **Chi possiede il dispositivo** | **Sì** | Deve custodire la chiave. Se gliela rubano può solo revocarla |
+| Device makers | **No** | Nobody certifies the devices. Anyone can register a key |
+| A committee or an authority that grants approval | **No** | There is none |
+| An administrator of the contract | **No** | The contract has no owner and cannot be changed |
+| A treasury or a shared fund | **No** | There is none. The only money is the deposits and bonds of individuals |
+| Someone who watches the blockchain to defend honest users | **No** | Every accusation reaches a vote: no photo is condemned because of silence |
+| **UMA** | **Yes** | It decides the accusations. It is the main dependency: see below |
+| **The blockchain** | **Yes** | It holds records and deposits. It must be a public network for the guarantees to hold |
+| **Whoever owns the device** | **Yes** | They must keep the key safe. If it is stolen, they can only revoke it |
 
-### La dipendenza da UMA
+### The dependency on UMA
 
-| Domanda | Risposta |
+| Question | Answer |
 |---|---|
-| Chi decide, in pratica? | Chi possiede il token UMA, con un voto pubblico |
-| Quanto ci mette? | Su una rete vera, da 48 a 72 ore per ogni accusa |
-| Può sbagliare? | Sì. Se accoglie un'accusa falsa, una foto vera viene marcata come falso, chi l'ha attestata perde `B` e il dispositivo è segnalato. Gli altri record restano |
-| Si può corrompere? | Chi controlla abbastanza voti può pilotare una decisione. La sicurezza del voto è quella di UMA, non la nostra |
-| Che cosa lo limita? | Ogni decisione riguarda una sola foto. UMA non può cancellare record, non può toccare altre foto, non può cambiare le regole |
-| Chi fissa `f` e la cauzione minima? | UMA. Noi scegliamo `B`, che non può stare sotto il minimo di UMA |
-| E nella demo? | I contratti di UMA sono quelli veri, pubblicati su una blockchain locale. Il voto è simulato con lo strumento che UMA usa sulle reti di prova: l'esito lo inseriamo noi |
+| Who decides, in practice? | The holders of the UMA token, with a public vote |
+| How long does it take? | On a real network, 48 to 72 hours for each accusation |
+| Can it get it wrong? | Yes. If it accepts a false accusation, a real photo is marked as fake, whoever attested it loses `B` and the device is flagged. The other records stay |
+| Can it be corrupted? | Whoever controls enough votes can steer a decision. The security of the vote is UMA's, not ours |
+| What limits it? | Each decision concerns a single photo. UMA cannot delete records, cannot touch other photos, cannot change the rules |
+| Who sets `f` and the minimum bond? | UMA. We choose `B`, which cannot be below UMA's minimum |
+| And in the demo? | The UMA contracts are the real ones, published on a local blockchain. The vote is simulated with the tool that UMA uses on test networks: we enter the outcome ourselves |
 
-In sintesi: **Paprika sposta la fiducia dai produttori a UMA e al deposito.** Non la elimina.
+In short: **Paprika moves trust from the makers to UMA and to the deposit.** It does not remove
+it.
 
-## Che cosa Paprika non riesce a fare
+## What Paprika cannot do
 
-| Limite | In parole semplici |
+| Limit | In plain words |
 |---|---|
-| **Non dimostra che la foto viene da una fotocamera** | Un dispositivo registrato può firmare un'immagine generata. È la conseguenza diretta di non avere produttori |
-| **Prende solo i falsi che lasciano prove pubbliche** | Se nessuno può dimostrare che l'immagine è falsa, l'accusa viene respinta e il falso resta attestato |
-| **Solo entro `T_foto`** | Dopo quel tempo il deposito è tornato indietro e non c'è più nulla da togliere a chi ha attestato |
-| **La punizione è limitata dal deposito** | Chi attesta un falso rischia al massimo `B`. Se il falso gli rende di più, il deposito non lo ferma |
-| **Chi teme di essere scoperto può limitare la perdita** | Può accusarsi da solo, con le prove vere, prima che lo faccia un altro: perde `f×B` invece di `B` |
-| **Il ban costa poco** | Registrarsi è gratuito: chi viene segnalato rientra con una chiave nuova. Perde il deposito di quella foto e la storia del dispositivo |
-| **Capitale bloccato in proporzione all'uso** | Chi attesta N foto tiene bloccato N × `B` per il tempo `T_foto` |
-| **Le foto di un dispositivo sono collegabili fra loro** | Chiunque vede quali foto ha attestato un dispositivo e quale conto lo ha registrato |
-| **Vale solo per il file identico** | Una copia ricompressa o ritagliata, per il protocollo, è un'altra foto |
-| **La foto di uno schermo** | Un dispositivo che fotografa un'immagine falsa su uno schermo produce un record regolare |
-| **Il contratto non si può correggere** | Se c'è un difetto, bisogna pubblicarne uno nuovo |
+| **It does not prove that the photo comes from a camera** | A registered device can sign a generated image. This is the direct result of having no makers |
+| **It only catches fakes that leave public evidence** | If nobody can prove that the image is fake, the accusation is rejected and the fake stays attested |
+| **Only within `T_photo`** | After that time the deposit has gone back and there is nothing left to take from whoever attested |
+| **The penalty is limited by the deposit** | Whoever attests a fake risks at most `B`. If the fake earns them more, the deposit does not stop them |
+| **Whoever fears being caught can limit the loss** | They can accuse themselves, with the real evidence, before someone else does: they lose `f×B` instead of `B` |
+| **The ban is cheap** | Registering is free: whoever is flagged comes back with a new key. They lose the deposit on that photo and the device's history |
+| **Capital locked in proportion to use** | Whoever attests N photos keeps N × `B` locked for the time `T_photo` |
+| **A device's photos can be linked to each other** | Anyone can see which photos a device attested and which account registered it |
+| **It only holds for the identical file** | A recompressed or cropped copy is, for the protocol, a different photo |
+| **A photo of a screen** | A device that photographs a fake image on a screen produces a normal record |
+| **The contract cannot be fixed** | If there is a flaw, a new one must be published |
 
-## Quanto protegge il deposito
+## How much the deposit protects
 
-Chiamiamo `p` la probabilità che qualcuno dimostri un falso entro `T_foto`, e `G` quello che il
-falso rende a chi lo attesta.
+Let `p` be the probability that someone proves a fake within `T_photo`, and `G` what the fake
+earns whoever attests it.
 
-- Chi attesta un falso e viene scoperto perde `B`.
-- Se si accusa da solo per primo perde solo `f×B`.
+- Whoever attests a fake and is caught loses `B`.
+- If they accuse themselves first, they lose only `f×B`.
 
-Il deposito scoraggia quindi i falsi per cui `G` è minore di `p × f × B` nel caso peggiore, e
-minore di `p × B` nel caso migliore.
+So the deposit discourages fakes for which `G` is less than `p × f × B` in the worst case, and
+less than `p × B` in the best case.
 
-Due conseguenze:
+Two consequences:
 
-1. **`B` va scelto in base a quanto vale ciò che si protegge.** Un deposito piccolo ferma solo
-   falsi di poco valore. Un deposito grande esclude chi non può bloccare quella somma per ogni
-   foto.
-2. **`p` non lo conosce nessuno.** Gli studi che abbiamo trovato dicono che persone e programmi
-   riconoscono male le immagini generate guardando solo i pixel. Paprika funziona meglio dove un
-   falso lascia tracce verificabili: foto riciclate, immagini già pubblicate altrove.
+1. **`B` must be chosen based on how much the thing being protected is worth.** A small deposit
+   stops only low-value fakes. A large deposit shuts out whoever cannot lock that amount for each
+   photo.
+2. **Nobody knows `p`.** The studies we found say that people and programs are bad at recognizing
+   generated images by looking only at the pixels. Paprika works best where a fake leaves
+   traces that can be checked: recycled photos, images already published elsewhere.
 
-Paprika è quindi adatto a contesti dove un falso vale poco e spesso lascia tracce, come gli
-annunci di vendita. Non basta per notizie, elezioni o prove legali.
+So Paprika suits settings where a fake is worth little and often leaves traces, such as sale
+listings. It is not enough for news, elections or legal evidence.
 
-## Paprika e ORIGO sulla dipendenza dai produttori
+## Paprika and ORIGO on the dependency on makers
 
 | | ORIGO | Paprika |
 |---|---|---|
-| Chi deve esistere perché il sistema dica qualcosa | Almeno un produttore che registra le chiavi dei suoi dispositivi, più chi ammette i produttori (2 registrar su 3) | Nessuno: basta il contratto. Per le accuse, UMA |
-| Di chi ci si fida | Del produttore: che registri solo dispositivi veri e che le chiavi non escano dall'hardware | Di UMA, e del fatto che chi attesta ha soldi da perdere |
-| Che cosa dimostra un record | Che ha firmato una chiave garantita da un produttore ammesso | Che ha firmato una chiave registrata, con un deposito in gioco |
-| Legame con una fotocamera vera | Sì, tramite la parola del produttore | No |
-| Chi può entrare | Chi ha un dispositivo di un produttore ammesso | Chiunque |
-| Chi revoca | I registrar | UMA per una foto accusata; chi ha la chiave, per la propria chiave |
-| Privacy delle foto | Le foto di un dispositivo non sono collegabili da chi non ne conosce la chiave | Sono collegabili da chiunque |
-| Punto debole principale | La dipendenza da produttori e registrar | Nessuna prova di origine fisica; dipendenza da UMA |
+| Who must exist for the system to say anything | At least one maker that registers the keys of its devices, plus whoever admits the makers (2 registrars out of 3) | Nobody: the contract is enough. For accusations, UMA |
+| Who is trusted | The maker: that it registers only real devices and that the keys never leave the hardware | UMA, and the fact that whoever attests has money to lose |
+| What a record proves | That a key vouched for by an admitted maker signed | That a registered key signed, with a deposit at stake |
+| Link to a real camera | Yes, through the maker's word | No |
+| Who can join | Whoever has a device from an admitted maker | Anyone |
+| Who revokes | The registrars | UMA for an accused photo; whoever holds the key, for their own key |
+| Photo privacy | A device's photos cannot be linked by someone who does not know its key | They can be linked by anyone |
+| Main weak point | The dependency on makers and registrars | No proof of physical origin; dependency on UMA |
 
-Sono due risposte diverse alla stessa traccia. ORIGO dà una garanzia più forte e accetta di
-fidarsi dei produttori. Paprika non si fida di nessun produttore e accetta una garanzia più
-debole, di tipo economico.
+They are two different answers to the same track. ORIGO gives a stronger guarantee and
+accepts trusting the makers. Paprika trusts no maker and accepts a weaker, economic guarantee.
 
-## Come dirlo, e come non dirlo
+## How to say it, and how not to say it
 
-Si può dire:
+You can say:
 
-1. Un record dimostra che un dispositivo registrato ha firmato questo esatto file in un intervallo
-   di tempo noto, e che chi l'ha attestato ha messo un deposito in gioco.
-2. Nessun produttore, comitato o amministratore può decidere chi partecipa né cancellare un record.
-3. Chi attesta un falso che lascia prove pubbliche perde il deposito, e chi lo dimostra viene
-   pagato.
+1. A record proves that a registered device signed this exact file within a known time window,
+   and that whoever attested it put a deposit at stake.
+2. No maker, committee or administrator can decide who takes part or delete a record.
+3. Whoever attests a fake that leaves public evidence loses the deposit, and whoever proves it
+   gets paid.
 
-Non si deve dire:
+You must not say:
 
-1. "Paprika riconosce i falsi."
-2. "Un record prova che la foto viene da una fotocamera vera."
-3. "Il deposito garantisce che nessuno bari."
+1. "Paprika recognizes fakes."
+2. "A record proves that the photo comes from a real camera."
+3. "The deposit guarantees that nobody cheats."

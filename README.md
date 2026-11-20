@@ -1,64 +1,65 @@
 # Paprika
 
-Un protocollo per attestare l'origine delle foto su una blockchain, **senza produttori di
-dispositivi e senza autorità centrali**. Proposta per la Track 1 di
-[IXH26 — Italian XRPL Hackathon](https://www.decifris.it/ixh26/), Bari, 20–21 novembre 2026.
+A protocol to attest (that is, to certify in public) where photos come from, on a blockchain, **with no device makers and no
+central authorities**. A proposal for Track 1 of
+[IXH26 — Italian XRPL Hackathon](https://www.decifris.it/ixh26/), Bari, 20–21 November 2026.
 
-> **La traccia.** *"Design a secure protocol that generalises to any device and guarantees
+> **The track.** *"Design a secure protocol that generalises to any device and guarantees
 > authentic photo origin via decentralised blockchains technology."*
 
-## L'idea in tre righe
+## The idea in three lines
 
-1. Chi vuole attestare foto **registra il dispositivo**, gratis.
-2. Ogni foto viene **firmata dal dispositivo** e registrata sulla blockchain con un **deposito**,
-   che torna indietro se nessuno la contesta entro un certo tempo.
-3. Chiunque può **accusare** una foto mettendo una cauzione uguale. Decide **UMA**. Se il falso è
-   dimostrato, chi accusa prende il deposito e il dispositivo è segnalato; altrimenti chi accusa
-   perde la cauzione.
+1. Whoever wants to attest photos **registers the device**, for free.
+2. Each photo is **signed by the device** and recorded on the blockchain with a **deposit**.
+   The deposit comes back if nobody challenges the photo within a set time.
+3. Anyone can **accuse** a photo by putting up an equal bond. **UMA** decides. If the fake is
+   proven, the accuser takes the deposit and the device is flagged; otherwise the accuser
+   loses the bond.
 
-Nessuno amministra il contratto, nessuno decide chi può partecipare, nessun record viene mai
-cancellato. Depositi, cauzioni e tempi non sono fissati nel codice: si scelgono quando il
-contratto viene pubblicato.
+Nobody runs the contract, nobody decides who can take part, no record is ever deleted.
+Deposits, bonds and times are not fixed in the code: they are chosen when the contract is
+published.
 
-## Che cosa garantisce, e che cosa no
+## What it guarantees, and what it does not
 
-Un record dimostra che un dispositivo registrato ha firmato **questo esatto file**, in **questo
-intervallo di tempo**, e che chi l'ha attestato ha messo **dei soldi in gioco**.
+A record proves that a registered device signed **this exact file**, in **this time window**,
+and that whoever attested it put **money at stake**.
 
-Non dimostra che il file viene da una fotocamera vera. È il prezzo di non dipendere dai
-produttori, ed è spiegato per intero in [`docs/3-limiti-e-dipendenze.md`](docs/3-limiti-e-dipendenze.md).
+It does not prove that the file comes from a real camera. This is the price of not depending
+on device makers, and it is explained in full in [`docs/3-limits-and-dependencies.md`](docs/3-limits-and-dependencies.md).
 
-## Da dove cominciare
+## Where to start
 
-| Voglio… | Leggo |
+| I want to… | I read |
 |---|---|
-| Capire come funziona, con gli schemi e tutti i casi | [`docs/1-come-funziona.md`](docs/1-come-funziona.md) |
-| Sapere che cosa è cambiato rispetto alla prima versione, e perché | [`docs/2-cosa-e-cambiato.md`](docs/2-cosa-e-cambiato.md) |
-| Sapere che cosa non fa, da chi dipende, e il confronto con ORIGO sui produttori | [`docs/3-limiti-e-dipendenze.md`](docs/3-limiti-e-dipendenze.md) |
-| Rileggere la prima versione | [`proposal/PAPRIKA.md`](proposal/PAPRIKA.md) |
+| Understand how it works, with the diagrams and all the cases | [`docs/1-how-it-works.md`](docs/1-how-it-works.md) |
+| Know what changed compared to the first version, and why | [`docs/2-what-changed.md`](docs/2-what-changed.md) |
+| Know what it does not do, who it depends on, and the comparison with ORIGO on device makers | [`docs/3-limits-and-dependencies.md`](docs/3-limits-and-dependencies.md) |
+| Read the first version again | [`proposal/PAPRIKA.md`](proposal/PAPRIKA.md) |
 
-## Che cosa c'è nel repository
+## What is in the repository
 
-| Cartella | Contenuto |
+| Folder | Content |
 |---|---|
-| [`docs/`](docs/) | I tre documenti qui sopra, più gli [approfondimenti](docs/approfondimenti/) con le fonti |
-| [`proposal/`](proposal/) | La prima versione di Paprika, così com'è arrivata |
-| [`contract/`](contract/) | Il contratto (`Paprika.sol`), i suoi test e l'output dell'esecuzione |
-| [`prove/`](prove/) | La prima versione scritta alla lettera e attaccata: la prova di che cosa non andava |
-| [`impl/mock/`](impl/mock/) | Il mock della demo, con gli screenshot |
-| [`slides/`](slides/) | La bozza del deck |
-| [`track/`](track/) | La traccia: PDF, slide, trascrizione |
+| [`docs/`](docs/) | The three documents above, plus the [background](docs/background/) material with the sources |
+| [`proposal/`](proposal/) | The first version of Paprika, as it reached us |
+| [`contract/`](contract/) | The contract (`Paprika.sol`), its tests and the output of the run |
+| [`evidence/`](evidence/) | The first version written word for word and attacked: the proof of what was wrong |
+| [`impl/mock/`](impl/mock/) | The mock of the demo, with the screenshots |
+| [`slides/`](slides/) | The draft of the deck |
+| [`track/`](track/) | The track: PDF, slides, transcript |
 
-## Stato
+## Status
 
-- **Fatto:** protocollo definito; documenti; mock dell'app e bozza delle slide.
-- **In corso:** contratto nella forma definitiva e prova con i contratti veri di UMA in locale.
-- **Da fare per la demo:** vedi le [issue](https://github.com/VincenzoImp/ixh26-paprika/issues),
-  in ordine di dipendenza.
-- **Dove gira:** tutto su una blockchain Ethereum locale. Simulati: la chiave del dispositivo
-  (creata dal programma) e il voto di UMA (l'esito lo inseriamo noi).
+- **Done:** protocol defined; documents; mock of the app and draft of the slides.
+- **In progress:** contract in its final form, and a test with the real UMA contracts on a
+  local machine.
+- **To do for the demo:** see the [issues](https://github.com/VincenzoImp/ixh26-paprika/issues),
+  in order of dependency.
+- **Where it runs:** everything on a local Ethereum blockchain. Simulated: the device key
+  (created by the program) and the UMA vote (we enter the result ourselves).
 
-## Eseguire i test del contratto
+## Running the contract tests
 
 ```
 cd contract
@@ -66,11 +67,11 @@ npm install
 npx hardhat test
 ```
 
-## Note
+## Notes
 
-- Tutte le versioni intermedie del lavoro restano nella cronologia git, sotto l'etichetta
+- All the intermediate versions of the work stay in the git history, under the tag
   `iterazioni-complete`.
-- L'uso di strumenti di intelligenza artificiale è dichiarato in
-  [`AI_DISCLOSURE.md`](AI_DISCLOSURE.md); il materiale di terzi in
+- The use of artificial intelligence tools is declared in
+  [`AI_DISCLOSURE.md`](AI_DISCLOSURE.md); third-party material in
   [`THIRD_PARTY.md`](THIRD_PARTY.md).
-- L'altra proposta del team per la stessa traccia, ORIGO, è nel repository `ixh26-photo-origin`.
+- The team's other proposal for the same track, ORIGO, is in the `ixh26-photo-origin` repository.

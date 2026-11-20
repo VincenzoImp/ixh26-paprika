@@ -1,25 +1,25 @@
-# Software e materiali di terzi
+# Third-party software and material
 
-Regola ufficiale di IXH26: *"Non-team-created software or intellectual property can be utilised if
+Official IXH26 rule: *"Non-team-created software or intellectual property can be utilised if
 you have a licence (e.g. software libraries or design assets), but they must be mentioned in your
 submission."*
 
-| Componente | Versione | Licenza | Origine | Dove è usato |
+| Component | Version | Licence | Source | Where it is used |
 |---|---|---|---|---|
-| Slide della Track 1 di IXH26 | 20 novembre 2026 | © De Componendis Cifris | consegnate ai team | `track/` (solo come riferimento di lavoro) |
-| Hardhat | 2.29.2 | MIT | https://github.com/NomicFoundation/hardhat | `contract/`, `prove/originale-attaccato/` |
-| ethers | 6.17.x | MIT | https://github.com/ethers-io/ethers.js | test in `contract/` e `prove/originale-attaccato/` |
-| solc | 0.8.28 | GPL-3.0 | https://github.com/ethereum/solidity | compilatore, scaricato da Hardhat |
+| IXH26 Track 1 slides | 20 November 2026 | © De Componendis Cifris | given to the teams | `track/` (only as a working reference) |
+| Hardhat | 2.29.2 | MIT | https://github.com/NomicFoundation/hardhat | `contract/`, `evidence/original-under-attack/` |
+| ethers | 6.17.x | MIT | https://github.com/ethers-io/ethers.js | tests in `contract/` and `evidence/original-under-attack/` |
+| solc | 0.8.28 | GPL-3.0 | https://github.com/ethereum/solidity | compiler, downloaded by Hardhat |
 
-L'interfaccia dell'arbitro simulato ricalca quella dell'Optimistic Oracle V3 di UMA
-(https://github.com/UMAprotocol/protocol, AGPL-3.0); nessun codice di UMA è incluso.
+The interface of the simulated arbiter copies that of UMA's Optimistic Oracle V3
+(https://github.com/UMAprotocol/protocol, AGPL-3.0); no UMA code is included.
 
-Le licenze sono quelle dichiarate dai progetti: vanno ricontrollate prima della consegna.
+The licences are the ones declared by the projects: they must be checked again before submission.
 
-## Lavoro precedente all'hackathon
+## Work done before the hackathon
 
-Nessuno. Tutto è stato creato il 20 novembre 2026, dopo l'inizio dell'hackathon (12:00 CET).
+None. Everything was created on 20 November 2026, after the start of the hackathon (12:00 CET).
 
-## Lavoro condiviso con l'altro repository del team
+## Work shared with the team's other repository
 
-La cartella `track/` è una copia di quella del repository `ixh26-photo-origin` (ORIGO).
+The `track/` folder is a copy of the one in the `ixh26-photo-origin` repository (ORIGO).
