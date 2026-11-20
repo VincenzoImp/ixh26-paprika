@@ -1,0 +1,25 @@
+{
+  "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+  "chainId": "11155111",
+  "block": 12177408,
+  "oov3CodeBytes": 17837,
+  "defaultIdentifier": "0x4153534552545f54525554480000000000000000000000000000000000000000",
+  "defaultIdentifierAscii": "ASSERT_TRUTH",
+  "defaultLiveness": "7200",
+  "defaultCurrency": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  "minimumBond": "400000000",
+  "finder": "0xf4C48eDAd256326086AEfbd1A53e1896815F8f13",
+  "burnedBondPercentage": "500000000000000000",
+  "owner": "0x9A8f92a830A5cB89a3816e3D267CB7791c16b04D",
+  "currency": {
+    "name": "USDC",
+    "symbol": "USDC",
+    "decimals": 6
+  },
+  "finderOracle": "0xd6Fc66498aE366892BDa974Fd4eF903Ca7202F76",
+  "finderStore": "0x39e7FFA77A4ac4D34021C6BbE4C8778d47F684F2",
+  "finderCollateralWhitelist": "0xE8DE4bcE27f6214dcE18D8a7629f233C66A97B84",
+  "finderIdentifierWhitelist": "0xfcb6f77112951e1995d37542b519Fe0a85a1AA77",
+  "storeFinalFee": "0",
+  "oracleCodeBytes": 22612
+}

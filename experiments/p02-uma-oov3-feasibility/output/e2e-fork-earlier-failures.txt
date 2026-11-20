@@ -1,0 +1,5 @@
+Earlier failed attempts of scripts/e2e-fork.js (copied from the terminal; the log file was overwritten by later runs):
+1) hre.ethers undefined (no hardhat-ethers plugin installed): TypeError: Cannot read properties of undefined (reading 'encodeBytes32String') -> switched to plain ethers BrowserProvider(network.provider).
+2) eth_call failed: message: 'transaction gas limit (60000000) is greater than the cap (16777216)' -> set networks.hardhat.gas = 16_000_000 (EIP-7825 cap on forked Sepolia).
+3) MockOracleAncillary.finder() reverted (finder is not a public getter) -> removed that diagnostic call.
+4) BrowserProvider.getSigner(<impersonated Finder owner>) failed: eth_requestAccounts -32004 -> used new ethers.JsonRpcSigner(provider, owner).

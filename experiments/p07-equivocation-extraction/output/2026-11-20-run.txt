@@ -1,0 +1,8 @@
+1. both capture signatures valid: true true
+   key extracted from the two signatures: true
+   extracted key yields a valid EXTRACTED misuse proof naming the challenger: true
+2. rule not enforced: second signature valid: true | extraction: null
+   -> the verifier must check r == x(R_slot) against a nonce point committed at registration;
+      without it, only a direct two-signature equivocation proof (no key extraction) is sound.
+   committed-R check rejects the cheating signature: true | accepts honest one: true
+3. (r, n - s) also verifies (no low-s rule in the verifier): true

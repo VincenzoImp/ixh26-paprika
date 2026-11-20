@@ -1,0 +1,9 @@
+{
+  "name": "p02-uma-oov3-feasibility",
+  "private": true,
+  "type": "commonjs",
+  "devDependencies": {
+    "ethers": "^6.17.0",
+    "hardhat": "^2.29.2"
+  }
+}
