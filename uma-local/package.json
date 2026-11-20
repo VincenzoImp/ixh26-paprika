@@ -1,0 +1,13 @@
+{
+  "name": "uma-local",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "@uma/contracts-node": "^0.4.28",
+    "ethers": "^6.17.0",
+    "hardhat": "^2.29.2"
+  }
+}

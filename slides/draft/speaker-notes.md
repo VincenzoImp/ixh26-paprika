@@ -1,62 +1,67 @@
-# Speaker notes: Paprika, first draft
+# Speaker notes: Paprika
 
-Five minutes, about 40 seconds per slide, 90 seconds for the demo. Numbers are the ones on the
-slides; their sources are in the comments of `deck-draft.tex`. Sources of truth: `docs/1-3`.
+Five minutes: about 40 seconds per slide, 90 seconds for the demo. Source of truth:
+`docs/1-come-funziona.md`. Amounts and durations are deployment parameters, so we say `B`,
+`T_photo`, `T_reveal` and `f`, not numbers.
 
 ## 1. Title (30 s)
 
-Paprika is a public register in which whoever attests a photo puts a signature and money behind
-it. A record says that a registered device signed this exact file in a known block window, with a
-deposit at stake, and anyone can challenge it. We do not claim that the file came from a camera.
+Paprika is a public register of photos in which whoever attests a photo puts a device signature
+and money behind it. Every attested photo is signed by a registered device and backed by a deposit
+that anyone can win by proving the photo fake. We do not claim that the file came from a camera.
 
 ## 2. The problem (40 s)
 
-The brief's example is close to a solution but centralised: a single point of failure,
-cross-platform lock-in, retroactive censorship. We wrote our original proposal as a contract,
-exactly as described, and attacked it: a ban was evaded for free, a 1 ETH treasury was drained by
-self-accusation, a pending attestation was stolen, a device was banned for a photo it never
-attested. The three phases stayed; every phase was repaired.
+The brief's example is close to a solution but centralised. It has three weaknesses: a single
+point of failure, cross-platform lock-in, and retroactive censorship. We wrote our original
+proposal as a contract, exactly as described, and attacked it. A pending attestation could be
+stolen from the mempool. The treasury could be drained by self-accusation. A device could be
+banned over a photo it never attested, or because nobody contested. The three phases stayed, and
+every phase was repaired.
 
-## 3. The protocol (40 s)
+## 3. The protocol at a glance (40 s)
 
-Register: the owner locks a 0.25 ETH deposit and the device key signs the owner's address, so
-nobody can register someone else's key. Attest: the device signs the file's hash together with a
-recent block hash, anyone relays it, and the record says "signed after block A and before block B".
-Challenge: an accusation against one photo, or a proof that the key left the device. Anyone
-verifies by hashing the file and asking the contract.
+Registration is free: the device key signs the owner's address, which proves possession, and a
+key can register only once. To attest, the device signs the photo hash together with a recent
+block hash, and whoever submits it locks a deposit B. If nobody accuses the photo within T_photo,
+the deposit comes back and the record stays. Otherwise the accusation goes through commit, reveal
+and a UMA vote. Anyone can verify by hashing the file and asking the contract.
 
 ## 4. Removed or moved (45 s)
 
-There is no manufacturer, committee, owner or treasury, and no revocation list kept by anyone.
-Lock-in is removed for vendors; we still need one public chain and a node to read it. Records are
-never erased and flags carry their date, although a key thief can get a device flagged and
-verifiers may then distrust its archive. Trust is moved, not eliminated: to a decentralised arbiter
-for accusations, and to the deposit.
+There is no manufacturer, no committee, no owner and no treasury, and nobody keeps a revocation
+list. That single point of failure is removed. Lock-in is removed for vendors; what remains is one
+public chain and a node to read it. Records are never erased and flags carry their date. A flag
+stops new attestations, and every earlier record keeps its own deposit and window. Trust is moved,
+not eliminated: it goes to UMA's vote for accusations, and to the deposit.
 
-## 5. The challenge mechanism (50 s)
+## 5. The mechanism (50 s)
 
-An accusation starts as a sealed commitment with a 0.11 ETH bond, so the owner cannot see it
-coming; then the accuser reveals photo and evidence, and the contract contests it automatically
-with the device's deposit, so silence never flags anyone. If the arbiter upholds it, the accuser
-gets the bond back plus 0.125 ETH and the owner loses 0.25; if it rejects it, the accuser loses
-0.11 and the owner gains 0.055. The second way needs no arbiter: a signature on a message no camera
-would sign proves the key is out, and the deposit is split, 0.125 to the prover, 0.125 burned.
-Self-accusation always loses; the deposit-bound key idea is Kiayias and Tang's and Ruffing, Kate
-and Schröder's, and we only assemble it.
+The device signs with P-256, and the contract verifies the signature through the precompile. The
+block hash inside the signature gives a not-before bound, and the record's block gives a not-after
+bound. Accusations are made by commit and reveal because the mempool is public: a one-step
+accusation could be copied for the reward, or pre-empted by the forger. The contract asserts each
+accusation at UMA's Optimistic Oracle V3 and disputes it with the photo's deposit, so every
+accusation goes to a vote. The question is whether the evidence proves the photo is not a genuine
+capture, and the answer is yes only if that can be checked publicly. The loser's B goes to the
+winner, minus UMA's fee f times B, so accusing yourself always costs f times B. The deposit-bound
+key idea comes from Kiayias and Tang and from Ruffing, Kate and Schröder; we only assemble it.
 
 ## 6. Demo (90 s)
 
-We register a device with a 0.25 ETH deposit, attest a photo through a relayer, and verify it with
-its block window and the deposit at risk. One changed pixel and there is no record. A true
-accusation is upheld and the device is flagged; a false one is rejected and the accuser loses the
-bond. Verifying again shows that nothing was erased. All of this runs on a local Ethereum EVM
-chain, and the arbiter is simulated: we choose the outcome.
+We register a device for free and attest a photo with deposit B. Verifying shows the block window
+and the locked deposit, and changing one pixel gives no record. A true accusation is upheld: the
+photo is marked fake and the device is flagged. A false accusation is rejected and the accuser
+loses the bond. We then advance time past T_photo and the deposit is refunded. All of this runs on
+a local Ethereum chain. UMA's contracts are the real ones; the vote is simulated with UMA's own
+mock oracle.
 
 ## 7. Limits (45 s)
 
-There is no proof of physical origin: a registered device can sign a generated image, and only
-fakes that leave public evidence are caught. The deposit deters only low-value fakes, roughly 4 to
-190 dollars at an assumed 1 to 50 percent detection probability and 3,000 dollars per ETH. We
-depend on the arbiter, 48 to 72 hours per accusation with UMA, and records of one device are
-linkable. It suits sale listings, recycled photos and small frauds, not news or legal evidence.
-Design, code, documentation and slides were made with Claude Code under the team's direction.
+There is no proof of physical origin: a registered device can sign a generated image. Only fakes
+with publicly checkable evidence are caught, and only within T_photo. The deposit bounds the
+punishment, and a flagged party can register a new key for free. A forger can accuse itself to cap
+its loss at f times B. The vote is UMA's: it takes 48 to 72 hours per accusation on a real network,
+and it can err. Paprika suits low-value fakes that leave traces, such as sale listings and recycled
+photos; it is not suited to news or legal evidence. Design, code, documentation and slides were
+made with Claude Code under the team's direction.

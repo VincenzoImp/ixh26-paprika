@@ -7,16 +7,22 @@
 Track 1, "Universal Photo-Origin Validation Protocol". The team's other candidate, ORIGO, lives in
 the sibling repository `ixh26-photo-origin`. The team submits one project.
 
-## The team's standing decisions (20 November 2026)
+## The team's standing decisions (20-21 November 2026)
 
 1. **No dependence on manufacturers.** Do not add issuers, accredited makers or hardware roots to
    the protocol. Other limits are acceptable if stated plainly.
 2. **One final version only.** No intermediate versions, revision numbers or "step" documents in
    the tree. Earlier work is under the git tag `iterazioni-complete`.
-3. **Plain Italian for documents** (`README.md`, `docs/`): short sentences, every technical word
-   explained, every change from the original proposal stated with what was wrong and why it
-   changed. Code, code comments, test names and commit messages in English. Chat in Italian.
-4. **The demo runs on a local Ethereum EVM chain.** No public testnets.
+3. **English everywhere in the repository**: documents, code, comments, commit messages, issues.
+   Plain English: short sentences, every technical word explained, every change from the original
+   proposal stated with what was wrong and why it changed. Chat with the team is in Italian.
+4. **Code that reads at a glance.** Comment contracts and scripts so that someone opening a file
+   for the first time understands what it does and why.
+5. **Ethereum only, on a local chain.** No XRPL, no public testnets. The arbiter is UMA's
+   Optimistic Oracle V3, deployed locally from UMA's published contracts.
+6. **No hard-coded amounts or durations.** Deposits, bonds and time windows are deployment
+   parameters; documents use symbols (`B`, `T_photo`, `T_reveal`, `f`), not numbers.
+7. **All work happens in this repository** and the project is called Paprika.
 
 ## Hard constraints
 
@@ -41,14 +47,14 @@ the sibling repository `ixh26-photo-origin`. The team submits one project.
 | Path | Content |
 |---|---|
 | `README.md` | Start here |
-| `docs/1-come-funziona.md` | The protocol, explained simply, with every case |
-| `docs/2-cosa-e-cambiato.md` | What changed from the original proposal, and why |
-| `docs/3-limiti-e-dipendenze.md` | Limits, dependencies, comparison with ORIGO on manufacturers |
-| `docs/approfondimenti/` | Background reports with sources (English) |
+| `docs/1-how-it-works.md` | The protocol, explained simply, with every case |
+| `docs/2-what-changed.md` | What changed from the original proposal, and why |
+| `docs/3-limits-and-dependencies.md` | Limits, dependencies, comparison with ORIGO on manufacturers |
+| `docs/background/` | Background reports with sources |
 | `proposal/` | The original proposal as received |
-| `contract/` | The contract, its tests and raw output |
-| `prove/` | Supporting evidence: the original under attack, the incentive model, network costs |
-| `impl/mock/`, `slides/` | Demo mock and deck draft |
+| `contract/` | The contract, its tests, the local UMA deployment and raw output |
+| `evidence/` | The original proposal implemented literally and attacked |
+| `impl/mock/`, `slides/` | Demo app mock and deck |
 | `track/` | The brief |
 | `AI_DISCLOSURE.md`, `THIRD_PARTY.md` | Declarations required by the rules |
 
