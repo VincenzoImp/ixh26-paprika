@@ -1,0 +1,12 @@
+{
+  "name": "paprika",
+  "private": true,
+  "type": "commonjs",
+  "description": "Paprika contract on a local Hardhat chain (osaka, P-256 precompile): scenario/attack suite and randomised stateful test",
+  "scripts": { "test": "hardhat test" },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "ethers": "^6.17.0",
+    "hardhat": "^2.29.2"
+  }
+}

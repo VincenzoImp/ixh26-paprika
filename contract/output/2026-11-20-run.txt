@@ -1,0 +1,231 @@
+npm notice run npx
+npm notice run 'hardhat' test
+
+
+  Paprika
+      CASE honest path: owner registers (stake + proof of possession), a relayer submits the device-signed attestation, anyone calls verify | owner pays stake 0.25 + gas 0.000245686612147599; relayer pays gas 0.00010215898898436; verify returns: anchorBlock 3, recordedBlock 4, verdict None, status Active, flaggedAtBlock 0, flagReason None, stake 0.25, recordedBeforeFlag true, stakeAtRisk 0.25, withdrawnAtBlock 0, misusePending false, openClaims 0, reservedForClaims 0.0
+      CASE one pixel changed: verify(sha256 of the modified file, same key): no record for that hash | recordedBlock 0, anchorBlock 0, recordedBeforeFlag false (status Active and stake 0.25 are the key's, not the photo's)
+      CASE misuse proof escrow (honest path): misuse proof flags the key at once; settleStake reverts until 50 blocks have passed, then pays | prover credited 0.125, burned 0.125
+      POSITIVE PATH OK | upheld claim (commit+reveal): claimant net 0.124297975886743714 ETH | rejected claim: device stake 0.25 -> 0.305 | misuse reward collectable only after 50 blocks | withdraw ok, withdrawnAtBlock 75
+    ✔ 0 honest path: register, attest, verify, claims both ways, misuse proof, unbond, withdraw
+      invariant ok: contract 0.305 = stakes 0.305 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK ban-evasion: PRICED | old key: "key used"; new key: 0.25 ETH stake + 146075 gas
+      CASE flagged party returns with a new key: the flagged key cannot register again ("key used"); a fresh key registers like any newcomer | cost 0.25 stake + 0.000147709425140875 gas (146075 gas) per new key
+    ✔ 1 ban evasion
+      invariant ok: contract 0.5 = stakes 0.5 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK synthetic-content: SUCCEEDS | software key registers and attests random bytes
+      ATTACK synthetic-content punished (upheld claim): PRICED | forger loses 0.25 ETH; claimant nets 0.124515862968738556 ETH
+      CASE software key attests synthetic bytes: allowed: a registered software key signs any bytes and the attestation is recorded | no cost beyond stake + gas
+      CASE claim with public evidence, upheld: claimant commits+reveals (bond 0.11); the contract disputes with 0.11 of the device stake; the vote upholds: record UpheldFake, key Flagged (ClaimUpheld), free stake paid out | claimant net +0.124515862968738556 (after gas); owner -0.25; burned 0.07 at 0xdEaD + 0.055 oracle fee to the Store
+    ✔ 2 synthetic content and its punishment
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK front-running (copy attest calldata): FAILS | copied tx records the honest key (status 1), honest tx reverts "exists"
+      ATTACK front-running (same hash, thief's own device): FAILS (nothing to steal) | two independent records, windows [94,95] and [94,95]; no priority field
+      ATTACK front-running (register): FAILS | copied register reverts (PoP bound to msg.sender)
+      ATTACK front-running (copy a pending commitment): FAILS | thief's copy cannot be revealed by the thief ("no commit"), the honest reveal opens the claim; the thief's bond is forfeited (burned)
+      CASE mempool copies (attestation, registration, commitment): copied attestation records the honest key (the honest tx then reverts "exists"); copied registration reverts (proof of possession names msg.sender); copied commitment cannot be revealed by the copier ("no commit"); misuse-proof copy: test 19 | honest parties lose nothing; the copier loses its commit bond 0.11 (burned) + gas
+    ✔ 3 front-running: attest copy, same hash, register copy, commit copy (misuse-proof copy: test 19)
+      invariant ok: contract 0.805 = stakes 0.805 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK self-report-profit: FAILS | 5 misuse self-reports: -0.626346395962276265 ETH; 5 upheld self-claims: -0.629317259720043073 ETH; contract balance 1.0 -> 1.0
+      ATTACK self-slash before any commit: effective penalty: RESIDUAL (by design) | per key 0.125269279192455253 ETH = (1 - 0.5) x 0.25 + gas. Effective penalty = (1 - alpha) x S, not S
+      CASE owner accuses itself: 5 keys flagged by its own sybil via misuse proof, 5 keys via an upheld self-claim; the contract balance is unchanged (no treasury to drain) | owner+sybil net per key: misuse path -0.125269279192455253, claim path -0.125863451944008614 (incl. gas); total -0.626346395962276265 and -0.629317259720043073
+    ✔ 4 self-report loop; effective penalty (1 - alpha) x S (49ms)
+      invariant ok: contract 1.0 = stakes 1.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK double-dip / order of upheld claims: FAILS | two claims upheld; the later-committed one settled first and waited (credit 0.165), the earlier-committed one took the reward share 0.305 ETH; the later one got only its oracle payout (bond + half the device bond), no stake share; 2nd claim on a record with an open claim: rejected, bond credited back; claim after the slash: rejected (refund); other refund 0.22
+      CASE two upheld claims on one key: the claim committed first takes the stake share even if settled second; the other gets only its oracle payout; a 2nd claim on a record with an open claim is refunded | earlier-committed claimant credited 0.305, later 0.165, refunds 0.22 (bonds 0.11 each)
+    ✔ 4b double rewards; first upheld by COMMIT order takes the stake
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      CASE false claim against an honest device, rejected: the owner does nothing; the contract contests with its stake; the vote rejects; the device stays Active | claimant -0.110453068003624544 (bond + gas); owner +0.055 added to its stake; 0.055 oracle fee to the Store
+      ATTACK griefing unwatched: FAILS | owner did nothing; forced vote rejects; griefer -0.110453068003624544 ETH, owner +0.055 ETH (stake); griefing factor -0.498. Needs an honest vote
+    ✔ 5 griefing an honest device (unwatched)
+      invariant ok: contract 0.305 = stakes 0.305 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      CASE 100 earlier records after a flag: 100 records, then one judged fake: the key is flagged; every earlier record is still returned | 100/100 with recordedBlock > 0, recordedBeforeFlag true, verdict None
+      ATTACK retroactive-censorship: FAILS | 100/100 earlier records kept with recordedBeforeFlag=true; judged photo marked UpheldFake
+    ✔ 6 retroactive effect: 100 earlier records (132ms)
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK replay/domain/anchor: FAILS | "exists", "bad sig", "bad sig", "anchor", "anchor"
+      CASE replay, other key, other chain, stale or future anchor: all rejected | "exists", "bad sig", "bad sig", "anchor", "anchor"; no ETH moves
+    ✔ 7 replay / domain / anchors
+      invariant ok: contract 0.5 = stakes 0.5 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      CASE admin or treasury: no admin, owner, upgrade or sweep function; plain ETH from anyone but the oracle is refused | state-changing functions: assertionResolvedCallback, attest, claimCredit, commitClaim, forfeitCommit, proveKeyMisuse, register, requestUnbond, revealClaim, settleStake, withdraw; ETH: "only oracle"
+      ATTACK admin / treasury drain: FAILS | functions: assertionResolvedCallback, attest, claimCredit, commitClaim, forfeitCommit, proveKeyMisuse, register, requestUnbond, revealClaim, settleStake, withdraw; ETH from non-oracle: "only oracle"
+    ✔ 8 no admin
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      CASE claim against a photo the device never attested: reveal reverts "no record" (nothing to contest); the commit expires and anyone forfeits it | claimant loses its bond 0.11 (burned) + gas; owner 0
+      CASE key squatting: registering someone else's public key without its signature: "bad pop" | no ETH moves
+      ATTACK key-squatting / unattested claim: FAILS | "bad pop"; reveal "no record" (the commit is then forfeited)
+    ✔ 9 key squatting; claim on an unattested photo
+      invariant ok: contract 0.25 = stakes 0.25 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK withdraw races: FAILS | open claim: "open claims"; right after the claim settled: "claim grace" for 100 blocks; escrowed misuse (flagged during unbonding): "not retired"
+      CASE withdraw races: withdraw with an open claim: "open claims"; right after the claim settles: "claim grace" for 100 blocks; key flagged during unbonding: "not retired" | the stake stays until the rules allow it
+      CASE owner withdraws after unbonding, nobody claimed: requestUnbond, 30 days, withdraw; a later claim is refunded (nothing left to contest) | owner got back 0.25 (net of gas 0.249959580999717067); late claimant refunded 0.11; verify after: anchorBlock 1140, recordedBlock 1141, verdict None, status Retired, flaggedAtBlock 0, flagReason None, stake 0.0, recordedBeforeFlag true, stakeAtRisk 0.0, withdrawnAtBlock 1144, misusePending false, openClaims 0, reservedForClaims 0.0
+      ATTACK exit after the challenge window (10c): BY DESIGN (optimistic finality) | stakeAtRisk 0.25 -> 0.0, withdrawnAtBlock 0 -> 1144; forger got 0.25 ETH back; late claim rejected, bond refunded
+    ✔ 10 withdrawal races; 10c optimistic finality
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK signature-malleability: FAILS (harmless) | "exists", "bad sig"
+      CASE high-s twin signatures: rejected (low-s rule) | attest twin: "exists"; misuse twin: "bad sig"; no ETH moves
+    ✔ 11 signature malleability
+      invariant ok: contract 0.25 = stakes 0.25 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      CASE misuse proof while an earlier claim is open: the claim was committed first: it has priority on the stake | claimant credited 0.235, prover 0.0
+      ATTACK sniping an open claim: FAILS | hunter reward 0.235, misuse prover 0.0
+      ATTACK misuse proof after a rejected open claim: PAID TO PROVER | prover 0.1525 ETH
+      CASE misuse proof after a rejected earlier claim: the claim loses, so the prover is next in line | prover 0.1525 (half of the stake incl. the 0.055 won from the rejected claimant)
+      ATTACK self-slash in the SAME block as an opaque commit (12b): = 12c RESIDUAL (ties go to the prover) | commit and misuse proof both in block 1275; the claim has priority only if its commit block is EARLIER: prover 0.07 ETH, hunter net 0.054484602997343031 ETH (oracle split only), forger+sybil recovered 0.069716311 of 0.25. The forger cannot tell which device the commit targets; reacting to every commit is just the 12c strategy
+      CASE owner self-slashes in the same block as an opaque commit: ties go to the misuse proof (same as self-slashing before any commit) | owner+sybil recovered 0.069716311 of 0.25; hunter net 0.054484602997343031
+      CASE owner self-slashes after a claim was committed: the claim (earlier commit block) keeps priority; the self-slash buys nothing | hunter credited 0.235, net 0.124552517996867626; prover 0.0; the 0.25 stake is lost in full; owner+sybil spend a further 0.000094563000661941 (gas)
+      ATTACK sniping via self-slash after the commit (12b'): FAILS | revealed claim (commit block earlier than proof) takes priority: hunter reward 0.235, net 0.124552517996867626; prover 0.0; forger+sybil net -0.000094563000661941 (full stake lost)
+      ATTACK self-slash before any commit (12c): RESIDUAL (by design) | prover (forger's sybil) gets 0.14 x 0.5 of the free stake; forger+sybil recovered 0.069876834999137845 of its 0.25 stake (with no later claim it would recover (alpha) x S = 0.125, i.e. lose (1 - alpha) x S); a late hunter's claim still reserved a bond from the stake and nets 0.054552517996867626 ETH from the oracle split, no stake share
+      CASE owner self-slashes before anyone accuses it: its sybil proves misuse first; a hunter who commits later only wins the oracle split | owner+sybil recovered 0.069876834999137845 of the 0.25 stake (net -0.180123165000862155, gas incl.; 0.125 recovered if nobody claims); later hunter net 0.054552517996867626; burned 0.07 at 0xdEaD + 0.055 oracle fee
+    ✔ 12 reward sniping: open claim, hidden commit, self-slash before any commit
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK stolen honest key -> misuse flag: SUCCEEDS (accepted, custody risk) | thief earns 0.125 ETH after the escrow window
+      CASE proof of key misuse / stolen key of an honest owner: whoever holds the key flags it at once; the reward is escrowed (settleStake "not settleable" for 50 blocks) and then paid; the earlier record stays, marked recorded before the flag | prover/thief +0.125 (credit before the window 0.0); owner -0.25; burned 0.125; earlier record: anchorBlock 1452, recordedBlock 1453, verdict None, status Flagged, flaggedAtBlock 1454, flagReason KeyMisuse, stake 0.0, recordedBeforeFlag true, stakeAtRisk 0.0, withdrawnAtBlock 0, misusePending false, openClaims 0, reservedForClaims 0.0
+      CASE many claims against one device: each open claim reserves 0.11 of free stake: 2 fit in 0.25, the 3rd is refunded; withdraw waits for the votes ("open claims") | claimant loses 0.11 per rejected claim (half to the device stake, half oracle fee)
+      ATTACK spam claims vs withdrawal: PRICED | 2 claims opened (stake 0.25 / bond 0.11), 3rd rejected, refunded; withdraw "open claims" until voted; griefer loses 0.11 per rejected claim
+    ✔ 13 stolen honest key; several claims per device
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK claim-slot squatting, one weak claim: FAILS | hunter's claim opens next to the forger's (stake 0.25 = 2 bond slots of 0.11)
+      CASE owner fills its own claim slots: sybil claims fill both slots, so a real claim is refunded; the owner settles them and tries to withdraw in the same block: "claim grace"; the real claim then opens and is upheld | owner+sybil net -0.221676297005861912 (whole stake lost); hunter net 0.179072517998421136; what it buys: delay only, at 0.055 per slot per vote (0.11 per period for 2 slots)
+      ATTACK claim-slot squatting, all slots filled, same-block exit: FAILS | settle/settle/withdraw/hunter-reveal in one block: statuses 1/1/0/1 - withdraw reverts "claim grace" (needs 100 blocks after the last settlement), the hunter's reveal opens a claim (slots free again) and is upheld. Forger+sybil net -0.221676297005861912 ETH (full stake lost + 2 weak bonds' net), hunter net 0.179072517998421136 ETH. Squatting now buys delay only: 0.055 ETH per slot per vote period (k = 2 slots at S=0.25, B=0.11 -> 0.11 per period) and the forger can never withdraw without a 100-block period with no open claim
+    ✔ 14 claim-slot squatting: partial and full
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK commit-reveal mechanics: AS DESIGNED | reveal by another account: "no commit"; wrong salt: "no commit"; same block as commit: status 0 (reverts "too early"); after 50 blocks: "too late"; forfeit before window: "window open"; forfeit burns 0.11 ETH, twice: "no commit"; second hunter on the same record: rejected, 0.11 ETH credited back (not queued)
+      CASE claim never revealed / revealed late: not revealed within 50 blocks: reveal "too late"; anyone may then forfeit the commit (before: "window open"); reveal in the commit block: "too early" | claimant loses the bond 0.11 (burned); owner 0
+      CASE two claimants on the same record: the second reveal is refunded (not queued) | refund 0.11
+    ✔ 15 commit-reveal mechanics
+      invariant ok: contract 0.305 = stakes 0.305 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK signature hygiene: FAILS (all rejected) | high-s capture/PoP/misuse: "bad sig"/"bad pop"/"bad sig"; B's sig over a message naming A, as B / as A: "bad sig"/"bad sig"; A's sig with B's keyId: "bad sig"; cross-domain PoP->capture "bad sig", PoP->misuse "bad sig", capture->misuse "bad sig", misuse->capture "bad sig", capture->PoP "bad pop", misuse->PoP "bad pop"
+      CASE signature reuse across keys, domains and chains: high-s, a signature naming another key, and every signature type at every other entry point: all rejected | no ETH moves
+      ATTACK message layouts: NO COLLISION | preimage bytes REGISTER 120 (16+32+20+32+20), CAPTURE 163 (15+32+20+32+32+32), EXTRACTED 121 (17+32+20+32+20); labels diverge at byte 8 (R/C/E), none is a prefix of another; signature-taking functions: attest(bytes32 photoHash, uint256 anchorBlock, bytes32 keyId, bytes sig); proveKeyMisuse(bytes32 keyId, bytes sig); register(bytes32 x, bytes32 y, bytes popSig) - none takes a digest
+    ✔ 16 signature hygiene: low-s, keyId binding, cross-domain reuse, layouts
+      invariant ok: contract 0.75 = stakes 0.75 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK claimant that refuses ETH: CANNOT BLOCK SETTLEMENT | settleAssertion succeeds (status 1); device stake settled, reserved 0.0; the refusing claimant is credited 0.235 ETH and only its own collect() fails ("send") - nobody else is blocked
+      CASE claimant that cannot receive ETH: its claim is upheld and settled normally; it is credited; only its own collect() fails | credited 0.235; settleAssertion status 1; device stake settled; nobody else blocked
+      ATTACK oracle with UMA's real bond interface (ERC-20, not payable): STATED LIMIT | revealClaim reverts against a non-payable oracle; the contract takes the bond in native ETH and the vote path is tested against a mock only
+      CASE free vs reserved stake: verify reports the winnable free stake and the stake locked for open claims separately | 2 open claims: stakeAtRisk 0.03, reservedForClaims 0.22
+      ATTACK free vs reserved stake: REPORTED SEPARATELY | verify reports stakeAtRisk (free, winnable) 0.03 and reservedForClaims (locked at the oracle) 0.22
+      CASE every decision on a key is logged: one Flagged event per decision, flaggedAtBlock stays the first | 3 Flagged events
+      ATTACK flag history: LOGGED | 3 Flagged events for one key: [block 1833, ClaimUpheld, first=true] [block 1834, KeyMisuse, first=false] [block 1836, ClaimUpheld, first=false]; flaggedAtBlock stays the first
+      ATTACK block-denominated windows: STATED LIMIT | REVEAL_WINDOW, CLAIM_GRACE and the 256-block anchor are counted in blocks (chain-dependent)
+    ✔ 17 regressions from the independent review
+      invariant ok: contract 0.595 = stakes 0.36 + unpaid rewards 0.235 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      CASE who can register: anyone: register(bytes32 x, bytes32 y, bytes popSig) with the stake; no approval step exists | external functions (exact list): BURN, CLAIM_BOND, CLAIM_GRACE, LIVENESS, MIN_STAKE, REVEAL_WINDOW, REWARD_BPS, UNBONDING_PERIOD, assertionDisputedCallback, assertionResolvedCallback, attest, claimCredit, claims, commitBondsHeld, commitClaim, commits, credit, device, forfeitCommit, inbox, openClaimIds, oracle, proveKeyMisuse, records, register, requestUnbond, revealClaim, settleStake, verify, withdraw; state-changing: assertionResolvedCallback, attest, claimCredit, commitClaim, forfeitCommit, proveKeyMisuse, register, requestUnbond, revealClaim, settleStake, withdraw; verify fields: anchorBlock, recordedBlock, verdict, status, flaggedAtBlock, flagReason, stake, recordedBeforeFlag, stakeAtRisk, withdrawnAtBlock, misusePending, openClaims, reservedForClaims; device fields: owner, status, flagReason, openClaims, stakeSettled, flaggedAtBlock, unbondAt, withdrawnAtBlock, misuseBlock, lastClaimSettledBlock, stake, reserved, best, bestP, x, y
+    ✔ 18 registration takes only (x, y, popSig); the contract has no admin or approval function
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+      ATTACK front-running (copy a pending misuse proof): FAILS | the proof names its sender; the copy (mined first, higher gas price) reverts (status 0, "bad sig"), the original succeeds (status 1)
+      CASE mempool copy of a misuse proof: the copier's tx is mined first and reverts ("bad sig": the signed message names the prover); the original flags the key and is paid after 50 blocks | prover +0.125 (net of gas 0.124782271999799786); copier -0.000116016 (gas only)
+    ✔ 19 front-running a misuse proof: a copied proof is useless
+      invariant ok: contract 0.0 = stakes 0.0 + unpaid rewards 0.0 + unrevealed commit bonds 0.0; oracle open bonds 0.0 = 2 x reserved
+
+  Paprika randomised stateful test
+      FUZZ seed 1: 5000 steps in 68.4 s, 0 invariant violations; steps with >= 1 Active device 4948; keys used 175 (151 slot rotations); records 359, commits 512, claims opened 88 (settled 88); device status counts (1 Active, 2 Flagged, 3 Retired): {"1":13,"2":98,"3":64}; ETH conserved: in 109997.440277198640691198 = held+out+burned 109997.231158290176858849 + gas 0.209118908463832349
+        action          ok   revert   top revert reasons
+        attest          359     923   not active x767, anchor x89, bad sig x41, exists x26
+        claimCredit     120     101   nothing x101
+        commit          512      31   bond x31
+        forfeit         112      12   window open x12
+        mine            282       0   
+        misuse           81      15   already misuse x11, bad sig x4
+        register        175     111   key used x54, stake x31, bad pop x26
+        reveal          298     243   too late x99, no record x74, no commit x70
+        settle           88       4   dvm pending x4
+        settleStake      36     120   not settleable x120
+        unbond          118      25   not owner x15, not active x10
+        vote             88       0   
+        warp            231       0   
+        withdraw         60     231   unbonding x128, nothing x37, not retired x31, not owner x31
+    ✔ seed 1, 5000 steps (68412ms)
+      FUZZ seed 2: 5000 steps in 68.6 s, 0 invariant violations; steps with >= 1 Active device 4908; keys used 155 (131 slot rotations); records 433, commits 501, claims opened 112 (settled 112); device status counts (1 Active, 2 Flagged, 3 Retired): {"1":6,"2":70,"3":79}; ETH conserved: in 109968.772537704151514747 = held+out+burned 109968.55590060163505504 + gas 0.216637102516459707
+        action          ok   revert   top revert reasons
+        attest          433     867   not active x661, anchor x106, exists x54, bad sig x46
+        claimCredit     108     116   nothing x116
+        commit          501      19   bond x19
+        forfeit         104       9   window open x9
+        mine            295       0   
+        misuse           57      20   already misuse x11, bad sig x7, unknown x2
+        register        155     134   key used x96, bad pop x21, stake x17
+        reveal          287     190   too late x106, no commit x49, no record x35
+        settle          112      15   dvm pending x15
+        settleStake      17     155   not settleable x155
+        unbond          111      40   not owner x26, not active x14
+        vote            112       0   
+        warp            247       0   
+        withdraw         68     268   unbonding x175, not retired x33, nothing x30, not owner x28
+    ✔ seed 2, 5000 steps (68626ms)
+      FUZZ seed 3: 5000 steps in 73.3 s, 0 invariant violations; steps with >= 1 Active device 4948; keys used 178 (154 slot rotations); records 466, commits 522, claims opened 109 (settled 108); device status counts (1 Active, 2 Flagged, 3 Retired): {"1":18,"2":93,"3":67}; ETH conserved: in 109938.312280015609710938 = held+out+burned 109938.091194535062112585 + gas 0.221085480547598353
+        action          ok   revert   top revert reasons
+        attest          466     758   not active x560, anchor x110, bad sig x49, exists x39
+        claimCredit     113     116   nothing x116
+        commit          522      25   bond x25
+        forfeit          96      11   window open x11
+        mine            324       0   
+        misuse           70      18   already misuse x8, bad sig x8, unknown x2
+        register        178     133   key used x85, stake x32, bad pop x16
+        reveal          286     193   too late x106, no commit x51, no record x36
+        settle          108       9   dvm pending x9
+        settleStake      24     160   not settleable x160
+        unbond          107      29   not owner x24, not active x5
+        vote            108       0   
+        warp            226       0   
+        withdraw         62     293   unbonding x197, not retired x35, not owner x26, nothing x24
+    ✔ seed 3, 5000 steps (73312ms)
+      FUZZ seed 4: 5000 steps in 73.6 s, 0 invariant violations; steps with >= 1 Active device 4886; keys used 186 (162 slot rotations); records 427, commits 463, claims opened 115 (settled 114); device status counts (1 Active, 2 Flagged, 3 Retired): {"1":16,"2":101,"3":69}; ETH conserved: in 109899.930073949036768483 = held+out+burned 109899.705551131465108771 + gas 0.224522817571659712
+        action          ok   revert   top revert reasons
+        attest          427     866   not active x696, anchor x98, bad sig x39, exists x33
+        claimCredit     121     115   nothing x115
+        commit          463      24   bond x24
+        forfeit         105       5   window open x5
+        mine            281       0   
+        misuse           84      11   bad sig x7, already misuse x3, unknown x1
+        register        186     108   key used x57, stake x34, bad pop x17
+        reveal          294     217   too late x89, no record x71, no commit x57
+        settle          114      16   dvm pending x16
+        settleStake      23     154   not settleable x154
+        unbond          118      41   not owner x33, not active x8
+        vote            114       0   
+        warp            207       0   
+        withdraw         63     273   unbonding x182, not retired x38, not owner x31, nothing x20
+    ✔ seed 4, 5000 steps (73636ms)
+      FUZZ seed 5: 5000 steps in 67.7 s, 0 invariant violations; steps with >= 1 Active device 4965; keys used 166 (142 slot rotations); records 396, commits 492, claims opened 103 (settled 103); device status counts (1 Active, 2 Flagged, 3 Retired): {"1":13,"2":80,"3":73}; ETH conserved: in 109869.134430545439764669 = held+out+burned 109868.920092115939395673 + gas 0.214338429500368996
+        action          ok   revert   top revert reasons
+        attest          396     874   not active x725, anchor x76, bad sig x40, exists x33
+        claimCredit     125     108   nothing x108
+        commit          492      31   bond x31
+        forfeit         105      17   window open x17
+        mine            279       0   
+        misuse           66      21   already misuse x14, bad sig x5, unknown x2
+        register        166     100   key used x61, stake x21, bad pop x18
+        reveal          309     211   too late x106, no record x55, no commit x50
+        settle          103      17   dvm pending x17
+        settleStake      30     153   not settleable x153
+        unbond          121      32   not owner x25, not active x7
+        vote            103       0   
+        warp            223       0   
+        withdraw         67     251   unbonding x142, not owner x34, not retired x33, nothing x32
+    ✔ seed 5, 5000 steps (67690ms)
+      FUZZ successes across all seeds: attest 2081, claimCredit 587, commit 2490, forfeit 522, mine 1461, misuse 358, register 860, reveal 1474, settle 525, settleStake 130, unbond 575, vote 525, warp 1134, withdraw 320
+    ✔ coverage: every action succeeded at least 50 times across all seeds
+
+
+      GAS Paprika (gasUsed, optimizer 200 runs, hardfork osaka; settle rows = MockArbiter.settleAssertion incl. the callback)
+        register                                 146111
+        attest                                   63980
+        verify (view; eth_estimateGas)           36027
+        commitClaim                              67915
+        revealClaim (assert + auto-dispute)      385165
+        settle upheld (flag + slash)             239036
+        claimCredit                              28602
+        settle rejected                          131343
+        proveKeyMisuse (flag, escrow)            94563
+        settleStake (after window)               68724
+        requestUnbond                            50980
+        withdraw                                 40407
+        forfeitCommit                            39253
+
+      SIZE (non-empty, non-comment lines of Solidity; deployed bytecode bytes)
+        Paprika                   271 lines   12736 bytes
+        MockArbiter                56 lines    3518 bytes
+
+  27 passing (6m)
+
+EXIT 0
