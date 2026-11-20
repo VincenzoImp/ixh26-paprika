@@ -3,7 +3,7 @@
 > Working memory between sessions. Whoever resumes starts here, then checks `date` against the
 > deadlines in `docs/PLAN.md`.
 
-**Last update:** 2026-11-20, about 22:45 CET.
+**Last update:** 2026-11-20, about 23:05 CET.
 **Internal deadline:** 2026-11-21 08:00 CET. **Official submission:** 12:00 CET.
 
 ## Where we are
@@ -47,9 +47,7 @@ started: the team has to choose between this candidate, ORIGO and their combinat
    proof-based revocation.
 2. Whether the vote-based claim path stays in Paprika or is dropped for the smallest sound protocol
    (`docs/DECISIONS.md`, P-06).
-3. Permission to create a GitHub repository for this candidate and to push (not done: creating
-   repositories is reserved to humans).
-4. The open questions for the mentors listed in the sibling repository still apply.
+3. The open questions for the mentors listed in the sibling repository still apply.
 
 ## Environment notes
 
@@ -57,7 +55,7 @@ started: the team has to choose between this candidate, ORIGO and their combinat
   precompile), ethers 6, `nargo` 1.0.0, `bb` 6.0.0, `pdflatex`, Python 3, Docker (screenshots).
   Absent: `forge`, `solc` binary.
 - Each experiment has its own `node_modules` (git-ignored); `npm install` inside the folder.
-- This repository is local only: no remote, nothing pushed.
+- Remote: `VincenzoImp/ixh26-paprika` (private), created by the team at about 23:00.
 
 ## Actions reserved to humans
 

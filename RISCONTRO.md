@@ -37,8 +37,8 @@ via entro le 23:00 circa il piano arriva alle 08:00 senza margine: i tagli vanno
 
 **Stato del repository `crypto2`:** ha le stesse parti di quello di ORIGO (specifica, decisioni,
 nove esperimenti con output grezzo, tre revisioni indipendenti e tre rapporti di giuria, cinque
-rapporti di letteratura, mock con screenshot, bozza del deck, piano con milestone). È solo locale e senza
-commit: non ho creato repository remoti né fatto commit, in attesa di una tua indicazione.
+rapporti di letteratura, mock con screenshot, bozza del deck, piano con milestone). Pubblicato nel repository privato
+`VincenzoImp/ixh26-paprika`.
 
 ---
 
@@ -213,21 +213,39 @@ letteratura: il whitepaper di EIGEN distingue le colpe oggettivamente attribuibi
 soggettive e sulle seconde scrive "we cannot build strong cryptoeconomic guarantees on these". La
 regola di UMA dice la stessa cosa dal lato dell'oracolo.
 
-### 3.4 Costi e reti
+### 3.4 I due contratti finali, congelati
 
-| Operazione | Gas (v2.3) |
-|---|---|
-| Registrazione | 146 mila |
-| Attestazione | 64 mila |
-| Prova di uso improprio | 94 mila |
-| Accusa: impegno, poi rivelazione | 68 mila, poi 385 mila |
+Esito dell'ultima esecuzione completa: 164 test superati su tutte le versioni, nessuno fallito;
+cinque test casuali da 5 semi per 5000 azioni, nessuna violazione degli invarianti.
+
+| | `PaprikaV2_5` (completo) | `PaprikaCore` (minimo) |
+|---|---|---|
+| Che cosa contiene | Tutto: emittenti, deposito, attestazione firmata, prova di uso improprio, accuse con voto in due fasi | Lo stesso senza oracolo, senza accuse e senza voto: la prova di uso improprio paga subito |
+| Dimensione | 341 righe di codice, 16,5 kB | 174 righe di codice, 8,5 kB |
+| Attacchi che spariscono con il voto | — | Accuse false, furto della ricompensa di un'accusa, occupazione degli slot |
+| Che cosa si perde senza il voto | — | Niente agisce più su una foto specifica; una chiave che non trapela non viene mai punita |
+
+**Un'avvertenza onesta su `PaprikaCore`.** Al livello 0 solo il proprietario o un ladro possono
+far scattare il taglio del deposito, quindi lì il deposito non scoraggia quasi nulla: il valore del
+contratto minimo sta nel livello 1, con un emittente di cui chi verifica si fida. È un altro modo
+di dire che la parte solida di Paprika funziona come strato sopra chiavi legate all'hardware, non
+da sola.
+
+### 3.5 Costi e reti
+
+| Operazione | Gas, `PaprikaCore` | Gas, `PaprikaV2_5` |
+|---|---|---|
+| Registrazione, livello 0 / livello 1 | 125 mila / 160 mila | 147 mila / 182 mila |
+| Attestazione | 64 mila | 64 mila |
+| Prova di uso improprio | 62 mila (livello 0), 122 mila (livello 1), pagata subito | 117 mila, più 71 mila per il pagamento successivo |
+| Rivelazione di un'accusa | — | 385 mila |
 
 Il precompile P-256 risponde correttamente su tutte le 12 reti pubbliche provate in sola lettura,
 comprese mainnet e testnet della sidechain EVM di XRPL. Un'attestazione costa circa 0,00006
 dollari su XRPL EVM e circa 0,23 su Ethereum, ai prezzi campionati. UMA è presente ovunque tranne
 che su XRPL EVM: lì il protocollo può girare con le sole contestazioni oggettive.
 
-### 3.5 Dove il meccanismo ha senso
+### 3.6 Dove il meccanismo ha senso
 
 Dalla ricerca su rilevazione e deterrenza (`docs/research/seed/03-…`), con la cautela che nessuno
 ha mai misurato la probabilità che un falso venga scoperto:
@@ -454,8 +472,7 @@ domanda sulla governance.
 | 2 | In quale repository si costruisce | In `crypto` (quello di ORIGO, che ha già remoto, issue e storia), portandovi `p04` e il contratto di Paprika come riferimento |
 | 3 | Il percorso con voto (oracolo) | Fuori dalla demo: resta nella specifica come lavoro futuro, con i limiti dichiarati |
 | 4 | Rete della demo | Deciso da te: una EVM locale di Ethereum, senza reti pubbliche. Con Hardhat basta impostare l'hardfork `osaka` per avere il precompile P-256. La prova su testnet non serve e non è stata fatta |
-| 5 | Creare un repository GitHub per `crypto2` e pubblicarlo | Solo se vuoi conservarlo separato: è un'azione riservata a te |
-| 6 | Livello 0 pubblico (firma diretta) come seconda modalità | Solo se avanza tempo |
+| 5 | Livello 0 pubblico (firma diretta) come seconda modalità | Solo se avanza tempo |
 
 ---
 

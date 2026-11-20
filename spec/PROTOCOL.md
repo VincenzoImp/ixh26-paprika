@@ -5,8 +5,9 @@
 [`../docs/DECISIONS.md`](../docs/DECISIONS.md); the attacks that motivated them are reproduced in
 [`../experiments/p01-paprika-baseline-attacks/`](../experiments/p01-paprika-baseline-attacks/).
 Reference implementation and tests, one contract per revision:
-[`../experiments/p03-paprika-v2-hardened/`](../experiments/p03-paprika-v2-hardened/). §11 lists
-what each revision fixed.
+[`../experiments/p03-paprika-v2-hardened/`](../experiments/p03-paprika-v2-hardened/). The frozen
+contracts are `PaprikaV2_5.sol` (everything below) and `PaprikaCore.sol` (the same without the
+claim path, messages 4–6). §11 lists what each revision fixed.
 
 ## 1. What the protocol claims, and what it does not
 
@@ -129,6 +130,10 @@ Nothing is erased, by anyone.
 | 0 | Self-registered key with stake | Economic guarantee only | Implemented |
 | 1 | Key endorsed by a bonded issuer (device maker) that vouches it is hardware-bound | Level 0 plus the issuer's bond and public track record; a misuse proof is then evidence of extraction, paid in part by the issuer | Implemented (revision v2.4, issuers simulated). A private variant with zero-knowledge proofs is tested in `experiments/p04-combined-critical-path/` |
 | 2 | As level 1, signed at the sensor | Capture inside the trust boundary | Not implemented |
+
+Without the claim path (the minimal contract `PaprikaCore`), a level-0 stake can be slashed only
+by someone who holds the key, that is the owner or a thief: there the stake deters little, and the
+protocol's value rests on level 1.
 
 Anyone can become an issuer by locking the bond, and can endorse software keys of its own. The
 chain does not say which issuers are real device makers: a verifier brings its own list of

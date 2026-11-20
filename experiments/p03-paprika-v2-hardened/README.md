@@ -601,7 +601,14 @@ The reviewer's "what holds" checks (H-1 signature edge cases, H-2 anchors, H-3 o
 | **PaprikaCore** | **174** | **8,493** |
 
 ### Fuzz results (final run)
-FUZZ_FINAL_RESULTS
+**Results.** All runs passed: part A 121 tests, part B 43 tests, 164 in total, 0 failing.
+
+| Fuzz | Seeds × steps | Violations | Keys used per seed | Successes summed over all seeds |
+|---|---|---|---|---|
+| v2.5 | 5 × 5,000 | 0 | 134–156 | issuerRegister 122, issuerTopUp 114, issuerExit 121, issuerWithdraw 80, misuse 336, withdraw 265, settleStake 54, settle 524; every action above 50 |
+| Core | 5 × 5,000 | 0 | 250–295 | attest 2204, register 1350, misuse 818, withdraw 538, unbond 1082, issuerRegister 233, issuerTopUp 256, issuerExit 218, issuerWithdraw 205 |
+
+In both fuzzes ETH was conserved in every seed. The invariants are the same as in v2.4, plus Core's simpler balance formula (`balance == Σ stakes + Σ issuer bonds`).
 
 ### What v2.5 still does not solve
 - **The vote path does not work with real UMA** (R-05: ERC-20 bonds, a governance-mutable minimum bond). It is tested against a mock only.
