@@ -1,0 +1,51 @@
+# Cache of downloaded sources (third-party material: not versioned, re-downloaded with scripts/fetch_sources.sh)
+references/cache/
+
+# Secrets: wallet seeds, tokens. Never in the repository.
+# Keys of SIMULATED subjects (test data, marked TEST ONLY) may instead be versioned:
+# for this reason *.pem and *.key are not ignored wholesale.
+.env
+.env.*
+!.env.example
+secrets/
+wallets/
+
+# Local state of Claude Code
+.claude/settings.local.json
+.claude/worktrees/
+
+# Build artifacts and environments
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+target/
+dist/
+.DS_Store
+# Note: logs, output/ folders and artifacts are NOT ignored wholesale, because the raw outputs
+# of experiments and tests must be versioned. Ignore here, case by case, what is regenerable.
+
+# LaTeX
+paper/**/*.aux
+paper/**/*.bbl
+paper/**/*.blg
+paper/**/*.fdb_latexmk
+paper/**/*.fls
+paper/**/*.out
+paper/**/*.synctex.gz
+paper/**/*.toc
+slides/**/*.aux
+slides/**/*.nav
+slides/**/*.snm
+slides/**/*.out
+slides/**/*.toc
+
+# Scratch space of reviewers and Hardhat build output
+scratch/
+cache/
+artifacts/
+
+# Third-party pages downloaded by experiments (not versioned; the READMEs cite their URLs)
+experiments/p02-uma-oov3-feasibility/output/*.html
+experiments/p02-uma-oov3-feasibility/output/chains.json

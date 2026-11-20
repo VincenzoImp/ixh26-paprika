@@ -1,0 +1,32 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "permissions": {
+    "deny": [
+      "Edit(/track/original/**)",
+      "Write(/track/original/**)",
+      "Edit(/track/slides/**)",
+      "Write(/track/slides/**)",
+      "Read(**/.env)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "Bash(git push * +*)",
+      "Bash(gh repo delete *)",
+      "Bash(gh repo edit *)",
+      "Bash(gh repo archive *)",
+      "Bash(gh repo create *)",
+      "Bash(gh repo rename *)",
+      "Bash(gh gist *)",
+      "Bash(gh release *)",
+      "Bash(gh api -X *)",
+      "Bash(gh api --method *)",
+      "Bash(gh api * -X *)",
+      "Bash(gh api * --method *)"
+    ]
+  }
+}
