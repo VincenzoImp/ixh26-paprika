@@ -1,0 +1,8 @@
+{
+  "name": "p00-p256-precompile-local",
+  "private": true,
+  "type": "commonjs",
+  "description": "Check: does Hardhat's in-process chain expose the P-256 signature precompile (address 0x100), and under which hardfork?",
+  "scripts": { "check": "for hf in osaka prague cancun; do HF=$hf hardhat run check.js; done" },
+  "devDependencies": { "hardhat": "^2.29.2" }
+}
