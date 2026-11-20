@@ -23,6 +23,13 @@ the sibling repository `ixh26-photo-origin`. The team submits one project.
 6. **No hard-coded amounts or durations.** Deposits, bonds and time windows are deployment
    parameters; documents use symbols (`B`, `T_photo`, `T_reveal`, `f`), not numbers.
 7. **All work happens in this repository** and the project is called Paprika.
+8. **The submitted repository shows only the final result.** At the end the tree holds the
+   protocol description, the contracts with tests, the demo app, the slides and the required
+   declarations, and nothing else: no original proposal, no comparison with other candidates, no
+   research notes, no mock-ups, no agent working files. Text is in Simple Technical English:
+   short sentences, active voice, one idea per sentence, the same word for the same thing
+   everywhere. Target layout: `README.md`, `docs/` (protocol, design rationale, limits, demo),
+   `contracts/`, `app/`, `slides/`, `AI_DISCLOSURE.md`, `THIRD_PARTY.md`.
 
 ## Hard constraints
 
