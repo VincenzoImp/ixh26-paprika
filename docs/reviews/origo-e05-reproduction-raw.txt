@@ -1,0 +1,33 @@
+Fri Nov 20 20:25:32 UTC 2026
+time_utc=2026-11-20T20:25:32.236Z node=v26.4.0
+compile ms: 186
+witness ms: 195
+write_vk ms: 479
+prove ms (x3, zero-knowledge, EVM target): 794, 846, 786
+native verify ms: 7
+write_solidity_verifier ms: 2
+size proof: 9536 bytes
+size public_inputs: 192 bytes
+size vk: 1888 bytes
+npm notice run npx
+npm notice run 'hardhat' compile
+Compiled 1 Solidity file successfully (evm target: cancun).
+npm notice run npx
+npm notice run 'hardhat' run spike.js
+time_utc=2026-11-20T20:25:36.774Z hardhat=2.29.2 chainId=31337
+compiled contracts: BaseZKHonkVerifier, CommitmentSchemeLib, Errors, FrLib, Honk, HonkVerificationKey, HonkVerifier, IVerifier, RelationsLib, ZKTranscriptLib
+library RelationsLib: 8252 bytes
+library ZKTranscriptLib: 6049 bytes
+HonkVerifier runtime size: 17623 bytes (EIP-170 limit 24576) | deploy gas: 3862422
+proof: 9536 bytes | public inputs: 6
+on-chain verify(valid proof) -> true | gas (estimate, includes 21000 base + calldata): 4083750
+NEGATIVE tampered public input -> reverted (rejected): execution reverted (unknown custom error)
+NEGATIVE corrupted proof -> reverted (rejected): execution reverted (unknown custom error)
+exit=0
+/bin/bash: line 1: /usr/bin/time: No such file or directory
+/bin/bash: line 1: /usr/bin/time: No such file or directory
+taskset cores=0 bb prove rc=0 wall_ms=4723
+taskset cores=0-3 bb prove rc=0 wall_ms=1560
+taskset cores=0 bb prove rc=0 wall_ms=4723
+taskset cores=0-3 bb prove rc=0 wall_ms=1564
+single-core proof verifies

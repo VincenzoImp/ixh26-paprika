@@ -1,0 +1,8 @@
+{
+  "name": "p04-combined-critical-path",
+  "private": true,
+  "type": "commonjs",
+  "description": "ORIGO zero-knowledge attestation + Paprika-style open bonded admission and objective misuse revocation, one contract, local Hardhat chain (osaka)",
+  "scripts": { "setup-zk": "node lib/setup-zk.js", "test": "hardhat test" },
+  "devDependencies": { "ethers": "^6.17.0", "hardhat": "^2.29.2" }
+}
