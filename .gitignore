@@ -46,6 +46,3 @@ scratch/
 cache/
 artifacts/
 
-# Third-party pages downloaded by experiments (not versioned; the READMEs cite their URLs)
-experiments/p02-uma-oov3-feasibility/output/*.html
-experiments/p02-uma-oov3-feasibility/output/chains.json

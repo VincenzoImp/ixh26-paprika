@@ -1,3 +1,0 @@
-hardfork osaka valid -> 0x0000000000000000000000000000000000000000000000000000000000000001 | tampered -> 0x | gas(estimate incl. 21000 base) 30436
-hardfork prague valid -> 0x | tampered -> 0x | gas(estimate incl. 21000 base) 27370
-hardfork cancun valid -> 0x | tampered -> 0x | gas(estimate incl. 21000 base) 23549

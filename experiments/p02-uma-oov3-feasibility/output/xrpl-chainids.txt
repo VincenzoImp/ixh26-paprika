@@ -1,3 +1,0 @@
-1440000 XRPL EVM Sidechain ['https://rpc.xrplevm.org', 'wss://ws.xrplevm.org']
-1440002 XRPL EVM Sidechain Devnet ['https://rpc.devnet.xrplevm.org', 'wss://ws.devnet.xrplevm.org']
-1449000 XRPL EVM Sidechain Testnet ['https://rpc.testnet.xrplevm.org', 'wss://ws.testnet.xrplevm.org']
