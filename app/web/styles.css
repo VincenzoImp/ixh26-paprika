@@ -123,3 +123,7 @@ footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:2px sol
 #fatal{position:fixed;inset:0;z-index:20;background:var(--paper);display:grid;place-items:center;padding:28px}
 #fatal .card{max-width:640px}
 #fatal pre{background:var(--ink);color:#fff;border-radius:8px;padding:10px 14px;font-size:14px}
+.balance .cr{font-size:10px;font-weight:700;color:#17703f}
+.txlist div{display:flex;justify-content:space-between;gap:10px;border-top:1.5px solid var(--line);padding:2px 0}
+.txlist div:first-child{border-top:0}
+.chip.act-ph{background:var(--c-ph)}.chip.act-ve{background:var(--c-ve)}.chip.act-ac{background:var(--c-ac)}.chip.act-uma{background:var(--c-uma)}

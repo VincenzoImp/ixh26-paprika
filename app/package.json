@@ -4,16 +4,22 @@
   "private": true,
   "type": "module",
   "description": "Paprika demo: device library, chain client library, CLI and local start scripts (local Hardhat chain only)",
-  "engines": { "node": ">=26" },
+  "engines": {
+    "node": ">=26"
+  },
   "scripts": {
     "chain": "node scripts/chain.js",
     "deploy": "node scripts/deploy.js",
     "web": "node scripts/web.js",
     "start": "node scripts/start.js",
     "stop": "node scripts/stop.js",
-    "demo:cli": "node cli.js demo"
+    "demo:cli": "node cli.js demo",
+    "screens": "node e2e/screens.mjs"
   },
   "dependencies": {
     "ethers": "^6.17.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1"
   }
 }

@@ -18,10 +18,10 @@
 
 <!-- Shown instead of the app when the deployment, the library or the chain cannot be reached. -->
 <div id="fatal" class="hidden" data-testid="fatal-message"><div class="card">
-  <h2>Paprika cannot reach the local chain</h2>
+  <h2 data-testid="fatal-title">Paprika cannot reach the local chain</h2>
   <p data-testid="fatal-reason" class="mono"></p>
-  <p>Start the system (local chain, UMA contracts, Paprika contract and this web server) with:</p>
-  <pre>cd app
+  <p data-testid="fatal-howto-text">Start the system (local chain, UMA contracts, Paprika contract and this web server) with:</p>
+  <pre data-testid="fatal-howto">cd app
 npm start</pre>
   <p class="d">Then reload this page.</p>
 </div></div>
@@ -39,9 +39,9 @@ npm start</pre>
   <a href="#verifier" data-v="verifier" class="act-ve" data-testid="tab-verifier">Verifier</a>
   <a href="#accuser" data-v="accuser" class="act-ac" data-testid="tab-accuser">Accuser</a>
  </nav>
- <div class="balances">
-  <div class="balance act-ph"><span class="who">Photographer</span><b data-testid="balance-photographer">…</b><span class="delta" data-testid="delta-photographer"></span></div>
-  <div class="balance act-ac"><span class="who">Accuser</span><b data-testid="balance-accuser">…</b><span class="delta" data-testid="delta-accuser"></span></div>
+ <div class="balances" title="WETH in each wallet. The change is what the last action moved (ETH wrapped into WETH just before paying counts as paid).">
+  <div class="balance act-ph"><span class="who">Photographer</span><b data-testid="balance-photographer">…</b><span class="delta" data-testid="delta-photographer"></span><span class="cr" data-testid="header-credit-photographer"></span></div>
+  <div class="balance act-ac"><span class="who">Accuser</span><b data-testid="balance-accuser">…</b><span class="delta" data-testid="delta-accuser"></span><span class="cr" data-testid="header-credit-accuser"></span></div>
   <div class="balance act-uma"><span class="who">UMA Store</span><b data-testid="balance-store">…</b><span class="delta" data-testid="delta-store"></span></div>
  </div>
  <div class="conn" data-testid="chain-status" title="Local Ethereum chain"><span class="dot" data-testid="chain-dot"></span><span data-testid="chain-label">connecting…</span></div>
