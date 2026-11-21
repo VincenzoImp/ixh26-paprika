@@ -227,6 +227,46 @@ async function edge() {
     !/can still be accused/i.test(detail), detail);
   void R;
 
+  // ---- acceptance-report checks (A-2, A-4, A-7) ----
+  await t("tab-photographer").click();
+  await t("btn-generate-key").click(); await page.waitForTimeout(150); await idle();
+  await must("register key for A-checks", await click("btn-register"));
+
+  // A-2 (minor): two windows vote at the same time: one vote wins, the other gets a plain message, nothing stays stuck.
+  const Q = await attestSample();
+  await must("commit Q", await webCommit(Q));
+  await must("reveal Q", await click("btn-reveal"));
+  const pageB = await freshPage();
+  const [q1, q2] = await Promise.all([click("btn-vote-fake"), click("btn-vote-not-fake", pageB)]);
+  const stillOpen = (await lib.listAccusations(ctx)).some((x) => x.open);
+  const outA = await t("settle-outcome").getAttribute("data-outcome").catch(() => "");
+  const outB = await t("settle-outcome", pageB).getAttribute("data-outcome").catch(() => "");
+  await check("A-2", "simultaneous votes: no raw UMA error, the accusation is decided, both windows show the outcome",
+    !/Revealed data|Cannot commit|coalesce|could not/i.test(q1 + q2) && !stillOpen && !!outA && outA === outB,
+    `window1="${q1}" window2="${q2}" open=${stillOpen} outcomes=${outA}/${outB}`);
+  await pageB.context().close();
+
+  // A-4 (minor): after a refused (empty) file, the previously loaded file is cleared: nothing can be attested by mistake.
+  await t("tab-photographer").click();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "paprika-edge-"));
+  fs.writeFileSync(path.join(dir, "one.bin"), Buffer.from([7]));
+  fs.writeFileSync(path.join(dir, "empty.jpg"), Buffer.alloc(0));
+  await t("input-capture-file").setInputFiles(path.join(dir, "one.bin"));
+  await page.waitForTimeout(150); await idle();
+  await t("input-capture-file").setInputFiles(path.join(dir, "empty.jpg"));
+  await page.waitForTimeout(150); await idle();
+  const refusedMsg = (await t("error-banner").isVisible()) ? await text("error-message") : "";
+  if (refusedMsg) await t("btn-dismiss-error").click();
+  const photoLeft = await page.evaluate(() => !!window.paprikaState.photo);
+  await check("A-4", "an empty file is refused and the previous file is no longer ready to attest",
+    /empty/i.test(refusedMsg) && !photoLeft && !(await t("btn-attest").isEnabled()), `msg="${refusedMsg}" photo kept=${photoLeft}`);
+
+  // A-7 (minor): the timeline survives a reload.
+  const rowsBefore = await t("activity-row").count();
+  await page.reload(); await page.waitForTimeout(600); await idle();
+  const rowsAfter = await t("activity-row").count();
+  await check("A-7", "the timeline is still there after a reload", rowsBefore > 0 && rowsAfter >= rowsBefore, `${rowsBefore} rows before, ${rowsAfter} after`);
+
   // S-3 (major): a second `npm start` on ports already in use must not redeploy over the running demo.
   const before = (await (await fetch(BASE + "/deployment.json")).json()).addresses.paprika;
   const second = spawn(process.execPath, ["scripts/start.js"], { cwd: APP, detached: true, stdio: "ignore", env });

@@ -98,7 +98,10 @@ function proxyRpc(req, res) {
     try { calls = JSON.parse(body.toString("utf8")); } catch { return reply(res, 400, null, -32700, "invalid JSON"); }
     const problem = checkRpc(calls);
     if (problem) return reply(res, 403, null, -32601, problem);
-    forward(Buffer.from(JSON.stringify(calls)), res);   // forward the validated value, re-serialised
+    checkClock(calls).then((bad) => {
+      if (bad) return reply(res, 403, null, -32602, bad);
+      forward(Buffer.from(JSON.stringify(calls)), res);   // forward the validated value, re-serialised
+    }, () => reply(res, 502, null, -32000, "local chain not reachable"));
   });
 }
 
@@ -114,6 +117,57 @@ function checkRpc(calls) {
     if (!RPC_ALLOWED.test(c.method)) return `method not allowed through /rpc: ${c.method}`;
   }
   return "";
+}
+
+// The demo clock may move forward, but not absurdly far: evm_increaseTime and evm_setNextBlockTimestamp are
+// limited to MAX_JUMP seconds after the latest block (a timestamp in the year 5000 would spoil the chain).
+const MAX_JUMP = 30 * 86400;
+async function checkClock(calls) {
+  const list = Array.isArray(calls) ? calls : [calls];
+  const clock = list.filter((c) => c.method === "evm_increaseTime" || c.method === "evm_setNextBlockTimestamp");
+  if (!clock.length) return "";
+  let latest = null;
+  for (const c of clock) {
+    const v = Number(Array.isArray(c.params) ? c.params[0] : NaN);
+    if (!Number.isFinite(v) || v < 0) return `${c.method}: invalid value`;
+    if (c.method === "evm_increaseTime" && v > MAX_JUMP) return `evm_increaseTime: at most ${MAX_JUMP} s per call`;
+    if (c.method === "evm_setNextBlockTimestamp") {
+      if (latest === null) latest = await latestTimestamp();
+      if (v > latest + MAX_JUMP) return `evm_setNextBlockTimestamp: at most ${MAX_JUMP} s after the latest block`;
+    }
+  }
+  return "";
+}
+
+// Timestamp of the latest block, asked directly to the chain.
+function latestTimestamp() {
+  return new Promise((resolve, reject) => {
+    const up = http.request({ host: "127.0.0.1", port: RPC_PORT, path: "/", method: "POST", headers: { "Content-Type": "application/json" } }, (r) => {
+      let data = "";
+      r.on("data", (c) => (data += c));
+      r.on("end", () => { try { resolve(Number(BigInt(JSON.parse(data).result.timestamp))); } catch (e) { reject(e); } });
+    });
+    up.on("error", reject);
+    up.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["latest", false] }));
+  });
+}
+
+// Vote locks: one UMA vote at a time per assertion, across every tab and browser using this server.
+// POST /vote-lock?assertion=<id>&op=acquire|release. A lock expires after VOTE_LOCK_MS.
+const VOTE_LOCK_MS = 60000;
+const voteLocks = new Map();   // assertion id -> expiry time (ms)
+function voteLock(req, res) {
+  const u = new URL(req.url, "http://localhost");
+  const id = String(u.searchParams.get("assertion") || "").toLowerCase();
+  const op = u.searchParams.get("op");
+  res.setHeader("Content-Type", "application/json");
+  if (!/^0x[0-9a-f]{64}$/.test(id)) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "bad assertion id" })); }
+  const now = Date.now();
+  if (op === "release") { voteLocks.delete(id); res.writeHead(200); return res.end(JSON.stringify({ ok: true })); }
+  if ((voteLocks.get(id) || 0) > now) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, busy: true })); }
+  voteLocks.set(id, now + VOTE_LOCK_MS);
+  res.writeHead(200);
+  return res.end(JSON.stringify({ ok: true }));
 }
 
 // Sends a JSON-RPC error answer with an HTTP status (the request never reaches the chain).
@@ -140,6 +194,7 @@ function forward(body, res) {
 // Answers one request: POST /rpc to the chain; GET/HEAD of a file; 404 otherwise. Nothing is cached.
 function handle(req, res) {
   if (req.method === "POST" && req.url.split("?")[0] === "/rpc") return proxyRpc(req, res);
+  if (req.method === "POST" && req.url.split("?")[0] === "/vote-lock") return voteLock(req, res);
   if (req.url.split("?")[0] === "/server-info.json") {   // the real ports, for the page's "start the system" hint
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     return res.end(JSON.stringify({ rpcPort: RPC_PORT, webPort: PORT }));

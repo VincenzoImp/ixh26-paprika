@@ -328,6 +328,22 @@ function renderTimeline() {
   }
   q("timeline-empty").classList.toggle("hidden", S.timeline.length > 0);
   ol.scrollTop = ol.scrollHeight;
+  saveTimeline();
+}
+
+// Keeps the timeline across reloads (per deployment, in this browser). Cleared with the rest on a chain restart.
+function saveTimeline() {
+  if (!S.fingerprint) return;
+  try { localStorage.setItem(storeKey("timeline"), JSON.stringify(S.timeline.slice(-200))); } catch { /* storage full: skip */ }
+}
+function loadTimeline() {
+  try {
+    const t = JSON.parse(localStorage.getItem(storeKey("timeline")) || "[]");
+    if (Array.isArray(t)) {
+      S.timeline = t;
+      S.actionId = Math.max(0, ...t.map((e) => Number(e.actionId) || 0));
+    }
+  } catch { S.timeline = []; }
 }
 
 // Adds a transaction to the timeline entry of the current action.
@@ -744,7 +760,16 @@ function renderCaptureControls() {
 
 // Loads photo bytes for capture (camera still, file or sample image). Refuses an empty file; warns on a non-image.
 async function loadCapturePhoto(bytes, type, name, fromCamera = false) {
-  if (!bytes.length) throw new Error("This file is empty (0 bytes): nothing to attest.");
+  if (!bytes.length) {   // refused: also drop the previously loaded photo, so the next click cannot attest it
+    S.photo = null;
+    const box = q("capture-preview");
+    for (const el of box.querySelectorAll("img,video,.tag,.nopreview")) el.remove();
+    q("capture-placeholder").classList.remove("hidden");
+    q("capture-result-box").classList.add("hidden");
+    setText("capture-file-name", "");
+    renderCaptureControls();
+    throw new Error("This file is empty (0 bytes): nothing to attest. Choose another photo.");
+  }
   S.photo = { bytes, type, name, fromCamera, already: false };
   const box = q("capture-preview");
   showImage(box, bytes, type);
@@ -949,7 +974,17 @@ async function doRevoke() {
 
 // Loads a file into the Verifier tab and checks it. Refuses an empty file; warns on a non-image.
 async function loadVerifyFile(bytes, type, name, prevHash = "") {
-  if (bytes && !bytes.length) throw new Error("This file is empty (0 bytes): there is nothing to verify.");
+  if (bytes && !bytes.length) {   // refused: clear the previous file and verdict too
+    S.verify = null;
+    for (const el of q("verify-dropzone").querySelectorAll("img,.nopreview")) el.remove();
+    q("verify-placeholder").classList.remove("hidden");
+    setText("verify-file-name", "No file yet.");
+    const box = q("verify-status");
+    box.className = "verdict idle"; box.dataset.state = "idle";
+    setText("verify-seal", "?"); setText("verify-title", "Drop a file to verify it"); setText("verify-detail", "SHA-256 of the file, then a read of the contract.");
+    for (const id of ["verify-record", "verify-shows", "verify-other-records", "verify-attesters", "verify-hash-compare"]) q(id).classList.add("hidden");
+    throw new Error("This file is empty (0 bytes): there is nothing to verify.");
+  }
   S.verify = { bytes, type, name, hash: "", records: [], prevHash };
   if (bytes) {
     showImage(q("verify-dropzone"), bytes, type);
@@ -1296,12 +1331,27 @@ async function doVote(fakeProven) {
   };
   const already = "This accusation was already decided (in another window or by the CLI). Its outcome is shown below.";
   if (await decidedElsewhere()) throw new Error(already);
+  // One vote at a time per assertion, across tabs and browsers: a lock kept by this page's server.
+  const lock = (op) => fetch(`/vote-lock?assertion=${a.assertionId}&op=${op}`, { method: "POST" }).then((r) => r.status).catch(() => 200);
+  let got = (await lock("acquire")) === 200;
+  if (!got) {
+    setText("busy-indicator", "Another tab is running the vote on this accusation: waiting for it…");
+    for (let i = 0; i < 60 && !got; i++) {
+      await new Promise((res) => setTimeout(res, 500));
+      if (await decidedElsewhere()) throw new Error(already);
+      got = (await lock("acquire")) === 200;
+    }
+    if (!got) throw new Error("A vote is still running on this accusation in another tab. Wait a moment, then reload the page.");
+    if (await decidedElsewhere()) { await lock("release"); throw new Error(already); }   // the other tab finished it
+  }
   let r;
   try {
     r = await S.lib.umaVote(S.ctx, a.assertionId, fakeProven, { onPhase });
   } catch (e) {
     if (await decidedElsewhere()) throw new Error(already);
-    throw new Error(/coalesce/i.test(errText(e)) ? "The vote did not go through: the assertion changed meanwhile. Reload the page to see its state." : errText(e));
+    throw new Error("The vote did not go through: a vote on this accusation was running elsewhere (another tab or the CLI). Press the button again to finish it.");
+  } finally {
+    await lock("release");
   }
   for (const n of order) if (q(`vote-phase-${n}`).className !== "done") phaseState(n, "done");
   a.voteTxs = r?.txHashes || [];
@@ -1581,9 +1631,10 @@ function fatal(reason, title, howtoText, howto, retry = true) {
   q("fatal-message").classList.remove("hidden");
   // The start command with this instance's real ports (the server tells them).
   if (retry && !howto) fetch("/server-info.json", { cache: "no-store" }).then((r) => r.json()).then(({ rpcPort, webPort }) => {
-    const vars = [rpcPort !== 8545 ? `RPC_PORT=${rpcPort}` : "", webPort !== 5173 ? `WEB_PORT=${webPort}` : ""].filter(Boolean).join(" ");
-    setText("fatal-howto", `cd app\n${vars ? vars + " " : ""}npm start`);
-    setText("fatal-howto-text", `Start this instance (chain on port ${rpcPort}, web on port ${webPort}) with:`);
+    // This page is served, so the web server runs: only the chain (and the deployment on it) must come back.
+    const v = rpcPort !== 8545 ? `RPC_PORT=${rpcPort} ` : "";
+    setText("fatal-howto", `cd app\n${v}npm run chain      # in one terminal\n${v}npm run deploy     # then, in another`);
+    setText("fatal-howto-text", `The web server (port ${webPort}) is running; start the chain on port ${rpcPort} and deploy on it:`);
   }).catch(() => {});
   // Retry by itself: reload when the server answers with a deployment whose contract exists on the chain.
   if (retry) setInterval(async () => {
@@ -1665,6 +1716,8 @@ async function main() {
   explainIntro();
   q("input-evidence").value = defaultEvidence();
   await loadDevice();
+  loadTimeline();
+  renderTimeline();
   try { const s = localStorage.getItem(storeKey("acc")); if (s) S.acc = fromJson(s); } catch { S.acc = null; }
   S.lib.onActivity(S.ctx, onTx);
   await run("Reading the chain", async () => {}, { tx: false });

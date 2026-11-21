@@ -91,3 +91,10 @@ Buttons are disabled while an action runs (`busy-indicator` visible) and wheneve
 | `settle-accuser`, `settle-depositor`, `settle-store` | Money moved (measured) |
 | `settle-formula-*`, `settle-expected-*` (`accuser`, `depositor`, `store`), `settle-check` ("Measured on chain = expected by the rule ✓") | Rule, expected amounts, self-check |
 | `credit-accuser`, `credit-photographer`, `btn-withdraw-accuser`, `btn-withdraw-photographer`, `btn-accuse-verify`, `vote-tx` (hidden) | Credits and next actions |
+
+## Notes (acceptance fixes)
+
+- The timeline (`activity-log-table`) is kept per deployment in this browser and restored after a reload.
+- A refused (empty) file clears the previously loaded photo: `btn-attest` is then disabled.
+- Votes are serialised per assertion by the server (`POST /vote-lock`); a second window waits, then shows the outcome.
+- A non-image file shows a "No preview" note (class `nopreview`) in `capture-preview` / `verify-dropzone`.

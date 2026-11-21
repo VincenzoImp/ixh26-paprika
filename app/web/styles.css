@@ -189,3 +189,5 @@ td.mono,td .chip{white-space:nowrap}
 @media (max-width:1100px){header{position:static}}
 .card h2 .status{text-transform:none;letter-spacing:0;font-size:13px}
 .summary{font-size:20px}
+.summary span{white-space:nowrap}
+.nopreview{position:absolute;inset:0;display:grid;place-items:center;background:#f2f0ea;font-size:14px;font-weight:700;padding:20px;text-align:center}

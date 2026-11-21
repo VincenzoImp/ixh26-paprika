@@ -143,7 +143,14 @@ export async function changeOnePixel(bytes, type) {
 
 // Shows image bytes inside a preview box (replacing any earlier image or video in it).
 export function showImage(box, bytes, type) {
-  for (const el of box.querySelectorAll("img,video")) el.remove();
+  for (const el of box.querySelectorAll("img,video,.nopreview")) el.remove();
+  if (type && !/^image\//.test(type)) {   // not an image: a note instead of a broken-image icon
+    const d = document.createElement("div");
+    d.className = "nopreview";
+    d.textContent = `No preview: not an image (${type}, ${bytes.length} byte${bytes.length === 1 ? "" : "s"})`;
+    box.appendChild(d);
+    return;
+  }
   const img = document.createElement("img");
   img.src = URL.createObjectURL(new Blob([bytes], { type: type || "image/jpeg" }));
   img.alt = "photo";
