@@ -7,7 +7,7 @@ import path from "node:path";
 import { APP_DIR, WEB_DEPLOYMENT_FILE, WEB_HOST, WEB_PORT, serverEnv, writePid } from "./common.js";
 
 if (!["127.0.0.1", "localhost", "::1"].includes(WEB_HOST)) {
-  console.warn(`WARNING: HOST=${WEB_HOST}: the page and its /rpc relay (unlocked Hardhat accounts) are reachable from other machines.`);
+  console.warn(`WARNING: HOST=${WEB_HOST}: the page and its demo controls (faucet, vote, clock) are reachable from other machines.`);
 }
 const server = path.join(APP_DIR, "server.js");
 if (!fs.existsSync(server)) {

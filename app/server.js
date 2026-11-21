@@ -6,17 +6,27 @@
 //   /            -> app/web/            (the page, its scripts and styles)
 //   /lib/...     -> app/lib/            (the shared Paprika library, ES modules)
 //   /vendor/...  -> node_modules/ethers/dist/   (the browser ES module build of ethers)
-//   POST /rpc    -> forwarded to the local chain's JSON-RPC (http://127.0.0.1:RPC_PORT, default 8545)
-// The page talks only to its own origin, so one port serves everything and the app also works from another
-// machine. It never serves files outside the three folders. /rpc forwards only the JSON-RPC methods the page uses.
-// WARNING: the chain's accounts are unlocked, so anyone who can reach /rpc can act as any demo account. Keep the
-// default 127.0.0.1 and use an SSH tunnel from another computer; the server prints a warning when exposed.
+//   POST /rpc    -> relayed to the local chain's JSON-RPC (http://127.0.0.1:RPC_PORT, default 8545): reads and
+//                   eth_sendRawTransaction only (RPC_ALLOWED below). Transactions arrive SIGNED by the user's own
+//                   wallet (the page's key or MetaMask); the server never holds a user key and never asks the node
+//                   to sign (eth_sendTransaction, eth_accounts, personal_*, eth_sign*, evm_*, hardhat_*: 403).
+//                   CORS is open on /rpc only, so a wallet extension such as MetaMask can use it as its RPC URL.
+//   /demo/...    -> the demo controls of the LOCAL chain, run here because they belong to third parties, not the
+//                   user: POST /demo/faucet (test ETH from the operator), POST /demo/vote + GET /demo/vote/status
+//                   (the UMA voters vote; polled for progress), POST /demo/advance (the chain clock). They sign with
+//                   the operator and voter keys of Hardhat's public test mnemonic (lib/demo-keys.js), which never
+//                   leave this process, and refuse anything but a local Hardhat chain.
+// The page talks only to its own origin, so one port serves everything. It never serves files outside the three
+// folders (and never lib/demo-keys.js). Keep the default HOST=127.0.0.1 and use an SSH tunnel from another computer:
+// the demo endpoints give test ETH and move the clock for anyone who can reach them.
 
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { advanceTime, connect, requestTestFunds, umaVote, onActivity } from "./lib/paprika.js";
+import { demoKeys } from "./lib/demo-keys.js";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.WEB_PORT || process.env.PORT || 5173);
@@ -31,9 +41,16 @@ function deploymentFile() {
   return path.join(APP_DIR, "web", "deployment.json");
 }
 
-// JSON-RPC methods the page needs (reads, transactions from the unlocked demo accounts, the demo clock).
+// JSON-RPC methods relayed by /rpc: what ethers and MetaMask need for reads, gas and fees, and signed transactions.
+// Everything else is refused with 403, in particular eth_sendTransaction / eth_accounts / eth_requestAccounts
+// (signing by the node), personal_*, eth_sign*, evm_*, hardhat_*, debug_*.
 const RPC_MAX_BYTES = 1024 * 1024;   // /rpc body size limit (the page sends small requests)
-const RPC_ALLOWED = /^(eth_|net_version$|web3_clientVersion$|evm_increaseTime$|evm_setNextBlockTimestamp$|evm_mine$)/;
+const RPC_ALLOWED = new Set([
+  "eth_chainId", "net_version", "web3_clientVersion", "eth_blockNumber", "eth_getBlockByNumber", "eth_getBlockByHash",
+  "eth_getBalance", "eth_getCode", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_gasPrice",
+  "eth_maxPriorityFeePerGas", "eth_feeHistory", "eth_getLogs", "eth_getTransactionByHash", "eth_getTransactionReceipt",
+  "eth_sendRawTransaction", "eth_getStorageAt", "eth_syncing",
+]);
 
 // Content types by file extension. Unknown extensions are served as raw bytes.
 const MIME = {
@@ -77,6 +94,7 @@ function resolveFile(urlPath) {
   else [root, rest] = [ROOTS.web, urlPath === "/" ? "index.html" : urlPath.slice(1)];
   if (!root) return null;
   const file = path.resolve(root, rest);
+  if (root === ROOTS.lib && path.basename(file) === "demo-keys.js") return null;   // Node-only keys module
   if (file !== root && !file.startsWith(root + path.sep)) return null;   // blocks "../" escapes
   return file;
 }
@@ -98,10 +116,7 @@ function proxyRpc(req, res) {
     try { calls = JSON.parse(body.toString("utf8")); } catch { return reply(res, 400, null, -32700, "invalid JSON"); }
     const problem = checkRpc(calls);
     if (problem) return reply(res, 403, null, -32601, problem);
-    checkClock(calls).then((bad) => {
-      if (bad) return reply(res, 403, null, -32602, bad);
-      forward(Buffer.from(JSON.stringify(calls)), res);   // forward the validated value, re-serialised
-    }, () => reply(res, 502, null, -32000, "local chain not reachable"));
+    forward(Buffer.from(JSON.stringify(calls)), res);   // forward the validated value, re-serialised
   });
 }
 
@@ -114,42 +129,9 @@ function checkRpc(calls) {
   if (list.length > 100) return "batch too large";
   for (const c of list) {
     if (!isReq(c)) return "not a JSON-RPC request object";
-    if (!RPC_ALLOWED.test(c.method)) return `method not allowed through /rpc: ${c.method}`;
+    if (!RPC_ALLOWED.has(c.method)) return `method not allowed through /rpc: ${c.method}`;
   }
   return "";
-}
-
-// The demo clock may move forward, but not absurdly far: evm_increaseTime and evm_setNextBlockTimestamp are
-// limited to MAX_JUMP seconds after the latest block (a timestamp in the year 5000 would spoil the chain).
-const MAX_JUMP = 30 * 86400;
-async function checkClock(calls) {
-  const list = Array.isArray(calls) ? calls : [calls];
-  const clock = list.filter((c) => c.method === "evm_increaseTime" || c.method === "evm_setNextBlockTimestamp");
-  if (!clock.length) return "";
-  let latest = null;
-  for (const c of clock) {
-    const v = Number(Array.isArray(c.params) ? c.params[0] : NaN);
-    if (!Number.isFinite(v) || v < 0) return `${c.method}: invalid value`;
-    if (c.method === "evm_increaseTime" && v > MAX_JUMP) return `evm_increaseTime: at most ${MAX_JUMP} s per call`;
-    if (c.method === "evm_setNextBlockTimestamp") {
-      if (latest === null) latest = await latestTimestamp();
-      if (v > latest + MAX_JUMP) return `evm_setNextBlockTimestamp: at most ${MAX_JUMP} s after the latest block`;
-    }
-  }
-  return "";
-}
-
-// Timestamp of the latest block, asked directly to the chain.
-function latestTimestamp() {
-  return new Promise((resolve, reject) => {
-    const up = http.request({ host: "127.0.0.1", port: RPC_PORT, path: "/", method: "POST", headers: { "Content-Type": "application/json" } }, (r) => {
-      let data = "";
-      r.on("data", (c) => (data += c));
-      r.on("end", () => { try { resolve(Number(BigInt(JSON.parse(data).result.timestamp))); } catch (e) { reject(e); } });
-    });
-    up.on("error", reject);
-    up.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["latest", false] }));
-  });
 }
 
 // Vote locks: one UMA vote at a time per assertion, across every tab and browser using this server.
@@ -170,10 +152,122 @@ function voteLock(req, res) {
   return res.end(JSON.stringify({ ok: true }));
 }
 
+// ------------------------------------------------------------------ demo controls (local chain only)
+
+// A read-write ctx for the demo controls, rebuilt when the deployment file changes. It signs with the operator and
+// voter keys (lib/demo-keys.js); it has no user wallet.
+let demoCtx = null, demoCtxKey = "";
+function getDemoCtx() {
+  const file = deploymentFile();
+  const st = fs.statSync(file);
+  const key = `${file}:${st.mtimeMs}`;
+  if (!demoCtx || demoCtxKey !== key) {
+    const deployment = JSON.parse(fs.readFileSync(file, "utf8"));
+    demoCtx = connect({ rpcUrl: `http://127.0.0.1:${RPC_PORT}`, deployment, demoKeys: demoKeys(deployment) });
+    demoCtxKey = key;
+  }
+  return demoCtx;
+}
+
+// One demo operation at a time: the operator and the voters sign with plain wallets, so their nonces must not race.
+let demoQueue = Promise.resolve();
+function enqueue(fn) {
+  const p = demoQueue.then(fn, fn);
+  demoQueue = p.catch(() => {});
+  return p;
+}
+
+// Reads a small JSON body (at most 64 kB).
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (c) => { data += c; if (data.length > 65536) { reject(Object.assign(new Error("body too large"), { status: 413 })); req.destroy(); } });
+    req.on("end", () => { try { resolve(data ? JSON.parse(data) : {}); } catch { reject(Object.assign(new Error("invalid JSON"), { status: 400 })); } });
+    req.on("error", reject);
+  });
+}
+function sendJson(res, status, obj) {
+  if (res.headersSent) return;
+  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(obj, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+}
+// Maps a library error to an HTTP status: refusals the user can act on are 409, a non-local chain is 403.
+function statusOf(e) {
+  if (e.status) return e.status;
+  if (/not a local Hardhat chain/.test(e.message)) return 403;
+  if (/cannot reach the local chain/.test(e.message)) return 502;
+  return 409;
+}
+
+const FAUCET_INTERVAL_MS = 10000;
+const faucetLast = new Map();   // address (lowercase) -> time of the last grant (ms)
+const MAX_JUMP = 30 * 86400;    // the demo clock moves at most 30 days per request
+const voteJobs = new Map();     // assertion id (lowercase) -> { state, phases, activity, result, error, code, at }
+
+async function demoRoute(req, res, route) {
+  try {
+    if (req.method === "POST" && route === "/demo/faucet") {
+      const { address } = await readJson(req);
+      if (!/^0x[0-9a-fA-F]{40}$/.test(String(address))) return sendJson(res, 400, { error: "address must be 0x + 40 hex characters" });
+      const k = address.toLowerCase();
+      const wait = (faucetLast.get(k) || 0) + FAUCET_INTERVAL_MS - Date.now();
+      if (wait > 0) return sendJson(res, 429, { error: `test ETH was just sent to this address: try again in ${Math.ceil(wait / 1000)} s` });
+      faucetLast.set(k, Date.now());
+      const ctx = getDemoCtx();
+      const activity = [];
+      const off = onActivity(ctx, (a) => activity.push(a));
+      try {
+        const r = await enqueue(() => requestTestFunds(ctx, address));
+        return sendJson(res, 200, { txHash: r.txHash, amount: r.amount, activity });
+      } catch (e) { faucetLast.delete(k); throw e; } finally { off(); }
+    }
+    if (req.method === "POST" && route === "/demo/vote") {
+      const { assertionId, fakeProven } = await readJson(req);
+      if (!/^0x[0-9a-fA-F]{64}$/.test(String(assertionId))) return sendJson(res, 400, { error: "assertionId must be 0x + 64 hex characters" });
+      const k = assertionId.toLowerCase();
+      if (voteJobs.get(k)?.state === "running") {
+        return sendJson(res, 409, { error: "a vote on this accusation is already running (another tab or the CLI): wait a few seconds", code: "VOTE_IN_PROGRESS" });
+      }
+      const job = { state: "running", phases: [], activity: [], result: null, error: null, code: null, at: Date.now() };
+      voteJobs.set(k, job);
+      const ctx = getDemoCtx();
+      enqueue(async () => {
+        const off = onActivity(ctx, (a) => job.activity.push(a));
+        try {
+          job.result = await umaVote(ctx, assertionId, Boolean(fakeProven), { onPhase: (ph) => job.phases.push(ph) });
+          job.state = "done";
+        } catch (e) {
+          job.state = "error"; job.error = e.message; job.code = e.code || null;
+        } finally { off(); }
+      });
+      for (const [id, j] of voteJobs) if (j.state !== "running" && Date.now() - j.at > 600000) voteJobs.delete(id);
+      return sendJson(res, 202, { assertionId, state: "running" });
+    }
+    if (req.method === "GET" && route === "/demo/vote/status") {
+      const id = String(new URL(req.url, "http://localhost").searchParams.get("assertionId") || "").toLowerCase();
+      const job = voteJobs.get(id);
+      if (!job) return sendJson(res, 404, { error: "no vote started for this assertion on this server" });
+      return sendJson(res, 200, job);
+    }
+    if (req.method === "POST" && route === "/demo/advance") {
+      const { seconds, force } = await readJson(req);
+      const s = Number(seconds);
+      if (!Number.isFinite(s) || s < 0) return sendJson(res, 400, { error: "seconds must be a number >= 0" });
+      if (s > MAX_JUMP) return sendJson(res, 400, { error: `at most ${MAX_JUMP} s per request` });
+      const ctx = getDemoCtx();
+      const r = await enqueue(() => advanceTime(ctx, s, { force: Boolean(force) }));
+      return sendJson(res, 200, r);
+    }
+    return sendJson(res, 404, { error: `unknown demo endpoint: ${req.method} ${route}` });
+  } catch (e) {
+    return sendJson(res, statusOf(e), { error: e.message, code: e.code || null });
+  }
+}
+
 // Sends a JSON-RPC error answer with an HTTP status (the request never reaches the chain).
 function reply(res, status, id, code, message) {
   if (res.headersSent) return;
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
   res.end(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }));
 }
 
@@ -181,11 +275,11 @@ function reply(res, status, id, code, message) {
 function forward(body, res) {
   const up = http.request({ host: "127.0.0.1", port: RPC_PORT, path: "/", method: "POST",
     headers: { "Content-Type": "application/json" } }, (r) => {
-    res.writeHead(r.statusCode || 502, { "Content-Type": r.headers["content-type"] || "application/json", "Cache-Control": "no-store" });
+    res.writeHead(r.statusCode || 502, { "Content-Type": r.headers["content-type"] || "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
     r.pipe(res);
   });
   up.on("error", (e) => {
-    res.writeHead(502, { "Content-Type": "application/json" });
+    res.writeHead(502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
     res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message: `local chain not reachable on port ${RPC_PORT}: ${e.code || e.message}` } }));
   });
   up.end(body);
@@ -193,7 +287,14 @@ function forward(body, res) {
 
 // Answers one request: POST /rpc to the chain; GET/HEAD of a file; 404 otherwise. Nothing is cached.
 function handle(req, res) {
-  if (req.method === "POST" && req.url.split("?")[0] === "/rpc") return proxyRpc(req, res);
+  const route = req.url.split("?")[0];
+  if (route === "/rpc" && req.method === "OPTIONS") {   // CORS preflight (wallet extensions)
+    res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "content-type", "Access-Control-Max-Age": "600" });
+    return res.end();
+  }
+  if (req.method === "POST" && route === "/rpc") return proxyRpc(req, res);
+  if (route.startsWith("/demo/")) return demoRoute(req, res, route);
   if (req.method === "POST" && req.url.split("?")[0] === "/vote-lock") return voteLock(req, res);
   if (req.url.split("?")[0] === "/server-info.json") {   // the real ports, for the page's "start the system" hint
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -240,8 +341,8 @@ server.listen(PORT, HOST, () => {
   for (const h of hosts) console.log(`Paprika web UI: http://${h}:${PORT}/`);
   console.log(`Deployment served at /deployment.json: ${deploymentFile()}`);
   if (!["127.0.0.1", "localhost", "::1"].includes(HOST)) {
-    console.warn(`\nWARNING: HOST=${HOST} exposes this server beyond this machine. Through /rpc, anyone who can reach it can`);
-    console.warn("send transactions as any demo account (the chain's accounts are unlocked) and move the chain clock.");
+    console.warn(`\nWARNING: HOST=${HOST} exposes this server beyond this machine. Anyone who can reach it can use the demo`);
+    console.warn("controls (test ETH from the faucet, the UMA vote, the chain clock). User keys are never on the server.");
     console.warn("Browsers also disable WebCrypto and the camera on plain http from another address, so the page will not");
     console.warn(`work there anyway. Prefer the default HOST=127.0.0.1 and, on the other computer: ssh -N -L ${PORT}:127.0.0.1:${PORT} <user>@<this-host>\n`);
   }

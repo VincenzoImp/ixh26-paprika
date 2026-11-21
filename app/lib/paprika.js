@@ -1,9 +1,11 @@
 // Paprika client library: every on-chain action of the demo, for the CLI (Node) and the web UI (browser).
 //
-// It talks to a LOCAL Hardhat node over JSON-RPC with ethers 6 and sends transactions from Hardhat's default
-// unlocked accounts (eth_sendTransaction: the node holds the keys, this code holds none). Roles:
-//   operator = account 0 (deployer; settles UMA assertions), photographer = 1, accuser = 2,
-//   voters = accounts 3, 4, 5 (they hold staked UMA voting tokens and vote in UMA's VotingV2).
+// It talks to a LOCAL Hardhat node over JSON-RPC with ethers 6. As on a real network, every user action is signed
+// CLIENT-SIDE by the user's own wallet: setSigner(ctx, role, signer) with a key kept by the page or the CLI
+// (browserWallet) or an injected wallet such as MetaMask (injectedWallet). No node account is ever unlocked.
+// Roles: photographer and accuser = the users (their own wallets). Third parties, run by the demo server
+// (browser) or directly from Hardhat's well-known keys (Node, lib/demo-keys.js): the operator (faucet, settles
+// UMA assertions) and the UMA voters (accounts 3, 4, 5, holders of staked UMA voting tokens).
 // Deposits and bonds are in WETH (UMA's WETH9): the roles hold ETH and wrap exactly what they need.
 // The contract addresses, parameters, RPC URL and ABIs come from the deployment JSON written by
 // contract/scripts/deploy-local.js (copied to app/web/deployment.json for the browser).
@@ -14,14 +16,9 @@
 import { ethers } from "ethers";
 import { captureMessage, registerMessage, revokeMessage, sha256, toHex, utf8 } from "./device.js";
 
-// Hardhat's well-known default accounts 0..2 (mnemonic "test test ... junk"); used only if the deployment JSON
-// does not list the accounts it minted to. They are public test accounts, not secrets: we never use their keys.
-const HARDHAT_ACCOUNTS = [
-  "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-  "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-  "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
-];
-const ROLES = ["operator", "photographer", "accuser"];
+// Hardhat's well-known account 0 (the operator), used only if the deployment JSON does not name it.
+const HARDHAT_OPERATOR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+const USER_ROLES = ["photographer", "accuser"];
 const STATES = ["none", "attested", "accused", "refunded", "fake"];          // Paprika.State
 const DEVICE_STATUS = ["none", "active", "flagged"];                          // Paprika.Status
 const REASONS = ["none", "fake-proven", "key-revoked"];                       // Paprika.Reason
@@ -32,9 +29,14 @@ const DVM_STATUS = ["NotRequested", "Active", "Resolved", "Future", "ToDelete"];
 
 /**
  * Connects to the node and the deployed contracts. Synchronous (no network call): awaiting it is harmless.
- * deployment = the parsed JSON written by the deploy script.
+ * The ctx is READ-ONLY until setSigner() gives a role its wallet.
+ *   deployment = the parsed JSON written by the deploy script;
+ *   demoKeys   = (Node only) { operator, voters } from lib/demo-keys.js: the demo controls (faucet, vote, clock)
+ *                then run directly on the chain;
+ *   demoUrl    = base URL of the demo server (default in a browser: location.origin): the demo controls then call
+ *                its /demo/* endpoints. Without either, the demo controls throw a clear error.
  */
-export function connect({ rpcUrl, deployment }) {
+export function connect({ rpcUrl, deployment, demoKeys, demoUrl }) {
   if (!deployment?.addresses?.paprika) throw new Error("deployment JSON is missing or has no Paprika address");
   rpcUrl = rpcUrl || deployment.rpcUrl || "http://127.0.0.1:8545";
   const chainId = Number(deployment.chainId ?? 31337);
@@ -43,16 +45,27 @@ export function connect({ rpcUrl, deployment }) {
   // or after evm_mine could return the previous block. A demo must always show fresh state.
   const provider = new ethers.JsonRpcProvider(rpcUrl, chainId, { staticNetwork: true, pollingInterval: 100, cacheTimeout: -1 });
 
-  const known = deployment.accounts || {};
-  const minted = deployment.token?.mintedTo || [];
-  const accounts = {};
-  ROLES.forEach((role, i) => { accounts[role] = ethers.getAddress(known[role] || minted[i] || HARDHAT_ACCOUNTS[i]); });
+  // ctx.accounts: the user roles (null until setSigner), the operator and the UMA voters (third parties).
+  const accounts = {
+    operator: ethers.getAddress(deployment.accounts?.operator || HARDHAT_OPERATOR),
+    photographer: null,
+    accuser: null,
+    voters: (deployment.voters || []).map((v) => ethers.getAddress(v)),
+  };
+  // Demo controls: direct (Node, with the demo keys) or through the demo server (browser).
+  let demo;
+  if (demoKeys) {
+    demo = {
+      mode: "direct",
+      operator: demoKeys.operator.connect(provider),
+      voters: demoKeys.voters.map((w, i) => ({ label: `voter${i + 1}`, address: w.address, signer: w.connect(provider) })),
+    };
+  } else {
+    const base = demoUrl || (typeof location !== "undefined" ? location.origin : null);
+    demo = base ? { mode: "server", baseUrl: base.replace(/\/$/, "") } : { mode: "none" };
+  }
   const signers = {};
-  for (const role of ROLES) signers[role] = new ethers.JsonRpcSigner(provider, accounts[role]);
-  // UMA voters (accounts 3-5): unlocked on the node like the roles; they only sign commitVote / revealVote.
-  const voters = (deployment.voters || []).map((address, i) => ({
-    label: `voter${i + 1}`, address: ethers.getAddress(address), signer: new ethers.JsonRpcSigner(provider, address),
-  }));
+  const voters = demo.mode === "direct" ? demo.voters : [];
 
   const a = deployment.addresses, abis = deployment.abis;
   const p = deployment.parameters;
@@ -61,9 +74,10 @@ export function connect({ rpcUrl, deployment }) {
     chainId,
     deployment,
     provider,
-    signers,
+    signers,     // role -> ethers Signer (set with setSigner)
     accounts,
-    voters,
+    voters,      // direct mode only: [{ label, address, signer }]
+    demo,
     addresses: {
       paprika: a.paprika, oo: a.oo, store: a.store, currency: a.currency, weth: a.weth || deployment.weth || a.currency,
       voting: a.voting || deployment.voting, votingToken: a.votingToken || deployment.votingToken,
@@ -100,10 +114,160 @@ export function onActivity(ctx, callback) {
   return () => ctx.listeners.delete(callback);
 }
 
+// ------------------------------------------------------------------ wallets (client-side signing)
+
+/**
+ * Gives a user role its wallet: any ethers v6 Signer (a Wallet, or a BrowserProvider signer from MetaMask).
+ * Every write function of that role signs with it, client-side. role: "photographer" | "accuser".
+ * Pass null to forget the role's wallet. Returns the signer's address (or null).
+ */
+export async function setSigner(ctx, role, signer) {
+  if (!USER_ROLES.includes(role)) throw new Error(`unknown role "${role}" (use photographer or accuser)`);
+  if (!signer) { delete ctx.signers[role]; ctx.accounts[role] = null; return null; }
+  const address = ethers.getAddress(await signer.getAddress());
+  ctx.signers[role] = signer;
+  ctx.accounts[role] = address;
+  return address;
+}
+
+/**
+ * A wallet kept by the app itself (a "burner" key, like a mobile wallet's): loads the role's private key from
+ * `storage`, or creates and stores a new one. The key is stored per deployment fingerprint, so a new chain or
+ * deployment gets a new key and an old one is never overwritten. storage = any object with getItem(key) and
+ * setItem(key, value) (window.localStorage in the browser; a file-backed object in the CLI).
+ * Returns { signer, address, isNew }; the signer is connected to ctx's provider. Call setSigner() to use it.
+ */
+export async function browserWallet(ctx, role, { storage } = {}) {
+  if (!USER_ROLES.includes(role)) throw new Error(`unknown role "${role}" (use photographer or accuser)`);
+  if (!storage || typeof storage.getItem !== "function") throw new Error("browserWallet needs a storage with getItem/setItem");
+  const key = `paprika-wallet:${await deploymentFingerprint(ctx)}:${role}`;
+  let pk = await storage.getItem(key);
+  let isNew = false;
+  if (!pk) {
+    pk = ethers.Wallet.createRandom().privateKey;
+    await storage.setItem(key, pk);
+    isNew = true;
+  }
+  const signer = new ethers.Wallet(pk, ctx.provider);
+  return { signer, address: signer.address, isNew };
+}
+
+/**
+ * An injected EIP-1193 wallet (MetaMask): asks for an account, makes sure the wallet is on this chain
+ * (wallet_switchEthereumChain, or wallet_addEthereumChain "Paprika local" with RPC <page origin>/rpc), and returns
+ * { signer, address }. The wallet signs every transaction itself. A refusal in the wallet (code 4001) throws
+ * "request rejected in the wallet". Call setSigner() to use it.
+ */
+export async function injectedWallet(ctx, role, ethereum = globalThis.ethereum) {
+  if (!USER_ROLES.includes(role)) throw new Error(`unknown role "${role}" (use photographer or accuser)`);
+  if (!ethereum?.request) throw new Error("no browser wallet found (install MetaMask, or use the built-in wallet)");
+  const ask = async (method, params) => {
+    try { return await ethereum.request(params ? { method, params } : { method }); } catch (e) {
+      if (e?.code === 4001) throw Object.assign(new Error("request rejected in the wallet"), { code: 4001 });
+      throw e;
+    }
+  };
+  const [address] = await ask("eth_requestAccounts");
+  if (!address) throw new Error("the wallet gave no account");
+  const want = ethers.toQuantity(ctx.chainId);
+  if (String(await ask("eth_chainId")).toLowerCase() !== want) {
+    try {
+      await ask("wallet_switchEthereumChain", [{ chainId: want }]);
+    } catch (e) {
+      if (e?.code === 4001) throw e;
+      // 4902 = unknown chain: add it, pointing the wallet at this page's /rpc relay.
+      const origin = typeof location !== "undefined" ? location.origin : ctx.rpcUrl.replace(/\/rpc$/, "");
+      await ask("wallet_addEthereumChain", [{
+        chainId: want, chainName: "Paprika local",
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        rpcUrls: [typeof location !== "undefined" ? `${origin}/rpc` : ctx.rpcUrl],
+      }]);
+    }
+  }
+  const browser = new ethers.BrowserProvider(ethereum, "any");
+  const signer = await browser.getSigner(address);
+  return { signer, address: ethers.getAddress(address) };
+}
+
+/**
+ * Test ETH for an address, from the operator (local chain only). Browser: POST <demo server>/demo/faucet
+ * { address }; Node with demo keys: the operator sends it directly. Returns { txHash, amount } (amount: bigint wei).
+ * The amount is FAUCET_ETH (5 ETH) or 5 x BOND if larger; refused when the address already holds twice that.
+ */
+export async function requestTestFunds(ctx, address) {
+  address = ethers.getAddress(address);
+  if (ctx.demo.mode === "server") {
+    const r = await demoPost(ctx, "/demo/faucet", { address });
+    emitAll(ctx, r.activity);
+    return { txHash: r.txHash, amount: BigInt(r.amount) };
+  }
+  const operator = demoOperator(ctx);
+  await assertLocalChain(ctx);
+  const amount = faucetAmount(ctx);
+  const held = await read(ctx.provider.getBalance(address));
+  if (held >= 2n * amount) throw new Error(`this address already holds ${ethers.formatEther(held)} ETH: enough for the demo`);
+  let tx;
+  try { tx = await operator.sendTransaction({ to: address, value: amount }); } catch (e) { throw fail(e); }
+  const receipt = await tx.wait();
+  emit(ctx, { blockNumber: receipt.blockNumber, txHash: receipt.hash, call: "Faucet: test ETH from the operator", from: operator.address, role: "operator" });
+  return { txHash: receipt.hash, amount };
+}
+
+/** Test-ETH amount of the faucet (bigint wei). */
+export function faucetAmount(ctx) {
+  const five = ethers.parseEther("5");
+  return 5n * ctx.params.bond > five ? 5n * ctx.params.bond : five;
+}
+
+// The demo controls refuse anything but a local Hardhat chain.
+async function assertLocalChain(ctx) {
+  const id = Number(await read(ctx.provider.send("eth_chainId", [])));
+  const client = String(await read(ctx.provider.send("web3_clientVersion", [])));
+  if (id !== 31337 || !/hardhat/i.test(client)) throw new Error(`demo controls refused: not a local Hardhat chain (chain id ${id}, ${client})`);
+}
+
+function demoOperator(ctx) {
+  if (ctx.demo.mode !== "direct") throw new Error("demo controls are not available here (no demo server and no demo keys)");
+  return ctx.demo.operator;
+}
+
+// POST a JSON body to the demo server; throws its error message (with its code) on a non-2xx answer.
+async function demoPost(ctx, pathname, body) {
+  if (ctx.demo.mode !== "server") throw new Error("demo controls are not available here (no demo server and no demo keys)");
+  let res;
+  try {
+    res = await fetch(ctx.demo.baseUrl + pathname, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch (e) { throw new Error(`cannot reach the demo server (${e.message})`); }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(j.error || `demo server: HTTP ${res.status}`), { code: j.code, status: res.status });
+  return j;
+}
+async function demoGet(ctx, pathname) {
+  const res = await fetch(ctx.demo.baseUrl + pathname, { cache: "no-store" });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(j.error || `demo server: HTTP ${res.status}`), { code: j.code, status: res.status });
+  return j;
+}
+
+// Reports activity items (from this ctx, or relayed by the demo server) to the onActivity listeners.
+function emit(ctx, item) {
+  ctx.activity.push(item);
+  for (const cb of ctx.listeners) {
+    try { cb(item); } catch { /* a broken listener must not break the flow */ }
+  }
+}
+function emitAll(ctx, items) {
+  for (const it of items || []) emit(ctx, it);
+}
+
 // ------------------------------------------------------------------ errors and sending
 
 // Turns an ethers / Hardhat error into the bare revert reason (e.g. "bad sig"), or the shortest useful message.
 function revertReason(e) {
+  if (e?.code === "ACTION_REJECTED" || e?.code === 4001 || e?.info?.error?.code === 4001) return "request rejected in the wallet";
+  if (e?.code === "INSUFFICIENT_FUNDS" || /insufficient funds/i.test(String(e?.message))) {
+    return "not enough ETH in this wallet to pay for the transaction: get test ETH first (faucet)";
+  }
   if (e?.reason) return e.reason;
   if (e?.revert?.args?.length) return String(e.revert.args[0]);
   const texts = [e?.info?.error?.message, e?.error?.message, e?.data?.message, e?.shortMessage, e?.message].filter(Boolean);
@@ -122,10 +286,19 @@ function fail(e) {
   return err;
 }
 
+// The wallet of a role. "operator" is the demo operator (direct mode only); users must have called setSigner.
 function signerOf(ctx, role) {
+  if (role === "operator") return demoOperator(ctx);
+  if (!USER_ROLES.includes(role)) throw new Error(`unknown role "${role}" (use photographer or accuser)`);
   const s = ctx.signers[role];
-  if (!s) throw new Error(`unknown role "${role}" (use photographer, accuser or operator)`);
+  if (!s) throw new Error(`no wallet for the ${role}: connect one first (setSigner)`);
   return s;
+}
+// The address of a role's wallet (throws like signerOf when there is none).
+function addressOf(ctx, role) {
+  if (role === "operator") return demoOperator(ctx).address;
+  signerOf(ctx, role);
+  return ctx.accounts[role];
 }
 
 // Sends one transaction, waits for it to be mined, reports it to onActivity, returns the receipt.
@@ -135,7 +308,7 @@ async function send(ctx, who, contract, method, args, label, overrides) {
   const voter = typeof who === "object" ? who : null;
   const signer = voter ? voter.signer : signerOf(ctx, who);
   const role = voter ? voter.label : who;
-  const from = voter ? voter.address : ctx.accounts[who];
+  const from = voter ? voter.address : addressOf(ctx, who);
   let receipt;
   try {
     const tx = await contract.connect(signer)[method](...args, ...(overrides ? [overrides] : []));
@@ -144,11 +317,7 @@ async function send(ctx, who, contract, method, args, label, overrides) {
     throw fail(e);
   }
   if (!receipt || receipt.status !== 1) throw new Error(`${label} reverted`);
-  const item = { blockNumber: receipt.blockNumber, txHash: receipt.hash, call: label, from, role };
-  ctx.activity.push(item);
-  for (const cb of ctx.listeners) {
-    try { cb(item); } catch { /* a broken listener must not break the transaction flow */ }
-  }
+  emit(ctx, { blockNumber: receipt.blockNumber, txHash: receipt.hash, call: label, from, role });
   return receipt;
 }
 
@@ -158,18 +327,24 @@ async function read(promise) {
 }
 
 // Makes sure `role` can pay one BOND to Paprika: wraps exactly the missing amount of ETH into WETH
-// (WETH9.deposit{value}) and sends approve(BOND) if the allowance is too low. Pushes the tx hashes it sent.
-async function ensureFunds(ctx, role, txHashes) {
+// (WETH9.deposit{value}) and, if the allowance is too low, approves Paprika for MaxUint256 ONCE per account (fewer
+// wallet pop-ups). Pushes the tx hashes it sent into txHashes, and { label, txHash } into labelled.
+async function ensureFunds(ctx, role, txHashes, labelled = []) {
   const { token } = ctx.contracts;
-  const held = await read(token.balanceOf(ctx.accounts[role]));
+  const me = addressOf(ctx, role);
+  const held = await read(token.balanceOf(me));
   if (held < ctx.params.bond) {
-    const r = await send(ctx, role, token, "deposit", [], `${ctx.params.tokenSymbol}.deposit (wrap ETH)`, { value: ctx.params.bond - held });
+    const label = `${ctx.params.tokenSymbol}.deposit (wrap ETH)`;
+    const r = await send(ctx, role, token, "deposit", [], label, { value: ctx.params.bond - held });
     txHashes.push(r.hash);
+    labelled.push({ label, txHash: r.hash });
   }
-  const have = await read(token.allowance(ctx.accounts[role], ctx.addresses.paprika));
+  const have = await read(token.allowance(me, ctx.addresses.paprika));
   if (have >= ctx.params.bond) return;
-  const r = await send(ctx, role, token, "approve", [ctx.addresses.paprika, ctx.params.bond], `${ctx.params.tokenSymbol}.approve`);
+  const label = `${ctx.params.tokenSymbol}.approve (once, unlimited)`;
+  const r = await send(ctx, role, token, "approve", [ctx.addresses.paprika, ethers.MaxUint256], label);
   txHashes.push(r.hash);
+  labelled.push({ label, txHash: r.hash });
 }
 
 // Accepts Uint8Array / ArrayBuffer / Node Buffer and returns a Uint8Array.
@@ -207,7 +382,8 @@ export async function chainInfo(ctx) {
 
 /**
  * WETH balances (bigint) of photographer, accuser, UMA Store and Paprika; also operator and UMA's oracle (oo, which
- * holds both bonds during a vote). `eth` = native ETH balances of the three roles (they pay gas in ETH). Reads only.
+ * holds both bonds during a vote). `eth` = native ETH balances of operator, photographer, accuser (they pay gas in
+ * ETH). The user roles' addresses come from their wallets (setSigner); a role without a wallet reports null.
  */
 export async function balances(ctx) {
   const { token } = ctx.contracts;
@@ -216,10 +392,12 @@ export async function balances(ctx) {
     paprika: ctx.addresses.paprika, oo: ctx.addresses.oo, operator: ctx.accounts.operator,
   };
   const keys = Object.keys(who);
-  const values = await read(Promise.all(keys.map((k) => token.balanceOf(who[k]))));
+  // A role without a wallet (no setSigner yet) reports null.
+  const values = await read(Promise.all(keys.map((k) => (who[k] ? token.balanceOf(who[k]) : null))));
   const out = Object.fromEntries(keys.map((k, i) => [k, values[i]]));
-  const eth = await read(Promise.all(ROLES.map((r) => ctx.provider.getBalance(ctx.accounts[r]))));
-  out.eth = Object.fromEntries(ROLES.map((r, i) => [r, eth[i]]));
+  const roles = ["operator", ...USER_ROLES];
+  const eth = await read(Promise.all(roles.map((r) => (ctx.accounts[r] ? ctx.provider.getBalance(ctx.accounts[r]) : null))));
+  out.eth = Object.fromEntries(roles.map((r, i) => [r, eth[i]]));
   return out;
 }
 
@@ -283,7 +461,7 @@ export function formatToken(ctx, amount) {
  * possession); sends Paprika.register(x, y, sig) from that account, which becomes the device owner.
  */
 export async function registerDevice(ctx, role, device) {
-  const owner = ctx.accounts[role] ?? signerOf(ctx, role);
+  const owner = addressOf(ctx, role);
   const msg = registerMessage({ chainId: ctx.chainId, contract: ctx.addresses.paprika, keyId: device.keyId, owner });
   const sig = toHex(await device.sign(msg));
   const r = await send(ctx, role, ctx.contracts.paprika, "register", [device.x, device.y, sig], "Paprika.register");
@@ -296,7 +474,7 @@ export async function registerDevice(ctx, role, device) {
  * Paprika.attest(photoHash, anchorBlock, keyId, sig). txHashes lists them in order.
  */
 export async function attestPhoto(ctx, role, device, photoBytes) {
-  signerOf(ctx, role);
+  addressOf(ctx, role);
   // Checks BEFORE spending anything (no wrap, no approve when the attest would revert anyway).
   const bytes = asBytes(photoBytes);
   if (bytes.length === 0) throw new Error("the photo is empty (0 bytes): nothing to attest");
@@ -314,10 +492,12 @@ export async function attestPhoto(ctx, role, device, photoBytes) {
   const msg = captureMessage({ chainId: ctx.chainId, contract: ctx.addresses.paprika, keyId: device.keyId, photoHash, blockHash: anchor.hash });
   const sig = toHex(await device.sign(msg));
   const txHashes = [];
-  await ensureFunds(ctx, role, txHashes);
+  const transactions = [];
+  await ensureFunds(ctx, role, txHashes, transactions);
   const r = await send(ctx, role, ctx.contracts.paprika, "attest", [photoHash, anchor.number, device.keyId, sig], "Paprika.attest");
   txHashes.push(r.hash);
-  return { txHashes, photoHash, keyId: device.keyId, anchorBlock: anchor.number };
+  transactions.push({ label: "Paprika.attest", txHash: r.hash });
+  return { txHashes, transactions, photoHash, keyId: device.keyId, anchorBlock: anchor.number };
 }
 
 /**
@@ -325,7 +505,7 @@ export async function attestPhoto(ctx, role, device, photoBytes) {
  * The device becomes Flagged (reason key-revoked). No money moves.
  */
 export async function revokeKey(ctx, role, device) {
-  const caller = ctx.accounts[role] ?? signerOf(ctx, role);
+  const caller = addressOf(ctx, role);
   const d = await read(ctx.contracts.paprika.devices(device.keyId));
   if (Number(d.status) === 0) throw new Error("this device key is not registered on this chain");
   if (Number(d.status) === 2) throw new Error(`this key is already flagged (${REASONS[Number(d.reason)]}): nothing to revoke`);
@@ -349,7 +529,7 @@ export async function revokeKey(ctx, role, device) {
  * Returns { txHashes, commitment, salt, evidenceHash, warning (string or null) }.
  */
 export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }) {
-  const claimant = ctx.accounts[role] ?? signerOf(ctx, role);
+  const claimant = addressOf(ctx, role);
   if (!String(evidence ?? "").trim()) throw new Error("evidence is required (a text or a URL that shows the photo is not genuine)");
   const rec = await read(ctx.contracts.paprika.verify(photoHash, keyId));
   const state = STATES[Number(rec.state)];
@@ -369,10 +549,12 @@ export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }
   const commitment = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
     ["address", "bytes32", "bytes32", "bytes32", "bytes32"], [claimant, photoHash, keyId, evidenceHash, salt]));
   const txHashes = [];
-  await ensureFunds(ctx, role, txHashes);
+  const transactions = [];
+  await ensureFunds(ctx, role, txHashes, transactions);
   const r = await send(ctx, role, ctx.contracts.paprika, "commitClaim", [commitment], "Paprika.commitClaim");
   txHashes.push(r.hash);
-  return { txHashes, commitment, salt, evidenceHash, warning };
+  transactions.push({ label: "Paprika.commitClaim", txHash: r.hash });
+  return { txHashes, transactions, commitment, salt, evidenceHash, warning };
 }
 
 /**
@@ -484,6 +666,8 @@ async function advanceTo(ctx, ts) {
 const votesRunning = new Map();
 
 export async function umaVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
+  if (ctx.demo.mode === "server") return umaVoteViaServer(ctx, assertionId, fakeProven, { onPhase });
+  if (ctx.demo.mode !== "direct") throw new Error("the UMA vote is run by the demo server or with the demo keys: neither is available here");
   const key = String(assertionId).toLowerCase();
   if (votesRunning.has(key)) {
     await votesRunning.get(key).catch(() => {});
@@ -493,6 +677,27 @@ export async function umaVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
   const run = runVote(ctx, assertionId, fakeProven, { onPhase });
   votesRunning.set(key, run);
   try { return await run; } finally { if (votesRunning.get(key) === run) votesRunning.delete(key); }
+}
+
+// Browser: the voters are third parties, run by the demo server. POST /demo/vote starts the vote (409 + code
+// VOTE_IN_PROGRESS if one already runs for this assertion); GET /demo/vote/status?assertionId=... is polled every
+// 150 ms: { state: "running" | "done" | "error", phases: [{ phase, roundId, txHashes, timestamp }], activity, result,
+// error, code }. onPhase is called for every new phase; the result has the same shape as the direct vote.
+async function umaVoteViaServer(ctx, assertionId, fakeProven, { onPhase } = {}) {
+  await demoPost(ctx, "/demo/vote", { assertionId, fakeProven: Boolean(fakeProven) });
+  let seenPhases = 0, seenActivity = 0;
+  for (;;) {
+    const st = await demoGet(ctx, `/demo/vote/status?assertionId=${encodeURIComponent(assertionId)}`);
+    for (const ph of (st.phases || []).slice(seenPhases)) {
+      if (onPhase) { try { onPhase(ph); } catch { /* UI callback errors are ignored */ } }
+    }
+    seenPhases = (st.phases || []).length;
+    emitAll(ctx, (st.activity || []).slice(seenActivity));
+    seenActivity = (st.activity || []).length;
+    if (st.state === "done") return st.result;
+    if (st.state === "error") throw Object.assign(new Error(st.error || "the UMA vote failed"), { code: st.code });
+    await new Promise((r) => setTimeout(r, 150));
+  }
 }
 
 async function runVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
@@ -661,7 +866,7 @@ export async function forfeitCommitment(ctx, role, commitment) {
 /** Moves all credit of `role` from Paprika to its wallet, as WETH. Sends Paprika.withdrawCredit. Reverts "no credit" if zero. */
 export async function withdrawCredit(ctx, role) {
   const { paprika } = ctx.contracts;
-  if ((await read(paprika.credits(ctx.accounts[role] ?? signerOf(ctx, role)))) === 0n) throw new Error(`no credit to withdraw for the ${role}`);
+  if ((await read(paprika.credits(addressOf(ctx, role)))) === 0n) throw new Error(`no credit to withdraw for the ${role}`);
   const r = await send(ctx, role, paprika, "withdrawCredit", [], "Paprika.withdrawCredit");
   let amount = 0n;
   for (const log of r.logs) {
@@ -680,9 +885,9 @@ export async function wrap(ctx, role, amount) {
 
 /** Unwraps WETH back to ETH: `amount` (bigint), or the role's whole WETH balance if omitted. Sends WETH9.withdraw. */
 export async function unwrap(ctx, role, amount) {
-  const value = amount === undefined || amount === null ? await read(ctx.contracts.token.balanceOf(ctx.accounts[role])) : BigInt(amount);
+  const value = amount === undefined || amount === null ? await read(ctx.contracts.token.balanceOf(addressOf(ctx, role))) : BigInt(amount);
   if (value <= 0n) throw new Error("no WETH to unwrap");
-  const held = await read(ctx.contracts.token.balanceOf(ctx.accounts[role]));
+  const held = await read(ctx.contracts.token.balanceOf(addressOf(ctx, role)));
   if (value > held) throw new Error(`only ${formatToken(ctx, held)} to unwrap`);
   const r = await send(ctx, role, ctx.contracts.token, "withdraw", [value], `${ctx.params.tokenSymbol}.withdraw (unwrap)`);
   return { txHash: r.hash, amount: value };
@@ -696,6 +901,11 @@ export async function unwrap(ctx, role, amount) {
  * jumping far past it makes the request roll (see the deploy script's MAX_ROLLS). Vote first, then advance.
  */
 export async function advanceTime(ctx, seconds, { force = false } = {}) {
+  if (ctx.demo.mode === "server") {
+    const r = await demoPost(ctx, "/demo/advance", { seconds: Number(seconds), force: Boolean(force) });
+    return { timestamp: r.timestamp };
+  }
+  if (ctx.demo.mode !== "direct") throw new Error("the demo clock is moved by the demo server or with the demo keys: neither is available here");
   if (!force) {
     const open = (await listAccusations(ctx)).filter((a) => a.open);
     if (open.length) {

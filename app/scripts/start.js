@@ -95,7 +95,7 @@ try {
     process.exit(1);
   }
   if (!["127.0.0.1", "localhost", "::1"].includes(WEB_HOST)) {
-    console.warn(`WARNING: HOST=${WEB_HOST}: the page and its /rpc relay (unlocked Hardhat accounts) are reachable from other machines.`);
+    console.warn(`WARNING: HOST=${WEB_HOST}: the page and its demo controls (faucet, vote, clock) are reachable from other machines.`);
   }
   if (await rpcAlive()) {
     // A node we did not start: only use it if it is unused (e.g. a fresh `npm run chain`), never a chain that

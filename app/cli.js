@@ -4,6 +4,10 @@
 //
 //   node cli.js <command> [args]          (see `node cli.js help`)
 //
+// Every user action is signed here, client-side, by the role's own key: .state/cli/<id>/photographer.key and
+// accuser.key (created on first use, funded with test ETH from the faucet). The CLI also plays the demo's third
+// parties directly with Hardhat's public test keys (lib/demo-keys.js): the operator (faucet, settlement) and the UMA
+// voters. No node account is ever unlocked.
 // State kept between commands (device key, pending commitments with their salts, last UMA assertion id) lives in
 // app/.state/cli/<id>/ (git-ignored), one folder per deployment fingerprint (chain id + Paprika address + block-1
 // hash). The state of another chain or deployment is never deleted or overwritten.
@@ -15,8 +19,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ethers } from "ethers";
 import { createDevice, exportDevice, importDevice, sha256 } from "./lib/device.js";
+import { demoKeys } from "./lib/demo-keys.js";
 import {
-  advanceTime, attestPhoto, balances, chainInfo, commitAccusation, commitmentStatus, connect, credits,
+  advanceTime, attestPhoto, balances, browserWallet, chainInfo, faucetAmount, requestTestFunds, setSigner, commitAccusation, commitmentStatus, connect, credits,
   deploymentFingerprint, forfeitCommitment, formatToken, listRecords,
   listAccusations, onActivity, refund, registerDevice, revealAccusation, revokeKey, umaVote, unwrap, verifyPhoto, withdrawCredit,
 } from "./lib/paprika.js";
@@ -49,7 +54,9 @@ const HELP = `Paprika CLI (local chain only)
   vote <true|false> [assertionId]          real UMA vote (VotingV2, 3 voters) on the open accusation, then settle
                                            (true = fake proven); the chain clock jumps through the vote phases
   refund <file>                            refund the deposit of <file> (after the challenge period)
-  withdraw <photographer|accuser|operator> withdraw the role's credit from Paprika (as WETH)
+  fund <photographer|accuser>              get test ETH for the role's wallet from the faucet (done automatically
+                                           when a wallet has almost no ETH)
+  withdraw <photographer|accuser>          withdraw the role's credit from Paprika (as WETH)
   unwrap <role> [amount]                   turn the role's WETH back into ETH (all of it by default)
   revoke                                   revoke the saved device key (photographer)
   forfeit [#]                              burn the bond of an expired commitment (not revealed in time)
@@ -153,8 +160,8 @@ const when = (t) => (t ? new Date(t * 1000).toISOString().replace(".000Z", "Z") 
 async function money(ctx) {
   const b = await balances(ctx);
   const c = {
-    "credit photographer": await credits(ctx, ctx.accounts.photographer),
-    "credit accuser": await credits(ctx, ctx.accounts.accuser),
+    "credit photographer": ctx.accounts.photographer ? await credits(ctx, ctx.accounts.photographer) : 0n,
+    "credit accuser": ctx.accounts.accuser ? await credits(ctx, ctx.accounts.accuser) : 0n,
   };
   return {
     photographer: b.photographer, accuser: b.accuser, "UMA Store": b.store, Paprika: b.paprika, "UMA OOv3": b.oo, ...c,
@@ -193,7 +200,10 @@ const commands = {
     console.log(`chain      id ${info.chainId}, block ${info.blockNumber}, time ${when(info.timestamp)}  (${ctx.rpcUrl})`);
     for (const [k, v] of Object.entries(ctx.addresses)) console.log(`${k.padEnd(13)}${v}`);
     console.log(`params     B = ${formatToken(ctx, p.bond)}, challenge period ${p.photoWindow} s, reveal period ${p.revealWindow} s, UMA fee share ${p.feeShare}`);
-    for (const [k, v] of Object.entries(ctx.accounts)) console.log(`${k.padEnd(13)}${v}`);
+    console.log(`photographer ${ctx.accounts.photographer}  (own key: ${path.relative(APP_DIR, path.join(path.dirname(STATE_FILE), "photographer.key"))})`);
+    console.log(`accuser      ${ctx.accounts.accuser}  (own key: ${path.relative(APP_DIR, path.join(path.dirname(STATE_FILE), "accuser.key"))})`);
+    console.log(`operator     ${ctx.accounts.operator}  (demo: faucet, settles UMA assertions)`);
+    console.log(`UMA voters   ${ctx.accounts.voters.join(", ")}`);
     console.log(`device     ${fs.existsSync(DEVICE_FILE) ? (await loadDevice()).keyId : "none (run register)"}`);
     const pending = await refreshCommits(ctx, state);
     if (pending.length) { console.log("pending commitments (reveal with accuse-reveal [#|file]):"); pending.forEach((c, i) => console.log(`  ${describeCommit(c, i)}`)); }
@@ -305,7 +315,7 @@ const commands = {
 
   async withdraw(ctx, args) {
     const role = args[0];
-    if (!["photographer", "accuser", "operator"].includes(role)) throw new Error("usage: withdraw <photographer|accuser|operator>");
+    if (!["photographer", "accuser"].includes(role)) throw new Error("usage: withdraw <photographer|accuser>");
     const r = await withdrawCredit(ctx, role);
     console.log(`Withdrew ${formatToken(ctx, r.amount)} to the ${role}.`);
   },
@@ -342,12 +352,19 @@ const commands = {
     const m = await money(ctx);
     for (const [k, v] of Object.entries(m)) console.log(`  ${k.padEnd(20)} ${formatToken(ctx, v)}`);
     const { eth } = await balances(ctx);
-    for (const [k, v] of Object.entries(eth)) console.log(`  ${("ETH " + k).padEnd(20)} ${ethers.formatEther(v)} ETH`);
+    for (const [k, v] of Object.entries(eth)) console.log(`  ${("ETH " + k).padEnd(20)} ${v === null ? "-" : `${ethers.formatEther(v)} ETH`}`);
+  },
+
+  async fund(ctx, args) {
+    const role = args[0];
+    if (!["photographer", "accuser"].includes(role)) throw new Error("usage: fund <photographer|accuser>");
+    const r = await requestTestFunds(ctx, ctx.accounts[role]);
+    console.log(`Faucet: ${ethers.formatEther(r.amount)} test ETH sent to the ${role} (${ctx.accounts[role]}).`);
   },
 
   async unwrap(ctx, args) {
     const role = args[0];
-    if (!["photographer", "accuser", "operator"].includes(role)) throw new Error("usage: unwrap <role> [amount]");
+    if (!["photographer", "accuser"].includes(role)) throw new Error("usage: unwrap <photographer|accuser> [amount]");
     if (args[1] !== undefined && !(/^\d+(\.\d+)?$/.test(args[1]) && Number(args[1]) > 0)) throw new Error(`amount must be a positive number of WETH, got "${args[1]}"`);
     const r = await unwrap(ctx, role, args[1] ? ethers.parseUnits(args[1], ctx.params.tokenDecimals) : undefined);
     console.log(`Unwrapped ${formatToken(ctx, r.amount)} into ETH for the ${role}.`);
@@ -357,7 +374,40 @@ const commands = {
 };
 
 // Commands whose printed output already includes everything; others print the money that moved.
-const NO_MONEY = new Set(["status", "verify", "balances", "advance", "demo", "help"]);
+const NO_MONEY = new Set(["status", "verify", "balances", "advance", "demo", "help", "fund"]);
+
+// Roles that sign for each command: their wallet gets test ETH first if it has almost none.
+const SIGNS = {
+  register: ["photographer"], attest: ["photographer"], refund: ["photographer"], revoke: ["photographer"],
+  "accuse-commit": ["accuser"], "accuse-reveal": ["accuser"], forfeit: ["accuser"],
+};
+
+// A storage (getItem / setItem) backed by files <dir>/<role>.key, for browserWallet().
+function keyFileStorage(dir) {
+  const file = (key) => path.join(dir, `${key.split(":").pop()}.key`);
+  return {
+    getItem: (key) => (fs.existsSync(file(key)) ? fs.readFileSync(file(key), "utf8").trim() : null),
+    setItem: (key, value) => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file(key), value + "\n", { mode: 0o600 }); },
+  };
+}
+
+// Loads (or creates) the photographer's and the accuser's own keys and gives them to the library.
+async function loadWallets(ctx) {
+  const storage = keyFileStorage(path.dirname(STATE_FILE));
+  for (const role of ["photographer", "accuser"]) {
+    const w = await browserWallet(ctx, role, { storage });
+    await setSigner(ctx, role, w.signer);
+    if (w.isNew) console.log(`New wallet for the ${role}: ${w.address} (key in ${path.relative(APP_DIR, path.join(path.dirname(STATE_FILE), role + ".key"))})`);
+  }
+}
+
+// Gives test ETH to a role's wallet when it holds less than one tenth of a faucet grant.
+async function ensureEth(ctx, role) {
+  const have = await ctx.provider.getBalance(ctx.accounts[role]);
+  if (have >= faucetAmount(ctx) / 10n) return;
+  const r = await requestTestFunds(ctx, ctx.accounts[role]);
+  console.log(`Faucet: ${ethers.formatEther(r.amount)} test ETH sent to the ${role}'s wallet.`);
+}
 
 // ------------------------------------------------------------------ demo (smoke check)
 
@@ -413,12 +463,22 @@ async function runDemoSteps(ctx) {
   let photo1Hash, assertion1;
 
   try {
-    await step("0. Wallets: the roles hold ETH; WETH is wrapped on demand", async () => {
+    await step("0. Wallets: each user signs with its own new key; test ETH from the faucet", async () => {
+      // Fresh keys for this run, signing client-side (never a node account).
+      for (const role of ["photographer", "accuser"]) await setSigner(ctx, role, ethers.Wallet.createRandom().connect(ctx.provider));
+      for (const role of ["photographer", "accuser"]) {
+        const r = await requestTestFunds(ctx, ctx.accounts[role]);
+        console.log(`   ${role.padEnd(12)} ${ctx.accounts[role]}: faucet sent ${ethers.formatEther(r.amount)} ETH (tx ${r.txHash})`);
+      }
       const b = await balances(ctx);
       for (const r of ["photographer", "accuser"]) console.log(`   ${r.padEnd(12)} ${ethers.formatEther(b.eth[r])} ETH, ${formatToken(ctx, b[r])}`);
-      console.log(`   UMA voters: ${ctx.voters.map((v) => v.address).join(", ")} (staked UMA voting tokens)`);
-      check(b.eth.photographer >= 2n * B && b.eth.accuser >= 2n * B, "both roles hold enough ETH to wrap");
+      console.log(`   UMA voters (third parties): ${ctx.voters.map((v) => v.address).join(", ")} (staked UMA voting tokens)`);
+      check(b.eth.photographer === faucetAmount(ctx) && b.eth.accuser === faucetAmount(ctx), "each wallet holds exactly one faucet grant");
+      check(b.photographer === 0n && b.accuser === 0n, "no WETH yet");
       check(ctx.voters.length >= 3, "three UMA voters in the deployment");
+      let again = null;
+      try { await requestTestFunds(ctx, ctx.accounts.photographer); } catch (e) { again = e.message; }
+      console.log(`   faucet again for a funded wallet -> ${again ? `refused: "${again}"` : "sent"}`);
     });
 
     await step("1. Device -> Register (free)", async (before) => {
@@ -597,8 +657,12 @@ async function main() {
   if (!cmd || cmd === "help" || cmd === "--help") { console.log(HELP); process.exit(0); }
   if (!commands[cmd]) { console.error(`Unknown command: ${cmd}\n`); console.error(HELP); process.exit(1); }
   const { deployment, rpcUrl } = loadDeployment();
-  const ctx = connect({ rpcUrl, deployment });
+  // The CLI runs the demo's third parties itself (operator, UMA voters) with Hardhat's public test keys.
+  const ctx = connect({ rpcUrl, deployment, demoKeys: demoKeys(deployment) });
   const state = await loadState(await deploymentId(ctx));
+  await loadWallets(ctx);
+  for (const role of SIGNS[cmd] || []) await ensureEth(ctx, role);
+  if (cmd === "withdraw" || cmd === "unwrap") if (["photographer", "accuser"].includes(args[0])) await ensureEth(ctx, args[0]);
   onActivity(ctx, (a) => { if (cmd !== "demo") console.log(`  tx ${a.txHash}  block ${a.blockNumber}  ${a.role}: ${a.call}`); });
   const before = NO_MONEY.has(cmd) ? null : await money(ctx);
   try {

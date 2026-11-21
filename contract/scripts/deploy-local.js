@@ -2,8 +2,9 @@
 //   UMA's Optimistic Oracle V3 + UMA's DVM (VotingV2, VotingToken, Registry, ...) from @uma/contracts-node
 //   (see lib/deploy-uma-dvm.js), UMA's WETH9 as the bond currency, then Paprika.
 // The voters are Hardhat accounts 3, 4, 5: each gets voting tokens (UMA token) and stakes them in VotingV2.
-// The role accounts (operator 0, photographer 1, accuser 2) get no tokens: they hold Hardhat's test ETH and wrap it
-// into WETH when they need a deposit or a bond.
+// Users (photographer, accuser) are not accounts of this script: they bring their own wallets and get test ETH
+// from the demo faucet. Every transaction here is signed locally with the keys of Hardhat's public test mnemonic
+// (hardhat.config.js, network localhost): operator = index 0, voters = 3, 4, 5. No unlocked node account is used.
 // Writes deployments/local.json with addresses, parameters, accounts and the ABIs a browser needs.
 //
 //   npx hardhat node                                             # terminal 1 (hardfork osaka, chainId 31337)
@@ -42,7 +43,7 @@ async function main() {
   if (MAX_ROLLS < 1n || MAX_ROLLS > 4294967295n) throw new Error("MAX_ROLLS must be between 1 and 4294967295 (uint32)");
 
   const signers = await ethers.getSigners();
-  const [operator, photographer, accuser] = signers;
+  const [operator] = signers;
   const voters = signers.slice(3, 6);
   const uma = await deployUmaWithVoting(hre, {
     finalFee: FINAL_FEE, liveness: LIVENESS, phaseLength: PHASE_LENGTH, voters, stakePerVoter: STAKE, currency: "WETH9",
@@ -69,7 +70,8 @@ async function main() {
     weth,
     voters: uma.voterAddrs,
     phaseLength: Number(PHASE_LENGTH),
-    accounts: { operator: operator.address, photographer: photographer.address, accuser: accuser.address },
+    // The operator only (deployer, faucet, settles assertions). Users bring their own wallets: none is listed here.
+    accounts: { operator: operator.address },
     identifier: uma.identifier,
     parameters: {
       BOND: BOND.toString(), PHOTO_WINDOW: Number(PHOTO_WINDOW), REVEAL_WINDOW: Number(REVEAL_WINDOW), LIVENESS: Number(LIVENESS),
