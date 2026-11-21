@@ -13,7 +13,7 @@ export const BOB_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a8
 export async function installFakeMetaMask(context, rpcUrl, { chainId = 31337 } = {}) {
   const rpc = new ethers.JsonRpcProvider(rpcUrl, undefined, { staticNetwork: true, cacheTimeout: -1, pollingInterval: 100 });
   const wallets = { alice: new ethers.Wallet(ALICE_KEY, rpc), bob: new ethers.Wallet(BOB_KEY, rpc) };
-  const st = { current: "alice", chainId, reject: false, sent: [], pages: [] };
+  const st = { current: "alice", chainId, reject: false, sent: [], pages: [], hold: null };
   const known = new Set([31337]);
   const fail = (code, message) => ({ __error: { code, message } });
 
@@ -34,8 +34,14 @@ export async function installFakeMetaMask(context, rpcUrl, { chainId = 31337 } =
         case "eth_sendTransaction": {
           if (st.chainId !== chainId) return fail(4100, "wrong chain");
           const t = params[0];
-          const sent = await w.sendTransaction({ to: t.to, data: t.data, value: t.value ?? 0, gasLimit: t.gas ?? t.gasLimit });
-          st.sent.push({ hash: sent.hash, from: w.address, account: st.current });
+          // Like MetaMask, the transaction is signed by its "from" account (when it is one of ours), even if the
+          // user selects another account while the confirmation is open.
+          const fromW = t.from ? Object.values(wallets).find((x) => x.address.toLowerCase() === String(t.from).toLowerCase()) : w;
+          if (!fromW) return fail(4100, "The requested account and/or method has not been authorized by the user.");
+          if (st.hold) await st.hold;   // the confirmation stays open until release()
+          if (st.reject) return fail(4001, "User rejected the request.");
+          const sent = await fromW.sendTransaction({ to: t.to, data: t.data, value: t.value ?? 0, gasLimit: t.gas ?? t.gasLimit });
+          st.sent.push({ hash: sent.hash, from: fromW.address, account: Object.keys(wallets).find((k) => wallets[k] === fromW) });
           return sent.hash;
         }
         case "personal_sign": return w.signMessage(ethers.getBytes(params[0]));
@@ -69,6 +75,8 @@ export async function installFakeMetaMask(context, rpcUrl, { chainId = 31337 } =
     async setChain(id) { st.chainId = id; await emitAll("chainChanged", "0x" + id.toString(16)); },
     // Makes the next requests fail as if the user pressed Reject.
     reject(on = true) { st.reject = on; },
+    // Keeps the next confirmations open (as a user who has not clicked yet); returns release().
+    hold() { let release; st.hold = new Promise((r) => { release = () => { st.hold = null; r(); }; }); return release; },
     // Transactions signed since a given count (to check "exactly one signature").
     sentSince(n) { return st.sent.slice(n); },
   };

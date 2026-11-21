@@ -1,0 +1,23 @@
+npm notice run paprika-app@0.1.0 e2e:edge
+npm notice run node e2e/edge.e2e.mjs
+PASS  S-1: /rpc with body null is refused (4xx) and the chain keeps running
+PASS  S-2: /rpc refuses the batch [0, hardhat_setBalance] with 403
+PASS  rpc: invalid JSON gets 400
+PASS  rpc: a body over 1 MB is refused
+PASS  A-4: an empty file is refused and nothing stays ready to attest
+PASS  W-F: Download of a GIF is named .gif
+PASS  W-C: no 'Start a new accusation' while the commitment can be revealed
+PASS  W-C: after a reload the reveal is still offered
+PASS  M-3: the page revealed its own accusation (Y), not X
+PASS  M-3: the vote on Y's page decided Y only
+PASS  M-5: bond credited back on chain
+PASS  M-5: the page says 'Bond returned' and shows no vote
+PASS  A-2: simultaneous votes: no raw UMA error, decided once
+PASS  W-E: reveal not offered at the deadline; forfeit offered instead
+PASS  W-G: dropping 2 files says only the first was verified
+PASS  m-2: revoked key + challenge over: the verdict offers no accusation
+PASS  S-3: a second npm start leaves the running deployment untouched
+PASS  S-4: RPC_PORT=944 npm run stop leaves the chain on 9445 running
+
+18 passed, 0 failed
+exit 0

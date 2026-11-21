@@ -1,0 +1,66 @@
+npm notice run npx
+npm notice run 'hardhat' test
+
+
+  Paprika with real UMA (OOv3 + VotingV2) and WETH9
+      real UMA stack: OOv3 0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1, VotingV2 0x3Aa5ebB10DC797CAC828524e59A333d0A371443c (phase 60 s, 3 voters x 1000000.0 UMA staked, GAT 1500000.0, SPAT 0.5), Store 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512, WETH9 0x0165878A594ca255338adfa4d48449f69242Eb8F
+      identifier ASSERT_TRUTH, minimum bond 1.0 WETH = BOND, burnedBondPercentage 0.5, fee 0.5; PHOTO_WINDOW 604800 s, REVEAL_WINDOW 3600 s
+      CASE honest path (UMA vote): register free, relayer attests and locks BOND, refund after PHOTO_WINDOW + REVEAL_WINDOW; record stays (Refunded, recordedBlock 53) | relayer locked BOND = 1.0 and got it back, net 0
+    ✔ 1 honest path with refund
+      invariant ok: Paprika holds 0.0 = deposits 0.0 + commit bonds 0.0 + credits 0.0; oracle 0.0 for 0 open
+      CASE one pixel changed (UMA vote): attestersOf(modified hash) = [], verify finds no record | state None, recordedBlock 0
+    ✔ 2 one pixel changed
+      invariant ok: Paprika holds 1.0 = deposits 1.0 + commit bonds 0.0 + credits 0.0; oracle 0.0 for 0 open
+      BAL start                    depositor 20.0 | accuser 20.0 | Paprika 1.0 | oracle 0.0 | Store 0.0
+      BAL after attest             depositor 19.0 | accuser 20.0 | Paprika 2.0 | oracle 0.0 | Store 0.0
+      CLAIM Paprika accusation. Question: is the photo with SHA-256 0x821bbc202c9c1a755a66bb05cff6ac555d17b0eeaf66efe4ce8dee1115e18d58, attested with the device key id 0x49565682a7f318c51fbe484387c3ae1c770dacdf1baafeafe553e8cb8c711c81 on chain id 31337 by the Paprika contract 0x7a2088a1bfc9d81c55368ae168c2c02570cb814f, NOT a genuine capture by that device (for example generated, edited, or a copy of an earlier image)? Answer true only if the evidence publicly proves it; otherwise answer false. Evidence SHA-256: 0xee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e. Evidence URL: http://localhost:5173/evidence/ee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e (the file at that URL must hash to the SHA-256 above).
+      BAL after reveal (accused)   depositor 19.0 | accuser 19.0 | Paprika 1.0 | oracle 2.0 | Store 0.0
+      VOTE TRUE (fake proven): round 14965431, 3 commits + 3 reveals + settle, 158 s of chain time
+      BAL after settle (TRUE)      depositor 19.0 | accuser 19.0 (+credit 1.5) | Paprika 2.5 | oracle 0.0 | Store 0.5
+      CASE true accusation (UMA vote): photo Fake, device Flagged (FakeProven) at block 73 | accuser credited 2 x BOND - fee = 1.5 (net +BOND - fee = 0.5); depositor -BOND = -1.0; Store +fee = 0.5
+    ✔ 3 true accusation: commit, reveal (assert + dispute at the real oracle), vote TRUE, settle (40ms)
+      invariant ok: Paprika holds 2.5 = deposits 1.0 + commit bonds 0.0 + credits 1.5; oracle 0.0 for 0 open
+      BAL after reveal (accused)   depositor 19.0 | accuser 19.0 | Paprika 2.5 | oracle 2.0 | Store 0.5
+      VOTE FALSE (rejected): round 14965433, 3 commits + 3 reveals + settle, 229 s of chain time
+      BAL after settle (FALSE)     depositor 19.0 (+credit 0.5) | accuser 19.0 | Paprika 4.0 | oracle 0.0 | Store 1.0
+      CASE false accusation (UMA vote): record back to Attested, device untouched, window extended by the 236 s under accusation; refund afterwards | accuser -BOND = -1.0; depositor +BOND - fee = 0.5 (deposit returned); Store +fee = 0.5
+    ✔ 4 false accusation: vote FALSE, deposit restored, window extended
+      invariant ok: Paprika holds 4.0 = deposits 1.0 + commit bonds 0.0 + credits 3.0; oracle 0.0 for 0 open
+      VOTE FALSE (rejected): round 14970505, 3 commits + 3 reveals + settle, 226 s of chain time
+      VOTE TRUE (fake proven): round 14970507, 3 commits + 3 reveals + settle, 231 s of chain time
+      CASE second accusation while one is open (UMA vote): B's reveal during A's accusation: BondReturned, credit +BOND, A still open; same commitment again: "no commit"; after A is voted false, B commits again and is voted true | B net 0 while waiting, then +BOND - fee = 0.5; photo Fake
+    ✔ 5 second accusation while one is open: bond back, open accusation unaffected, accuse again later (44ms)
+      invariant ok: Paprika holds 7.0 = deposits 1.0 + commit bonds 0.0 + credits 6.0; oracle 0.0 for 0 open
+      VOTE TRUE (fake proven): round 14970509, 3 commits + 3 reveals + settle, 229 s of chain time
+      CASE self-accusation (UMA vote): the forger's second account accuses and wins | net -fee = -0.5
+    ✔ 6 self-accusation loses the oracle fee
+      invariant ok: Paprika holds 8.5 = deposits 1.0 + commit bonds 0.0 + credits 7.5; oracle 0.0 for 0 open
+      CASE key revocation (UMA vote): revocation copied by another address: "bad sig"; holder revokes; revoked device attests: "not active"; its record stays Attested and is refunded | no tokens move at revocation
+    ✔ 7 key revocation
+      invariant ok: Paprika holds 9.5 = deposits 1.0 + commit bonds 0.0 + credits 8.5; oracle 0.0 for 0 open
+      CASE signatures and replay (UMA vote): replay: "exists"; otherKey: "bad sig"; otherChain: "bad sig"; highS: "bad sig"; futureAnchor: "anchor"; popAsCapture: "bad sig"; keyUsed: "key used"; callbackNotOracle: "only oracle"; popFrontRun: "bad sig"; revealByOther: "no commit"; commitReused: "commitment used"; tooLate: "too late" | no tokens move, except the forfeited commit bond (BOND to the burn address)
+    ✔ 8 signature and replay checks
+      invariant ok: Paprika holds 10.5 = deposits 2.0 + commit bonds 0.0 + credits 8.5; oracle 0.0 for 0 open
+      VOTE FALSE (rejected): round 14980680, 3 commits + 3 reveals + settle, 87 s of chain time
+      CASE long clock jump during an open accusation: jump 608400 s (~5070 DVM rounds) with the accusation open: request still Active (maxRolls 4294967295), the vote resolves it, record back to Attested | accuser -BOND = -1.0; depositor credit +BOND - fee, deposit still locked
+    ✔ 9 a long clock jump during an open accusation does not lose the vote
+      invariant ok: Paprika holds 12.0 = deposits 3.0 + commit bonds 0.0 + credits 9.0; oracle 0.0 for 0 open
+
+      GAS with the real contracts (gasUsed; first occurrence)
+        deploy Paprika                                             2812138
+        register                                                   101879
+        attest (P-256 verify + WETH transferFrom)                  167019
+        refund                                                     55937
+        withdrawCredit                                             35437
+        commitClaim                                                86799
+        revealClaim (OOv3 assertTruth + disputeAssertion + VotingV2.requestPrice) 783989
+        VotingV2.commitVote (max of 3)                             231883
+        VotingV2.revealVote (max of 3)                             193821
+        oo.settleAssertion -> Paprika callback (TRUE)              185920
+        oo.settleAssertion -> Paprika callback (FALSE)             161254
+        revokeKey                                                  44167
+
+
+  9 passing (542ms)
+
+exit 0
