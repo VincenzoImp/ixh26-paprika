@@ -2,37 +2,35 @@
 
 ## 1. Paprika (20 s)
 
-We are Team Sexy Plushies. Paprika gives photo origin without manufacturers or a central authority.
-Every photo is a signed claim with money at stake. Anyone can challenge it, and an open vote
-decides.
+We are Team Sexy Plushies. Paprika gives photo origin with no manufacturer and no central
+authority. Every photo is a signed claim with money at stake. Anyone can challenge it, and an open
+vote decides.
 
-## 2. Three weaknesses, three constraints (30 s)
+## 2. Who do you trust? (25 s)
 
-The brief's reference design is Apple's. It has three weaknesses: a single point of failure, where
-a compromised CA invalidates millions of devices; cross-platform lock-in; and retroactive
-censorship. We turned each weakness into a design constraint. There is no single trust root. Any
-device registers and anyone verifies. Records are permanent. Meeting the first constraint means one
-thing: no manufacturer in the trust chain.
+How do we prove that a photo came from a real sensor? The usual answer is hardware keys certified
+by manufacturers. But one compromised manufacturer invalidates millions of devices. We do not
+trust manufacturers. We assume that a fake can be exposed with public evidence, and we make
+exposing it pay.
 
-## 3. How Paprika works (45 s)
+## 3. How Paprika works (50 s)
 
 Alice registers her device key for free. To attest a photo, the device signs the photo hash
-together with a recent block hash, and Alice locks a deposit B. Anyone can verify by hashing the
-file and reading the chain. Bob can challenge the photo with evidence. He commits first, then
-reveals, and locks an equal bond. UMA's open vote decides, and the loser pays the winner. If nobody
-challenges the photo, Alice gets her deposit back.
+together with a recent block hash. The chain checks this P-256 signature, and Alice locks a deposit
+B. Anyone can verify by hashing the file and reading the chain. Bob can challenge the photo. He
+commits first, then reveals, and locks an equal bond. UMA's open vote decides, and the winner takes
+both stakes minus UMA's fee. If nobody challenges within the challenge period, Alice gets B back.
+The block hash fixes a time window, and commit-reveal stops anyone from copying a challenge.
 
-## 4. Why it holds (35 s)
+## 4. Three weaknesses, three constraints (30 s)
 
-No manufacturer or CA approves keys, so there is no root to compromise, and one vote touches only
-one photo. Any P-256 key can register, and anyone can verify with one read call to any node. The
-contract has no owner and no delete function, and every decision is dated on chain. The
-cryptography is concrete. The device signs with P-256, and the chain checks the signature. The
-block hash in the signature fixes a time window. Commit-reveal stops anyone from copying a
-challenge. The key intuition is that origin becomes a claim someone pays for if it is false.
+The brief's reference design has three weaknesses: a single point of failure, cross-platform
+lock-in, and retroactive censorship. Paprika meets the inverse of each. There is no single trust
+root: no manufacturer, no CA and no owner. Any device can register, and anyone can verify. Records
+are permanent, because the contract has no owner and no delete function.
 
-## 5. Demo and close (50 s)
+## 5. Demo and close (45 s)
 
-[Live: take a photo, sign and attest, verify.] The photo is signed, one WETH is at stake, and it is
-open to challenge. That is Paprika and UMA's oracle and voting contracts on a local Ethereum chain.
-Photo origin that no single company can switch off. Thank you.
+[Live: take a photo, sign and attest, verify.] The photo is signed, one WETH is at stake, and anyone
+can challenge it for one hour. This runs Paprika and UMA's oracle and voting contracts on a local
+Ethereum chain. Photo origin that no single company can switch off. Thank you.

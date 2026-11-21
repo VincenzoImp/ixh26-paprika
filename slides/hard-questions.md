@@ -2,6 +2,12 @@
 
 Facts come from `docs/protocol.md`, `docs/design-rationale.md` and `docs/demo.md`.
 
+**How can a fake be exposed if fakes look real?**
+With public evidence, not with the pixels. Examples: the same image was published before block `a`;
+the image is the known output of a generator; the photo re-photographs a known image. UMA's voters
+judge the evidence. Whoever exposes a fake earns the photographer's deposit, so exposing fakes
+pays.
+
 **What does the P-256 signature add over staking money on a hash?**
 It binds the record to a device key: a copied transaction cannot change who signed. The key builds
 a public history that verifiers can read. The block hash inside the signature gives a time window.

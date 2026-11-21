@@ -7,7 +7,7 @@
 | `speaker-notes.md` | About 350 words: a 3-minute talk that includes a short live demo |
 | `hard-questions.md` | Likely questions with short answers |
 
-Slides: 1 Paprika · 2 Three weaknesses, three constraints · 3 How Paprika works · 4 Why it holds ·
+Slides: 1 Paprika · 2 Who do you trust? · 3 How Paprika works · 4 Three weaknesses, three constraints ·
 5 Take a photo, attest, verify (demo, team, AI disclosure).
 
 Facts: `docs/protocol.md`, `docs/design-rationale.md`, `docs/demo.md`. Brief: `track/TRACK.md`.

@@ -65,7 +65,45 @@
 \end{tikzpicture}
 \end{frame}
 
-% ============================================================ 2 Problem -> constraints
+% ============================================================ 2 Who do you trust?
+\begin{frame}[plain]
+\begin{tikzpicture}[remember picture,overlay]
+  \headS{The starting point}{Who do you trust?}
+  \card{9}{32}{40}{27}{sky}{{\tiny\bfseries THE QUESTION}\\[2mm] {\small How do we prove that a photo came from a real sensor?}}
+  \card{57}{32}{42}{27}{peach}{{\tiny\bfseries THE OBVIOUS ANSWER}\\[2mm] {\small Hardware keys, certified by trusted manufacturers.}\\[3mm]
+    {\scriptsize\color{red!70!black} One compromised manufacturer invalidates millions of devices.\par}}
+  \fill[ink,rounded corners=2.5pt] ($(current page.north west)+(107mm,-32.8mm)$) rectangle ++(44mm,-27mm);
+  \draw[ink,line width=1.4pt,rounded corners=2.5pt,fill=mint] \at{107}{32} rectangle ++(44mm,-27mm);
+  \node[anchor=north west,inner sep=0pt,text width=39mm,align=left] at \at{109.5}{34.5}
+    {{\tiny\bfseries PAPRIKA'S ASSUMPTION}\\[2mm] {\small\bfseries We do not trust manufacturers.}\\[1.5mm]
+     {\scriptsize We assume that a fake can be exposed with public evidence --- and we make exposing it pay.\par}};
+  \draw[flow] \at{50}{45.5} -- \at{56}{45.5};
+  \draw[flow] \at{100}{45.5} -- \at{106}{45.5};
+\end{tikzpicture}
+\end{frame}
+
+% ============================================================ 3 How it works
+\begin{frame}[plain]
+\begin{tikzpicture}[remember picture,overlay]
+  \headS{The protocol}{How Paprika works}
+  \node[pill,fill=sky,text width=25mm]   (reg) at \at{23}{30} {\textbf{1 Register}\\ device key (free)};
+  \node[pill,fill=lilac,text width=44mm] (att) at \at{70}{30} {\textbf{2 Attest}\\ device signs photo hash + recent block hash (P-256, checked on chain)\\ Alice locks deposit $B$};
+  \node[pill,fill=mint,text width=28mm]  (ver) at \at{128}{30} {\textbf{3 Verify}\\ anyone hashes the file\\ and reads the chain};
+  \draw[flow] (reg) -- (att); \draw[flow] (att) -- (ver);
+  \node[pill,fill=white,text width=40mm] (ok) at \at{128}{48} {No challenge within the challenge period: Alice gets $B$ back};
+  \draw[flow] (att.south east) to[out=-40,in=180] (ok.west);
+  \draw[accent,line width=1pt,rounded corners=3pt,dashed] \at{9}{55} rectangle \at{151}{75};
+  \node[anchor=north west,font=\scriptsize\bfseries,text=accent,inner sep=0pt] at \at{11}{56.5} {4 Challenge};
+  \node[pill,fill=rose,text width=32mm]  (com) at \at{32}{66.5} {\textbf{Bob challenges}\\ commit, then reveal,\\ with bond $B$};
+  \node[pill,fill=lemon,text width=24mm] (vot) at \at{78}{66.5} {\textbf{UMA vote}\\ open, public};
+  \node[pill,fill=white,text width=36mm] (pay) at \at{125}{66.5} {\textbf{The loser pays}\\ winner gets both stakes\\ minus UMA's fee};
+  \draw[flow] (att.south) to[out=-90,in=90] (com.north);
+  \draw[flow] (com) -- (vot); \draw[flow] (vot) -- (pay);
+  \node[anchor=north,inner sep=0pt,font=\tiny,text=ink!75] at \at{80}{78.5} {P-256 signature verified on chain $\cdot$ block-hash time window $\cdot$ commit-reveal: a challenge cannot be copied or front-run};
+\end{tikzpicture}
+\end{frame}
+
+% ============================================================ 4 Weaknesses -> constraints
 \begin{frame}[plain]
 \begin{tikzpicture}[remember picture,overlay]
   \headS{The brief $\cdot$ Apple Reference Image (slide 10)}{Three weaknesses, three constraints}
@@ -82,47 +120,13 @@
 \end{tikzpicture}
 \end{frame}
 
-% ============================================================ 3 How it works
-\begin{frame}[plain]
-\begin{tikzpicture}[remember picture,overlay]
-  \headS{The protocol}{How Paprika works}
-  \node[pill,fill=sky,text width=27mm]   (reg) at \at{24}{30} {\textbf{1 Register}\\ Alice's device key (free)};
-  \node[pill,fill=lilac,text width=36mm] (att) at \at{66}{30} {\textbf{2 Attest}\\ the device signs photo hash\\ + recent block hash;\\ Alice locks deposit $B$};
-  \node[pill,fill=mint,text width=30mm]  (ver) at \at{124}{30} {\textbf{3 Verify}\\ anyone: hash the file,\\ read the chain};
-  \draw[flow] (reg) -- (att); \draw[flow] (att) -- (ver);
-  \node[pill,fill=white,text width=36mm] (ok)  at \at{66}{51} {no challenge:\\ Alice gets $B$ back};
-  \node[pill,fill=rose,text width=32mm]  (com) at \at{24}{68} {\textbf{Bob challenges}\\ commit, then reveal,\\ with bond $B$};
-  \node[pill,fill=lemon,text width=28mm] (vot) at \at{70}{68} {\textbf{UMA vote}\\ open, public};
-  \node[pill,fill=white,text width=34mm] (pay) at \at{120}{68} {\textbf{the loser pays}\\ the winner gets the\\ loser's $B$, minus UMA's fee};
-  \draw[flow] (att) -- (ok);
-  \draw[flow] (att.south west) to[out=-120,in=90] (com.north);
-  \draw[flow] (com) -- (vot); \draw[flow] (vot) -- (pay);
-\end{tikzpicture}
-\end{frame}
-
-% ============================================================ 4 Why it holds
-\begin{frame}[plain]
-\begin{tikzpicture}[remember picture,overlay]
-  \headS{The design}{Why it holds}
-  \card{9}{24}{44}{30}{rose}{\textbf{No single trust root}\\[1mm] No manufacturer, no CA. A device key needs nobody's approval. One vote touches one photo.}
-  \card{57}{24}{44}{30}{peach}{\textbf{Any device, any verifier}\\[1mm] Any P-256 key registers. Anyone verifies with one read call to any node.}
-  \card{105}{24}{46}{30}{lemon}{\textbf{Permanent records}\\[1mm] The contract has no owner and no delete function. Every decision is dated on chain.}
-  \card{9}{59}{82}{20}{white}{\textbf{\color{accent}THE CRYPTOGRAPHY}\\[0.8mm]
-    $\bullet$ ECDSA P-256 device signature, checked on chain\\
-    $\bullet$ recent block hash in the signature: a time window $[a, r]$\\
-    $\bullet$ commit--reveal: a challenge cannot be copied or front-run}
-  \card{95}{59}{56}{20}{mint}{\textbf{\color{accent}THE KEY INTUITION}\\[0.8mm]
-    Origin becomes a \textbf{signed claim with money at stake} that \textbf{anyone can challenge}, decided by an \textbf{open vote}.}
-\end{tikzpicture}
-\end{frame}
-
 % ============================================================ 5 Demo + close
 \begin{frame}[plain]
 \begin{tikzpicture}[remember picture,overlay]
   \headS{Live demo}{Take a photo, attest, verify}
   % app/output/screens/08-verify-signed-and-staked.png, cropped to heading, photo top and verdict
   \node[anchor=north west,inner sep=0pt] at \at{9}{23} {\includegraphics[width=142mm,trim=14 560 24 120,clip]{../app/output/screens/08-verify-signed-and-staked.png}};
-  \draw[ink,line width=0.6pt] \at{9}{23} rectangle \at{151}{44.9};
+  \draw[ink,line width=0.6pt] \at{9}{23} rectangle \at{151}{45.3};
   \node[pill,fill=sky]   (p1) at \at{35}{53} {take a photo};
   \node[pill,fill=lilac] (p2) at \at{80}{53} {sign \& attest};
   \node[pill,fill=mint]  (p3) at \at{125}{53} {verify};
