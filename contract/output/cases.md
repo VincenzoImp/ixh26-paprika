@@ -1,4 +1,4 @@
-# Paprika: cases, costs and limits
+# Paprika: cases and costs
 
 Measured in `output/2026-11-21-run.txt` (`npx hardhat test`, 9 tests, all passing; also passing with
 `PHASE_LENGTH=86400`, UMA's mainnet phase). One suite, `test/paprika.integration.test.js`, against the real contracts,
