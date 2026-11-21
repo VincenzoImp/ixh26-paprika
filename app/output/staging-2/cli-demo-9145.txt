@@ -1,0 +1,138 @@
+Demo on chain 31337: B = 1 WETH, f = 0.5, challenge period 3600 s, reveal period 900 s
+
+== 0. Wallets: the roles hold ETH; WETH is wrapped on demand
+   photographer 10000.0 ETH, 0 WETH
+   accuser      10000.0 ETH, 0 WETH
+   UMA voters: 0x90F79bf6EB2c4f870365E785982E1f101E93b906, 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65, 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc (staked UMA voting tokens)
+   PASS
+
+== 1. Device -> Register (free)
+   keyId 0x050ce061bb30d488e298ccc3b6ade2073f9097ec1ce4100e5ee2d2a748859341
+  money moved: none
+   PASS
+
+== 2. Capture -> sign & submit (deposit B)
+   photoHash 0xb3f41cb820bd55ed3947debceaaadef74e12509dda2409776268e8367fb00038, anchor block 34, 3 tx
+   wrapped 1 WETH from ETH (ETH spent incl. gas: 1.000254164750994176)
+  money moved:
+    Paprika              +1 WETH
+   PASS
+
+== 3. Verify this photo
+  record  photo 0xb3f41cb8...b00038  key 0x050ce061...859341
+    state            attested
+    signed between   block 34 and block 37 (recorded 2026-11-21T00:56:12Z)
+    depositor        0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+    deposit locked   1 WETH
+    accusable until  2026-11-21T01:56:12Z   refundable at 2026-11-21T02:11:13Z
+    device           active
+   A registered device signed this exact file between block 34 and block 37 and a deposit was at stake.
+   PASS
+
+== 4. Negative case 1: one pixel changed
+   0 record(s) for the changed file
+   PASS
+
+== 5. Accuse -> Commit (bond B, only a hash on chain)
+   commitment 0x75d617bdb3563275c5f2e4a9b74f9b6c7c6ec379f32fc0cd886ba5c254e09118
+  money moved:
+    Paprika              +1 WETH
+   PASS
+
+== 6. Reveal -> UMA assertion, disputed at once
+   assertionId 0x3ff4a264bf85d2ca8d50ae89101f68498c2e2a0af2218b817d01be87ba0a67a3
+  money moved:
+    Paprika              -2 WETH
+    UMA OOv3             +2 WETH
+   PASS
+
+== 7. Negative case 2: UMA vote 'evidence does not prove it' (real VotingV2 vote)
+   UMA commit round 14960189, chain time 2026-11-21T00:58:03Z: voters committed hidden votes (3 tx)
+   UMA reveal round 14960189, chain time 2026-11-21T00:59:03Z: voters revealed their votes (3 tx)
+   UMA settle round 14960189, chain time 2026-11-21T01:00:01Z: assertion settled on OOv3 (1 tx)
+   vote round 14960189: 7 tx, 218 s of chain time skipped
+   photographer withdrew 0.5 WETH
+  money moved:
+    photographer         +0.5 WETH
+    UMA Store            +0.5 WETH
+    Paprika              +1 WETH
+    UMA OOv3             -2 WETH
+   accusation window extended by 225 s (time under accusation)
+   accuser net over steps 5-7: -1 WETH
+   PASS
+
+== 8. Advance time by one challenge period -> Refund
+   refund before the period ends -> error "too early: refundable at 2026-11-21T02:14:58.000Z (in 4496 s of chain time)"
+   advanced 4496 s, now 2026-11-21T02:14:58Z (refundable at 2026-11-21T02:14:58Z)
+  money moved:
+    photographer         +1 WETH
+    Paprika              -1 WETH
+   PASS
+
+== 9. Activity log
+   block   34  0x93c2c888afa011cd22abbeb65c8ad45c50139088da2a70da5d08a271c24a871b  photographer Paprika.register
+   block   35  0x2a65454c95f40ca86d34c39de5c3bbc87045f66b6d6cef59423d0eceab693762  photographer WETH.deposit (wrap ETH)
+   block   36  0x5f6b0950606bf1b1891a44d46b9423c299d90c6d1e6a10b25f3fb8e042c3efc6  photographer WETH.approve
+   block   37  0x31078ce31173d6c94c194488f1f12d6765697f1aca0241f32a68c41a0e99e5cb  photographer Paprika.attest
+   block   38  0x891e2054cfbd97b53f8c370d4f702e6babdd48f8c0a03a22c968588cea7d41a7  accuser      WETH.deposit (wrap ETH)
+   block   39  0x212fa17c8b8c7b2f4b321f934f4f3ed55ec8ff49cfdabd6bef255365618155da  accuser      WETH.approve
+   block   40  0xd2d8086627ce015472670a850dd746ad3d979027366fec0f6cffd53e8c46d159  accuser      Paprika.commitClaim
+   block   41  0xf008f3da60fb7d345512a11fe7d101cc5d6d881a8f08f2d462a748794b4b829a  accuser      Paprika.revealClaim
+   block   43  0x993449ba8aa5438adcc9dae35eda8fc771e9f3f747232fc86426a7053146aa43  voter1       UMA VotingV2.commitVote
+   block   44  0x0a6966c0ba06f1966d3bbc7bf379df9657e0a2be5c1f444cf9d486ebf59417c1  voter2       UMA VotingV2.commitVote
+   block   45  0x9c312ca848a00fe8e2a42d76a3ccdc46c00989c1359438207c20e161d722a1af  voter3       UMA VotingV2.commitVote
+   block   47  0x4023a722533adc7124829ef19e9c47f53a0a4805341614eb418c26ec204fcb40  voter1       UMA VotingV2.revealVote
+   block   48  0x926583c184f9ee6dc2b6f33c04111349db5238d1267a222ac8de89f0185b5950  voter2       UMA VotingV2.revealVote
+   block   49  0x3565da610a74679ec20f69bfa7298067657f2ccc5a1f2383284e581ec433059a  voter3       UMA VotingV2.revealVote
+   block   51  0x33a585312654ee42d1645d4253e6a6f75480c83b163de214717b888ce52c5b86  operator     UMA OOv3.settleAssertion
+   block   52  0x20a2246648c64421d2a0bed442f17926c2f556a172149fe4d35958e6cadffbe4  photographer Paprika.withdrawCredit
+   block   54  0x43bb0a28bcca9d623e10b8919cca9aeb1acde4620cf6e7cf4f443c0e52b0f9f6  photographer Paprika.refund
+   block   55  0x99bbb2fea78fa111bbf6169d7a40c37a9aa34f102f2f478e9148970e79c71739  photographer Paprika.withdrawCredit
+   PASS
+
+== 10. Optional: evidence PROVES the fake
+   UMA commit round 14960228, chain time 2026-11-21T02:16:03Z: voters committed hidden votes (3 tx)
+   UMA reveal round 14960228, chain time 2026-11-21T02:17:03Z: voters revealed their votes (3 tx)
+   UMA settle round 14960228, chain time 2026-11-21T02:18:01Z: assertion settled on OOv3 (1 tx)
+   vote round 14960228: 7 tx, 168 s of chain time skipped
+   accuser withdrew 1.5 WETH
+  money moved:
+    photographer         -1 WETH
+    accuser              +1.5 WETH
+    UMA Store            +0.5 WETH
+  record  photo 0xf2c74937...e6fdb8  key 0x050ce061...859341
+    state            fake
+    signed between   block 55 and block 57 (recorded 2026-11-21T02:15:02Z)
+    depositor        0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+    deposit locked   0 WETH
+    device           flagged at block 71 (fake-proven); record predates the flag
+   flagged device tries to attest again -> error "this device key is flagged (fake-proven) and can no longer attest"
+   PASS
+
+== 11. Optional: revoke key (no money moves)
+  money moved: none
+   re-register the revoked key -> error "key used"
+   revoked device tries to attest -> error "this device key is flagged (key-revoked) and can no longer attest"
+   PASS
+
+== 12. Unwrap: WETH back to ETH
+   photographer unwrapped 0.5 WETH -> ETH 9998.999136616395532359 -> 9999.499106167857167237
+   accuser      unwrapped 1.5 WETH -> ETH 9997.998219330009985571 -> 9999.498188881663710572
+   PASS
+
+== Summary
+   PASS  0. Wallets: the roles hold ETH; WETH is wrapped on demand
+   PASS  1. Device -> Register (free)
+   PASS  2. Capture -> sign & submit (deposit B)
+   PASS  3. Verify this photo
+   PASS  4. Negative case 1: one pixel changed
+   PASS  5. Accuse -> Commit (bond B, only a hash on chain)
+   PASS  6. Reveal -> UMA assertion, disputed at once
+   PASS  7. Negative case 2: UMA vote 'evidence does not prove it' (real VotingV2 vote)
+   PASS  8. Advance time by one challenge period -> Refund
+   PASS  9. Activity log
+   PASS  10. Optional: evidence PROVES the fake
+   PASS  11. Optional: revoke key (no money moves)
+   PASS  12. Unwrap: WETH back to ETH
+
+Demo passed: 13 steps.

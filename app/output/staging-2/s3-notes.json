@@ -1,0 +1,230 @@
+[
+ {
+  "kind": "ok",
+  "msg": "register"
+ },
+ {
+  "kind": "obs",
+  "msg": "load empty.jpg: {\"err\":\"Load file failed: This file is empty (0 bytes): nothing to attest.\",\"ms\":199,\"name\":\"\",\"warn\":\"\",\"attest\":false}"
+ },
+ {
+  "kind": "obs",
+  "msg": "load one.bin: {\"err\":\"\",\"ms\":187,\"name\":\"one.bin · 1 bytes\",\"warn\":\"This file does not look like an image (application/octet-stream). It can still be attested, but a verifier will not see a picture.\",\"attest\":true}"
+ },
+ {
+  "kind": "obs",
+  "msg": "attest one.bin: ok in 476 ms"
+ },
+ {
+  "kind": "obs",
+  "msg": "load a.png: {\"err\":\"\",\"ms\":186,\"name\":\"a.png · 315 bytes\",\"warn\":\"\",\"attest\":true}"
+ },
+ {
+  "kind": "obs",
+  "msg": "attest a.png: ok in 477 ms"
+ },
+ {
+  "kind": "obs",
+  "msg": "load a.gif: {\"err\":\"\",\"ms\":188,\"name\":\"a.gif · 98 bytes\",\"warn\":\"\",\"attest\":true}"
+ },
+ {
+  "kind": "obs",
+  "msg": "attest a.gif: ok in 460 ms"
+ },
+ {
+  "kind": "obs",
+  "msg": "load fake.heic: {\"err\":\"\",\"ms\":187,\"name\":\"fake.heic · 5000 bytes\",\"warn\":\"\",\"attest\":true}"
+ },
+ {
+  "kind": "obs",
+  "msg": "attest fake.heic: ok in 476 ms"
+ },
+ {
+  "kind": "obs",
+  "msg": "load doc.pdf: {\"err\":\"\",\"ms\":187,\"name\":\"doc.pdf · 45 bytes\",\"warn\":\"This file does not look like an image (application/pdf). It can still be attested, but a verifier will not see a picture.\",\"attest\":true}"
+ },
+ {
+  "kind": "obs",
+  "msg": "attest doc.pdf: ok in 477 ms"
+ },
+ {
+  "kind": "obs",
+  "msg": "load my photo é 日本 🌶.png: {\"err\":\"\",\"ms\":215,\"name\":\"my photo é 日本 🌶.png · 315 bytes\",\"warn\":\"\",\"attest\":false}"
+ },
+ {
+  "kind": "obs",
+  "msg": "load big10.png: {\"err\":\"\",\"ms\":198,\"name\":\"big10.png · 10156022 bytes\",\"warn\":\"\",\"attest\":true}"
+ },
+ {
+  "kind": "obs",
+  "msg": "attest big10.png: ok in 482 ms"
+ },
+ {
+  "kind": "obs",
+  "msg": "load big30.png: {\"err\":\"\",\"ms\":250,\"name\":\"big30.png · 30402490 bytes\",\"warn\":\"\",\"attest\":true}"
+ },
+ {
+  "kind": "obs",
+  "msg": "attest big30.png: ok in 515 ms"
+ },
+ {
+  "kind": "obs",
+  "msg": "unicode copy of a.png attested separately? false"
+ },
+ {
+  "kind": "obs",
+  "msg": "download of one.bin: suggested paprika-2d711642.jpg same bytes=true"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "download extension matches the type (one.bin) -- paprika-2d711642.jpg"
+ },
+ {
+  "kind": "obs",
+  "msg": "download of a.png: suggested paprika-d621445e.png same bytes=true"
+ },
+ {
+  "kind": "obs",
+  "msg": "download of a.gif: suggested paprika-bd1b4dd4.jpg same bytes=true"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "download extension matches the type (a.gif) -- paprika-bd1b4dd4.jpg"
+ },
+ {
+  "kind": "obs",
+  "msg": "download of fake.heic: suggested paprika-fabb9231.jpg same bytes=true"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "download extension matches the type (fake.heic) -- paprika-fabb9231.jpg"
+ },
+ {
+  "kind": "obs",
+  "msg": "download of doc.pdf: suggested paprika-5a838678.jpg same bytes=true"
+ },
+ {
+  "kind": "FAIL",
+  "msg": "download extension matches the type (doc.pdf) -- paprika-5a838678.jpg"
+ },
+ {
+  "kind": "obs",
+  "msg": "download of big10.png: suggested paprika-4c703389.png same bytes=true"
+ },
+ {
+  "kind": "obs",
+  "msg": "download of big30.png: suggested paprika-c41d456f.png same bytes=true"
+ },
+ {
+  "kind": "obs",
+  "msg": "drop of 2 files: shows \"one.bin\" state=no-record; any notice? banner=false"
+ },
+ {
+  "kind": "obs",
+  "msg": "verify empty.jpg: Verify failed: This file is empty (0 bytes): there is nothing to verify. in 175 ms; pixel btn=false"
+ },
+ {
+  "kind": "obs",
+  "msg": "verify big30.png: attested in 233 ms; pixel btn=true"
+ },
+ {
+  "kind": "obs",
+  "msg": "  change pixel big30.png: no-record name=\"big30.png · one pixel changed (pixel (697, 1305) changed)\""
+ },
+ {
+  "kind": "obs",
+  "msg": "verify fake.heic: attested in 182 ms; pixel btn=true"
+ },
+ {
+  "kind": "obs",
+  "msg": "  change pixel fake.heic: no-record name=\"fake.heic · one pixel changed (last byte of the file changed)\""
+ },
+ {
+  "kind": "obs",
+  "msg": "verify a.gif: attested in 183 ms; pixel btn=true"
+ },
+ {
+  "kind": "obs",
+  "msg": "  change pixel a.gif: no-record name=\"a.gif · one pixel changed (pixel (19, 27) changed)\""
+ },
+ {
+  "kind": "obs",
+  "msg": "commit with XSS evidence: ok"
+ },
+ {
+  "kind": "ok",
+  "msg": "XSS evidence not executed"
+ },
+ {
+  "kind": "obs",
+  "msg": "evidence after reload: <img src=x onerror=\"window.__xss=1;alert(1)\"><script>window."
+ },
+ {
+  "kind": "obs",
+  "msg": "reveal xss: ok"
+ },
+ {
+  "kind": "obs",
+  "msg": "vote: ok"
+ },
+ {
+  "kind": "obs",
+  "msg": "commit with blank evidence: Commit failed: Write the evidence (a link or a hash of public evidence) first"
+ },
+ {
+  "kind": "ok",
+  "msg": "blank evidence refused"
+ },
+ {
+  "kind": "obs",
+  "msg": "commit with 200 kB evidence: ok"
+ },
+ {
+  "kind": "obs",
+  "msg": "reveal long: ok"
+ },
+ {
+  "kind": "obs",
+  "msg": "vote long: ok"
+ },
+ {
+  "kind": "obs",
+  "msg": "start camera: ok tag=Live camera"
+ },
+ {
+  "kind": "obs",
+  "msg": "mirror on: preview mirror class=true, note=\"The attested file is always the true camera image, never mirrored.\""
+ },
+ {
+  "kind": "obs",
+  "msg": "take: ok tag=Still: exactly the bytes that will be attested"
+ },
+ {
+  "kind": "obs",
+  "msg": "retake: ok"
+ },
+ {
+  "kind": "obs",
+  "msg": "retake gives a new still: false"
+ },
+ {
+  "kind": "ok",
+  "msg": "attest selfie"
+ },
+ {
+  "kind": "ok",
+  "msg": "downloaded selfie verifies as attested"
+ },
+ {
+  "kind": "ok",
+  "msg": "re-encoded selfie has no record"
+ },
+ {
+  "kind": "obs",
+  "msg": "console: [\"warning: Load file Error: This file is empty (0 bytes): nothing to attest.\\n    at loadCapturePhoto (http://127.0.0.1:5573/app.js:706:28)\\n    at run.tx (http://127.0.0.1:5573/app.js:1358:95)\\n    at async run (http://127.0.0.1:5573/app.js:498:5)\",\"warning: Verify Error: This file is empty (0 bytes): there is nothing to verify.\\n    at loadVerifyFile (http://127.0.0.1:5573/app.js:898:37)\\n    at run.tx (http://127.0.0.1:5573/app.js:1335:36)\\n    at async run (http://127.0.0.1:5573/app.js:498:5)\",\"warning: Commit Error: Write the evidence (a link or a hash of public evidence) first\\n    at doCommit (http://127.0.0.1:5573/app.js:1105:24)\\n    at run (http://127.0.0.1:5573/app.js:498:11)\\n    at HTMLButtonElement.<anonymous> (http://127.0.0.1:5573/app.js:1387:26)\"]"
+ },
+ {
+  "kind": "obs",
+  "msg": "failed: [\"http://127.0.0.1:5573/lib/device.js net::ERR_ABORTED\"]"
+ }
+]

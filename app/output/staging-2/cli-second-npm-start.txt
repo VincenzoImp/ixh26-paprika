@@ -1,0 +1,33 @@
+npm notice run paprika-app@0.1.0 start
+npm notice run node scripts/start.js
+A node already answers on http://127.0.0.1:9145: using it.
+Deploying: BOND=1 FINAL_FEE=0.5 PHASE_LENGTH=60s PHOTO_WINDOW=3600s REVEAL_WINDOW=900s LIVENESS=7200s STAKE=1000000 on http://127.0.0.1:9145
+Paprika 0xCD8a1C3ba11CF5ECfa6267617243239504a98d90 | OOv3 0x4c5859f0F772848b2D91F1D83E2Fe57935348029 | VotingV2 0x5eb3Bc0a489C5A8288765d2336659EbCA68FCd00 | WETH 0x9E545E3C0baAB3E08CdfD552C960A1050f373042 (WETH) | BOND 1.0 | phase 60s | voters 3 | http://127.0.0.1:9145 | written deployments/local-9145.json
+Deployment written to /home/tux/crypto2/contract/deployments/local-9145.json
+  and copied to /home/tux/crypto2/app/web/deployment-9145.json (served as /deployment.json for this instance)
+
+Paprika is running: http://127.0.0.1:5773/   (chain: http://127.0.0.1:9145)
+Press Ctrl-C to stop.
+node:events:487
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: listen EADDRINUSE: address already in use 127.0.0.1:5773
+    at Server.setupListenHandle [as _listen2] (node:net:2167:16)
+    at listenInCluster (node:net:2224:12)
+    at node:net:2448:7
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+Emitted 'error' event on Server instance at:
+    at emitErrorNT (node:net:2203:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EADDRINUSE',
+  errno: -98,
+  syscall: 'listen',
+  address: '127.0.0.1',
+  port: 5773
+}
+
+Node.js v26.4.0
+web exited with code 1; stopping.
+
+Stopped.
