@@ -40,12 +40,14 @@ const S = {
   timeline: [],        // readable timeline entries
   seenSteps: new Set(),
 };
+S.wallets = { photographer: null, accuser: null };   // { address, kind: "browser" | "metamask", signer, eth }
 window.paprikaState = S;   // read-only handle for debugging and the end-to-end tests
 
 // ------------------------------------------------------------------ small helpers
 
 // Address of a role ("photographer" | "accuser" | "operator" | ...), from the library context.
 function addr(role) {
+  if (role === "photographer" || role === "accuser") return S.wallets[role]?.address || "";   // only the user's own wallet
   const a = S.ctx?.accounts?.[role];
   return typeof a === "string" ? a : a?.address || "";
 }
@@ -53,6 +55,7 @@ function addr(role) {
 // Actor of a transaction: { key, name, cls } from the library's role, or else from the sender address.
 function actorOf(item) {
   let role = String(item.role || "");
+  if (!role) for (const r of ["photographer", "accuser"]) if (same(addr(r), item.from)) role = r;
   if (!role) for (const r of Object.keys(S.ctx.accounts || {})) if (same(addr(r), item.from)) role = r;
   if (role === "photographer") return { key: "ph", name: "Photographer", cls: "act-ph" };
   if (role === "accuser") return { key: "ac", name: "Accuser", cls: "act-ac" };
@@ -218,6 +221,15 @@ function describe(item) {
   return { actor, text: c, kind: "other", full: `${actor.name}: ${c}` };
 }
 
+// Who signed a transaction: the user's wallet (browser wallet or MetaMask) or the demo server (UMA voters, operator).
+function signerText(item) {
+  for (const r of ["photographer", "accuser"]) {
+    const w = S.wallets[r];
+    if (w && same(w.address, item.from)) return `signed by ${short(item.from)} ${w.kind === "metamask" ? "in MetaMask" : "by the browser wallet"}`;
+  }
+  return item.from ? `signed by the demo server (${short(item.from)})` : "";
+}
+
 // Groups the transactions of one action into readable lines: wrap + approve + attest (or commit) become one line,
 // and the seven vote transactions become one line. Each group keeps its items for the expandable detail.
 function groupTxs(items) {
@@ -236,7 +248,10 @@ function groupTxs(items) {
     plumbing.length = 0;
   }
   if (plumbing.length) out.push({ kind: "plumbing", cls: describe(plumbing[0]).actor.cls, items: [...plumbing] });
-  for (const g of out) g.text = groupText(g);
+  for (const g of out) {
+    g.text = groupText(g);
+    g.who = g.kind === "vote" ? "signed by the demo server (UMA voters)" : signerText(g.items[g.items.length - 1]);
+  }
   return out;
 }
 
@@ -270,6 +285,7 @@ function renderGroups(el, items, { rawCalls = false } = {}) {
       const sum = document.createElement("summary");
       const label = document.createElement("span");
       label.textContent = g.text;
+      if (g.who) { const w = document.createElement("div"); w.className = "who-signed"; w.textContent = g.who; label.appendChild(w); }
       sum.append(label, hash);
       det.appendChild(sum);
       for (const i of g.items) {
@@ -283,6 +299,7 @@ function renderGroups(el, items, { rawCalls = false } = {}) {
       const div = document.createElement("div");
       const label = document.createElement("span");
       label.textContent = g.text;
+      if (g.who) { const w = document.createElement("div"); w.className = "who-signed"; w.textContent = g.who; label.appendChild(w); }
       div.append(label, hash);
       el.appendChild(div);
     }
@@ -305,12 +322,12 @@ function renderTimeline() {
       if (g.items.length > 1) {
         const det = document.createElement("details");
         const sum = document.createElement("summary");
-        sum.textContent = g.text;
+        sum.textContent = g.text + (g.who ? ` · ${g.who}` : "");
         det.appendChild(sum);
         for (const i of g.items) { const sub = document.createElement("div"); sub.className = "txsub"; sub.textContent = `${describe(i).full} · ${short(i.txHash)}`; det.appendChild(sub); }
         if (raw) det.open = true;
         body.appendChild(det);
-      } else body.textContent = g.text;
+      } else body.textContent = g.text + (g.who ? ` · ${g.who}` : "");
       const rawDiv = document.createElement("div");
       rawDiv.className = "raw";
       rawDiv.textContent = e.raw || g.items.map((i) => `block ${i.blockNumber} · ${i.call}`).join("\n");
@@ -436,7 +453,9 @@ function explainIntro() {
 // Shows a failed action in the banner and in the explainer, with the contract's revert reason in plain words.
 function showError(what, e) {
   console.warn(what, e);
-  const reason = errText(e);
+  let reason = errText(e);
+  // ethers cannot always decode a node's "insufficient funds" answer: say it plainly.
+  if (/insufficient funds|coalesce/i.test(reason)) reason = "not enough ETH in your wallet for this transaction: get test ETH (local faucet)";
   const banner = q("error-banner");
   banner.classList.remove("info");
   setText("error-message", `${what} failed: ${reason}`);
@@ -445,6 +464,21 @@ function showError(what, e) {
   explain(`Refused: ${what}`,
     sent ? `Refused with the reason "${reason}". These transactions went through before the refusal:` : `Refused with the reason "${reason}". Nothing was sent: no deposit or bond was taken.`,
     REVERT_WHY[reason] || "");
+}
+
+// True when the user refused to sign in the wallet (EIP-1193 code 4001, ethers ACTION_REJECTED).
+function isRejection(e) {
+  const c = e?.code ?? e?.cause?.code ?? e?.info?.error?.code;
+  return c === 4001 || c === "ACTION_REJECTED" || /user rejected|user denied|rejected the request|rejected in the wallet/i.test(errText(e));
+}
+// Shows a rejection in the wallet: nothing was sent (or only what was signed before), nothing else changed.
+function rejected(what) {
+  const banner = q("error-banner");
+  banner.classList.remove("info");
+  setText("error-message", `You rejected the transaction in your wallet (${what}). Nothing else was sent.`);
+  banner.classList.remove("hidden");
+  explain(`Rejected in your wallet: ${what}`, S.actionTxs.length ? "You refused to sign. The transactions you had already signed for this action are listed below; nothing else was sent."
+    : "You refused to sign. Nothing was sent and nothing changed.", "", S.actionTxs);
 }
 
 // Shows a notice (not an error) in the banner, e.g. after a chain restart.
@@ -512,6 +546,8 @@ function syncButtons() {
     let ok = true;
     if (RULES[id]) ok = RULES[id]();
     else if (b.dataset.enabled !== undefined) ok = b.dataset.enabled === "1";
+    const wb = ROLE_OF[id] ? walletBlocker(ROLE_OF[id], DEPOSIT_BUTTONS.has(id)) : "";
+    if (wb) { ok = false; b.title = wb; }
     b.disabled = S.busy || S.chainDown || !ok;
   }
   // Refusal box: shown for a real blocker, never for the photo that was just attested (its result is shown instead).
@@ -527,12 +563,14 @@ function syncButtons() {
 
 // Runs one user action: one at a time, buttons disabled meanwhile, transactions collected, errors shown, then
 // everything re-read from the chain. `after` explains the result once the chain was re-read.
-async function run(what, fn, { tx = true, after = null } = {}) {
+async function run(what, fn, { tx = true, after = null, role = "" } = {}) {
   if (S.busy) return;
   S.busy = true;
   S.actionTxs = [];
   S.actionId += 1;
-  setText("busy-indicator", `${what}…`);
+  // Signing is visible: the user's own wallet signs every transaction of this action.
+  const w = role ? S.wallets[role] : null;
+  setText("busy-indicator", w ? (w.kind === "metamask" ? `${what}: confirm in MetaMask…` : `${what}: waiting for your wallet to sign…`) : `${what}…`);
   q("busy-indicator").classList.remove("hidden");
   syncButtons();
   let ok = false;
@@ -540,7 +578,7 @@ async function run(what, fn, { tx = true, after = null } = {}) {
     await fn();
     ok = true;
   } catch (e) {
-    showError(what, e);
+    if (isRejection(e)) rejected(what); else showError(what, e);
   }
   try {
     S.wrapped = await wrappedBy(S.actionTxs);
@@ -585,7 +623,7 @@ async function refreshBalances(deltas) {
   const b = await S.lib.balances(S.ctx);
   const prev = S.balances;
   for (const k of ["photographer", "accuser", "store"]) {
-    setText(`balance-${k}`, tok(b[k]));
+    setText(`balance-${k}`, b[k] == null ? "no wallet" : tok(b[k]));
     if (prev && deltas === "action") {
       const d = big(b[k]) - big(prev[k]) - big(S.wrapped?.[k] ?? 0);
       const el = q(`delta-${k}`);
@@ -594,8 +632,14 @@ async function refreshBalances(deltas) {
     }
   }
   S.balances = b;
-  S.credits.photographer = big(await S.lib.credits(S.ctx, addr("photographer")));
-  S.credits.accuser = big(await S.lib.credits(S.ctx, addr("accuser")));
+  S.credits.photographer = addr("photographer") ? big(await S.lib.credits(S.ctx, addr("photographer"))) : 0n;
+  S.credits.accuser = addr("accuser") ? big(await S.lib.credits(S.ctx, addr("accuser"))) : 0n;
+  for (const r of ["photographer", "accuser"]) {
+    const w = S.wallets[r];
+    if (w) w.eth = big(await S.ctx.provider.getBalance(w.address));
+    if (w) w.weth = big(b[r] ?? 0);
+  }
+  renderWallets();
   setText("credit-photographer", tok(S.credits.photographer));
   setText("credit-accuser", tok(S.credits.accuser));
   setText("deposits-credit", tok(S.credits.photographer));
@@ -662,6 +706,120 @@ function renderParams() {
   setShort("device-owner", addr("photographer"), 4);
   setShort("accuser-address", addr("accuser"), 4);
   q("btn-advance-time").title = `Local-chain demo control: moves the chain clock forward by T_photo + T_reveal + 1 s (${fmtDuration(Number(p.photoWindow) + Number(p.revealWindow) + 1)}).`;
+}
+
+// ------------------------------------------------------------------ wallets (each actor signs with its own key)
+
+const ACTOR = { photographer: "Photographer", accuser: "Accuser" };
+const walletStoreKey = (role) => storeKey(`wallet-${role}`);
+
+// Which actor must sign each button's action (the button needs that actor's wallet, connected and funded).
+const ROLE_OF = {
+  "btn-register": "photographer", "btn-generate-key": "photographer", "btn-attest": "photographer", "btn-new-key-attest": "photographer",
+  "btn-refund": "photographer", "btn-deposits-withdraw": "photographer", "btn-withdraw-photographer": "photographer", "btn-revoke": "photographer",
+  "btn-commit": "accuser", "btn-reveal": "accuser", "btn-forfeit": "accuser", "btn-withdraw-accuser": "accuser",
+};
+
+// Why an actor cannot act yet ("" when its wallet is connected and holds ETH for gas).
+function walletBlocker(role, needDeposit = false) {
+  const w = S.wallets[role];
+  if (!w) return `Connect a wallet to act as the ${ACTOR[role]}.`;
+  if (!(w.eth > 0n)) return "Get test ETH first (local faucet): the wallet has no ETH for gas and deposits.";
+  // A deposit or bond B is paid in WETH, wrapped from ETH when needed; keep a little ETH for gas.
+  if (needDeposit && big(w.eth) + big(w.weth) < big(S.ctx.params.bond) + GAS_MARGIN) return `Not enough ETH for ${tok(S.ctx.params.bond)} plus gas: get test ETH (local faucet).`;
+  return "";
+}
+const GAS_MARGIN = 20000000000000000n;   // 0.02 ETH kept for gas
+const DEPOSIT_BUTTONS = new Set(["btn-attest", "btn-commit"]);
+
+// Connects a wallet for a role: "browser" (a private key kept in this page) or "metamask" (EIP-1193).
+async function connectWallet(role, kind) {
+  let w;
+  if (kind === "metamask") {
+    if (!window.ethereum) throw new Error("No MetaMask (or other EIP-1193 wallet) in this browser. Use the browser wallet.");
+    w = await S.lib.injectedWallet(S.ctx, role);
+  } else {
+    w = await S.lib.browserWallet(S.ctx, role, { storage: localStorage });
+  }
+  await S.lib.setSigner(S.ctx, role, w.signer);
+  S.wallets[role] = { address: w.address, kind, signer: w.signer, isNew: !!w.isNew, eth: 0n, weth: 0n };
+  localStorage.setItem(walletStoreKey(role), kind);
+}
+
+// Forgets the connected wallet of a role (the browser wallet's key stays saved for later).
+function disconnectWallet(role) {
+  Promise.resolve(S.lib.setSigner(S.ctx, role, null)).catch(() => {});
+  S.wallets[role] = null;
+  localStorage.removeItem(walletStoreKey(role));
+}
+
+// Reconnects the wallets chosen earlier in this browser (per deployment), without prompting.
+async function restoreWallets() {
+  for (const role of ["photographer", "accuser"]) {
+    const kind = localStorage.getItem(walletStoreKey(role));
+    if (!kind) continue;
+    try { await connectWallet(role, kind); } catch (e) { console.warn(`Could not reconnect the ${role} wallet`, e); localStorage.removeItem(walletStoreKey(role)); }
+  }
+}
+
+// Draws the wallet strip of each actor and the compact address in the header.
+function renderWallets() {
+  for (const role of ["photographer", "accuser"]) {
+    const box = q(`wallet-${role}`);
+    if (!box) continue;
+    const w = S.wallets[role];
+    // Rebuild only when something shown changed (the poll calls this every few seconds; buttons must stay stable).
+    const sig = w ? `${w.address}|${w.kind}|${w.eth}|${w.weth}` : "none";
+    setText(`header-wallet-${role}`, w ? `${short(w.address)} · ${w.kind === "metamask" ? "MetaMask" : "browser"}` : "no wallet");
+    if (box.dataset.sig === sig) continue;
+    box.dataset.sig = sig;
+    if (role === "photographer") setShort("device-owner", w?.address || "", 4);
+    if (role === "accuser") setShort("accuser-address", w?.address || "", 4);
+    const el = (tag, cls, text, testid) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; if (testid) e.dataset.testid = testid; return e; };
+    box.replaceChildren();
+    box.appendChild(el("b", "", `${ACTOR[role]}'s wallet`));
+    if (!w) {
+      const b1 = el("button", "pri", "Use a browser wallet", `btn-wallet-browser-${role}`);
+      b1.title = "A private key kept in this page (localStorage), for the demo. One click.";
+      b1.addEventListener("click", () => run("Connect wallet", () => connectWallet(role, "browser"), { tx: false, after: () => explainConnected(role) }));
+      const b2 = el("button", "", "Connect MetaMask", `btn-wallet-metamask-${role}`);
+      b2.addEventListener("click", () => run("Connect MetaMask", () => connectWallet(role, "metamask"), { tx: false, after: () => explainConnected(role) }));
+      box.append(b1, b2);
+    } else {
+      const a = el("span", "addr", short(w.address), `wallet-address-${role}`);
+      a.title = `${w.address} (click to copy)`;
+      a.dataset.full = w.address;
+      a.addEventListener("click", () => navigator.clipboard?.writeText(w.address).catch(() => {}));
+      box.append(el("span", "chip " + (w.kind === "metamask" ? "p" : "s"), w.kind === "metamask" ? "MetaMask" : "browser wallet", `wallet-kind-${role}`), a,
+        el("span", "", `${S.lib.formatToken ? fmtEth(w.eth) : ""}`, `wallet-eth-${role}`),
+        el("span", "", w.weth != null ? tok(w.weth) : "", `wallet-weth-${role}`));
+      const f = el("button", "", "Get test ETH (local faucet)", `btn-faucet-${role}`);
+      f.addEventListener("click", () => run("Get test ETH", async () => {
+        const r = await S.lib.requestTestFunds(S.ctx, w.address);
+        S.faucet = { role, txHash: r?.txHash, amount: r?.amount };
+      }, { tx: false, after: () => explain("Test ETH from the local faucet",
+        `The demo server's faucet sent ${S.faucet?.amount != null ? fmtEth(S.faucet.amount) : "test ETH"} to ${short(w.address)}. ETH pays gas and is wrapped into WETH for deposits and bonds.`,
+        "on a real network you would bring your own ETH; this local test ETH has no value.", [], ACTOR[role]) }));
+      const sw = el("button", "link", "switch wallet", `btn-wallet-switch-${role}`);
+      sw.addEventListener("click", () => { disconnectWallet(role); renderWallets(); syncButtons(); });
+      box.append(f, sw, el("span", "wnote", "Local chain: test ETH has no value."));
+    }
+    box.appendChild(el("span", "why", walletBlocker(role, true), `wallet-why-${role}`));
+    setText(`header-wallet-${role}`, w ? `${short(w.address)} · ${w.kind === "metamask" ? "MetaMask" : "browser"}` : "no wallet");
+  }
+}
+
+// ETH amount, e.g. "100 ETH".
+function fmtEth(wei) {
+  let s = (Number(big(wei)) / 1e18).toFixed(4).replace(/\.?0+$/, "");
+  return `${s} ETH`;
+}
+
+// The explainer at a wallet's first connection.
+function explainConnected(role) {
+  const w = S.wallets[role];
+  explain("Wallet connected", `Every action here is signed by your own key, in your browser. The server only relays signed transactions; it never holds your keys. The ${ACTOR[role]} signs with ${short(w.address)} (${w.kind === "metamask" ? "MetaMask" : "a browser wallet: a private key kept in this page for the demo"}).`,
+    w.eth > 0n ? "" : "next, get test ETH from the local faucet: the wallet pays gas and the deposit or bond.", [], ACTOR[role]);
 }
 
 // ------------------------------------------------------------------ Photographer: device
@@ -922,7 +1080,7 @@ function renderDeposits() {
     b.classList.toggle("hidden", !refundable(r));   // shown only when it can be pressed
     b.title = "Credit the deposit back to the depositor";
     b.addEventListener("click", () => run("Refund", () => S.lib.refund(S.ctx, "photographer", { photoHash: hash, keyId: toHex(r.keyId) }),
-      { after: () => explain("Refund", "Nobody proved this photo fake in time, so its deposit B was credited back to the Photographer. The record stays.",
+      { role: "photographer", after: () => explain("Refund", "Nobody proved this photo fake in time, so its deposit B was credited back to the Photographer. The record stays.",
         "a refund is possible only after T_photo + T_reveal, so an accusation committed at the last second can still be revealed. Anyone may trigger the refund; the money always goes to the depositor.", S.actionTxs, "Photographer", "refund") }));
     c4.appendChild(b);
     const f = S.files.get(hash);
@@ -1529,7 +1687,7 @@ function wire() {
   // Photographer
   on("btn-generate-key", () => run("New key", doGenerateKey, { tx: false,
     after: () => explain("New device key", "A new P-256 key pair was created in this browser. Only its public key goes on chain, at registration. A new key starts with no history.", "", [], "Photographer", "register") }));
-  on("btn-register", () => run("Register", doRegister, { after: () => explain("Register a device key",
+  on("btn-register", () => run("Register", doRegister, { role: "photographer", after: () => explain("Register a device key",
     "The key signed a message naming the Photographer's account, and Paprika stored the public key on chain. It cost only gas: no manufacturer or authority approved it. Here the key is a software key in this browser.",
     "a public key is public. Without this proof of possession anyone could register someone else's key, and the real holder could never register it.", S.actionTxs, "Photographer", "register") }));
   on("btn-start-camera", () => run("Start camera", doStartCamera, { tx: false,
@@ -1540,7 +1698,7 @@ function wire() {
   on("btn-choose-file", () => q("input-capture-file").click());
   onFileInput("input-capture-file", (f) => run("Load file", async () => { stopCamera(); await loadCapturePhoto(await blobBytes(f), f.type, f.name); }, { tx: false, after: explainReady }));
   on("btn-sample-image", () => run("Sample image", async () => { stopCamera(); await loadCapturePhoto(await sampleImage(), "image/jpeg", `sample-${Date.now()}.jpg`); }, { tx: false, after: explainReady }));
-  on("btn-attest", () => run("Sign & attest", doAttest, { after: explainAttest }));
+  on("btn-attest", () => run("Sign & attest", doAttest, { role: "photographer", after: explainAttest }));
   on("btn-new-photo", () => {
     S.photo = null;
     const box = q("capture-preview");
@@ -1551,14 +1709,14 @@ function wire() {
     renderCaptureControls(); syncButtons();
   });
   on("btn-new-key-attest", () => run("Register a new key", async () => { await doGenerateKey(); await doRegister(); },
-    { after: () => explain("Register a new key", "A new key was created and registered for free. It starts with no history; the flagged key stays flagged.",
+    { role: "photographer", after: () => explain("Register a new key", "A new key was created and registered for free. It starts with no history; the flagged key stays flagged.",
       "a flag costs the forger the lost deposit and the key's history, not the ability to come back with a new key.", S.actionTxs, "Photographer", "register") }));
   on("btn-forfeit", () => run("Forfeit", async () => {
     await S.lib.forfeitCommitment(S.ctx, "accuser", S.acc.commitment);
     S.acc.forfeited = true; saveAcc();
-  }, { after: () => explain("Forfeit an expired commitment", "The commitment was not revealed within the reveal period, so its bond B was sent to the burn address. Nobody gets it.",
+  }, { role: "accuser", after: () => explain("Forfeit an expired commitment", "The commitment was not revealed within the reveal period, so its bond B was sent to the burn address. Nobody gets it.",
     "the target of a commitment is hidden, so no depositor is known to receive the bond; burning it is the only neutral choice.", S.actionTxs, "Accuser", "commit") }));
-  on("btn-deposits-withdraw", () => run("Withdraw credit", () => doWithdraw("photographer"), { after: explainWithdraw("Photographer") }));
+  on("btn-deposits-withdraw", () => run("Withdraw credit", () => doWithdraw("photographer"), { role: "photographer", after: explainWithdraw("Photographer") }));
   on("btn-advance-time", () => run("Advance time", async () => {
     if (accusationPending()) throw new Error("An accusation is open: decide it first. Skipping time now would expire UMA's vote.");
     const p = S.ctx.params;
@@ -1567,7 +1725,7 @@ function wire() {
     addTimelineNote(`Demo clock: skipped ${fmtDuration(secs)}`, "evm_increaseTime + evm_mine");
   }, { after: () => explain("Demo clock", `Demo: skipped the ${fmtDuration(S.ctx.params.photoWindow)} challenge period + ${fmtDuration(S.ctx.params.revealWindow)} reveal period. On a real network this is just waiting.`,
     "a deposit is refundable only after the challenge period plus the reveal period, so an accusation committed at the last second can still be revealed.", [], "", "refund") }));
-  on("btn-revoke", () => run("Revoke key", doRevoke, { after: () => explain("Revoke a key",
+  on("btn-revoke", () => run("Revoke key", doRevoke, { role: "photographer", after: () => explain("Revoke a key",
     "The key signed its own revocation, naming the caller. The key is flagged and cannot attest again. Its earlier records and deposits are untouched. No vote, no money.",
     "for a stolen or copied key: otherwise a thief could keep making records in the holder's name. A flag never erases records.", S.actionTxs, "Photographer", "revoke") }));
   // Verifier
@@ -1594,11 +1752,11 @@ function wire() {
   // Accuser
   q("select-accuse-photo").addEventListener("change", (e) => { S.accChoice = e.target.value; renderAccuseSelect(); syncButtons(); });
   on("btn-refresh-records", () => run("Reload records", async () => {}, { tx: false }));
-  on("btn-commit", () => run("Commit", doCommit, { after: () => explain("Accuse · Commit",
+  on("btn-commit", () => run("Commit", doCommit, { role: "accuser", after: () => explain("Accuse · Commit",
     "Only a hash went on chain, with a bond B. Nobody can tell which photo is accused, so nobody can copy this accusation or react to it. The secret is saved in this browser for the reveal.",
     "a pending transaction is public. A one-step accusation could be copied under another name, even by the forger itself. The hash includes the accuser's address, so a copied commitment is useless.",
     S.actionTxs, "Accuser", "commit") }));
-  on("btn-reveal", () => run("Reveal", doReveal, { after: () => explain("Accuse · Reveal",
+  on("btn-reveal", () => run("Reveal", doReveal, { role: "accuser", after: () => explain("Accuse · Reveal",
     S.acc?.noAssertion ? `Bond returned: ${S.acc.bondReason}. No accusation opened; the bond B was credited back to the Accuser.`
       : "Paprika checked the commitment and sent the case to UMA's vote. UMA holds both stakes (B from the accuser, B from the photographer's deposit) until the vote, then pays the winner.",
     "in UMA an undisputed claim is accepted as true. Without the immediate dispute a false accusation would win by silence against a photographer who was not watching.",
@@ -1606,8 +1764,8 @@ function wire() {
   on("btn-vote-fake", () => run("UMA vote", () => doVote(true), { after: explainOutcome }));
   on("btn-vote-not-fake", () => run("UMA vote", () => doVote(false), { after: explainOutcome }));
   on("btn-accuse-new", () => { doNewAccusation(); syncButtons(); });
-  on("btn-withdraw-accuser", () => run("Withdraw credit (Accuser)", () => doWithdraw("accuser"), { after: explainWithdraw("Accuser") }));
-  on("btn-withdraw-photographer", () => run("Withdraw credit (Photographer)", () => doWithdraw("photographer"), { after: explainWithdraw("Photographer") }));
+  on("btn-withdraw-accuser", () => run("Withdraw credit (Accuser)", () => doWithdraw("accuser"), { role: "accuser", after: explainWithdraw("Accuser") }));
+  on("btn-withdraw-photographer", () => run("Withdraw credit (Photographer)", () => doWithdraw("photographer"), { role: "photographer", after: explainWithdraw("Photographer") }));
   on("btn-accuse-verify", () => {
     location.hash = "#verifier";
     const a = S.acc;
@@ -1716,6 +1874,7 @@ async function main() {
   explainIntro();
   q("input-evidence").value = defaultEvidence();
   await loadDevice();
+  await restoreWallets();
   loadTimeline();
   renderTimeline();
   try { const s = localStorage.getItem(storeKey("acc")); if (s) S.acc = fromJson(s); } catch { S.acc = null; }

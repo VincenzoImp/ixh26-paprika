@@ -89,14 +89,25 @@ async function click(idOrLoc, p = page) {
 }
 async function must(what, r) { if (r) throw new Error(`${what}: ${r}`); }
 const attested = () => page.evaluate(() => ({ photoHash: window.paprikaState.attested.photoHash, keyId: window.paprikaState.attested.keyId }));
+// Wallets pay deposits and bonds themselves: top up from the local faucet when the page says the wallet is short.
+async function topUp(role, pg = page) {
+  const why = await t(`wallet-why-${role}`, pg).innerText().catch(() => "");
+  if (!/faucet/i.test(why)) return;
+  let r = await click(`btn-faucet-${role}`, pg);
+  const wait = /try again in (\d+) s/.exec(r);   // the faucet allows one request per address every few seconds
+  if (wait) { await sleep((Number(wait[1]) + 1) * 1000); r = await click(`btn-faucet-${role}`, pg); }
+  await must(`faucet top-up ${role}`, r);
+}
 async function attestSample() {
   await t("tab-photographer").click();
+  await topUp("photographer");
   await must("sample", await click("btn-sample-image"));
   await must("attest", await click("btn-attest"));
   return attested();
 }
 async function attestFile(name, bytes) {
   await t("tab-photographer").click();
+  await topUp("photographer");
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "paprika-edge-")), name);
   fs.writeFileSync(f, bytes);
   await t("input-capture-file").setInputFiles(f);
@@ -106,11 +117,13 @@ async function attestFile(name, bytes) {
 }
 async function webCommit(p, pg = page) {
   await t("tab-accuser", pg).click();
+  await topUp("accuser", pg);
   if (await t("btn-accuse-new", pg).isEnabled()) { await t("btn-accuse-new", pg).click(); await pg.waitForTimeout(100); }
   await t("select-accuse-photo", pg).selectOption(`${p.photoHash}|${p.keyId}`);
   return click("btn-commit", pg);
 }
 async function libAccuse(p) {
+  if ((await ctx.provider.getBalance(ctx.accounts.accuser)) < 2n * ctx.params.bond) await lib.requestTestFunds(ctx, ctx.accounts.accuser);
   const c = await lib.commitAccusation(ctx, "accuser", { photoHash: p.photoHash, keyId: p.keyId, evidence: "edge test evidence" });
   return lib.revealAccusation(ctx, "accuser", { photoHash: p.photoHash, keyId: p.keyId, evidenceHash: c.evidenceHash, salt: c.salt });
 }
@@ -128,8 +141,18 @@ async function freshPage() {
 
 // ------------------------------------------------------------------ the checks
 
+// Connects the page's browser wallet for a role and funds it from the local faucet (each actor signs client-side).
+async function connectWallet(role, p = page) {
+  await t(role === "photographer" ? "tab-photographer" : "tab-accuser", p).click();
+  await must(`wallet ${role}`, await click(`btn-wallet-browser-${role}`, p));
+  await must(`faucet ${role}`, await click(`btn-faucet-${role}`, p));
+  return p.evaluate((r) => window.paprikaState.wallets[r]?.address, role);
+}
+
 async function edge() {
   await page.goto(BASE + "/"); await page.waitForTimeout(800); await idle();
+  const pageAccuser = (await connectWallet("accuser")) || "";
+  await connectWallet("photographer");
   await must("register", await click("btn-register"));
   const X = await attestSample(), Y = await attestSample(), Z = await attestSample(), W = await attestSample(), V = await attestSample();
 
@@ -146,9 +169,9 @@ async function edge() {
   // W-B (major): a reveal on a photo already under accusation returns the bond; the page must say so.
   await must("commit Z", await webCommit(Z));
   await libAccuse(Z);
-  const credit0 = await lib.credits(ctx, ctx.accounts.accuser);
+  const credit0 = await lib.credits(ctx, pageAccuser);
   await must("reveal Z", await click("btn-reveal"));
-  const credit1 = await lib.credits(ctx, ctx.accounts.accuser);
+  const credit1 = await lib.credits(ctx, pageAccuser);
   await check("W-B", "chain: bond credited back on a reveal against an accused photo", credit1 - credit0 === ctx.params.bond);
   const explainer = await text("explainer-text"), reveal = await text("reveal-status");
   await check("W-B", "page does not claim that both stakes went to UMA when no accusation opened",
@@ -277,7 +300,7 @@ async function edge() {
 
   // S-2 (major): /rpc allow-list bypass with a falsy element in a batch.
   const bypass = await fetch(BASE + "/rpc", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify([0, { jsonrpc: "2.0", id: 2, method: "hardhat_setBalance", params: [ctx.accounts.accuser, "0x1"] }]) });
+    body: JSON.stringify([0, { jsonrpc: "2.0", id: 2, method: "hardhat_setBalance", params: ["0x0000000000000000000000000000000000000001", "0x1"] }]) });
   await check("S-2", "/rpc refuses a batch [0, hardhat_setBalance] with 403", bypass.status === 403, `HTTP ${bypass.status}`);
 
   // S-1 (major): /rpc with the body `null` crashes the Hardhat node (and npm start then stops everything).
@@ -302,7 +325,13 @@ try {
   await startInstance();
   lib = await import(path.join(APP, "lib", "paprika.js"));
   const deployment = await (await fetch(BASE + "/deployment.json")).json();
-  ctx = lib.connect({ rpcUrl: RPC, deployment });
+  // The test plays a second, CLI-like accuser with its own key; demo controls (faucet, vote) run directly.
+  const { demoKeys } = await import(path.join(APP, "lib", "demo-keys.js"));
+  ctx = lib.connect({ rpcUrl: RPC, deployment, demoKeys: demoKeys(deployment) });
+  const { ethers } = await import("ethers");
+  const cliAccuser = ethers.Wallet.createRandom().connect(ctx.provider);
+  await lib.requestTestFunds(ctx, cliAccuser.address);
+  await lib.setSigner(ctx, "accuser", cliAccuser);
   browser = await chromium.launch({ headless: !process.env.HEADED });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
   page = await context.newPage();

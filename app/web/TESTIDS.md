@@ -98,3 +98,21 @@ Buttons are disabled while an action runs (`busy-indicator` visible) and wheneve
 - A refused (empty) file clears the previously loaded photo: `btn-attest` is then disabled.
 - Votes are serialised per assertion by the server (`POST /vote-lock`); a second window waits, then shows the outcome.
 - A non-image file shows a "No preview" note (class `nopreview`) in `capture-preview` / `verify-dropzone`.
+
+## Wallets (each actor signs client-side)
+
+| Test id | Element |
+|---|---|
+| `wallet-photographer`, `wallet-accuser` | Wallet strip at the top of the Photographer / Accuser tab |
+| `btn-wallet-browser-<role>`, `btn-wallet-metamask-<role>` | "Use a browser wallet" (default, one click; key kept in this page per deployment) / "Connect MetaMask" (EIP-1193) |
+| `wallet-kind-<role>`, `wallet-address-<role>` (click copies), `wallet-eth-<role>`, `wallet-weth-<role>` | Connected wallet |
+| `btn-faucet-<role>` | "Get test ETH (local faucet)" (server-side, local chain only) |
+| `btn-wallet-switch-<role>` | Forget this wallet and choose again |
+| `wallet-why-<role>` | Why the actor cannot act yet (no wallet, no ETH, not enough for B plus gas) |
+| `header-wallet-<role>` | Compact address in the header balance pill |
+
+`<role>` is `photographer` or `accuser`. Every action button of an actor is disabled (with the reason in its
+`title` and in `wallet-why-<role>`) until that actor's wallet is connected and funded. The busy indicator says
+"waiting for your wallet to sign…" (browser wallet) or "confirm in MetaMask…"; a refusal in the wallet shows
+"You rejected the transaction in your wallet". Timeline rows and the explainer say who signed each transaction.
+`window.paprikaState.wallets.<role>.address` gives the address.

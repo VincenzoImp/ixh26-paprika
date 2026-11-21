@@ -131,6 +131,15 @@ try {
   await idle();
   expect(!(await t("fatal-message").isVisible()), "the app connects to the chain");
   await shot("start-photographer");
+  // Each actor signs with its own wallet: the browser wallet (a key kept in the page), funded by the local faucet.
+  await click("btn-wallet-browser-photographer");
+  await click("btn-faucet-photographer");
+  expect(!!(await page.evaluate(() => window.paprikaState.wallets.photographer?.address)), "photographer wallet connected");
+  await shot("photographer-wallet-connected-and-funded");
+  await t("tab-accuser").click();
+  await click("btn-wallet-browser-accuser");
+  await click("btn-faucet-accuser");
+  await t("tab-photographer").click();
 
   // Photographer: register, then a selfie from the (fake) camera.
   await click("btn-register");

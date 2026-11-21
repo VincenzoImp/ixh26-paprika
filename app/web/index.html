@@ -41,8 +41,8 @@ npm start</pre>
   <a href="#accuser" data-v="accuser" class="act-ac" data-testid="tab-accuser">Accuser</a>
  </nav>
  <div class="balances" title="WETH in each wallet. The small line is the change caused by the last action (ETH wrapped into WETH just before paying counts as paid), then the credit waiting in Paprika.">
-  <div class="balance act-ph"><span class="who">Photographer</span><b data-testid="balance-photographer">…</b><span class="delta" data-testid="delta-photographer"></span><span class="cr" data-testid="header-credit-photographer"></span></div>
-  <div class="balance act-ac"><span class="who">Accuser</span><b data-testid="balance-accuser">…</b><span class="delta" data-testid="delta-accuser"></span><span class="cr" data-testid="header-credit-accuser"></span></div>
+  <div class="balance act-ph"><span class="who">Photographer</span><b data-testid="balance-photographer">…</b><span class="delta" data-testid="delta-photographer"></span><span class="cr" data-testid="header-credit-photographer"></span><span class="hw" data-testid="header-wallet-photographer">no wallet</span></div>
+  <div class="balance act-ac"><span class="who">Accuser</span><b data-testid="balance-accuser">…</b><span class="delta" data-testid="delta-accuser"></span><span class="cr" data-testid="header-credit-accuser"></span><span class="hw" data-testid="header-wallet-accuser">no wallet</span></div>
   <div class="balance act-uma"><span class="who">UMA fees (Store)</span><b data-testid="balance-store">…</b><span class="delta" data-testid="delta-store"></span></div>
  </div>
  <div class="conn" data-testid="chain-status" title="Local Ethereum chain"><span class="dot" data-testid="chain-dot"></span><span data-testid="chain-label">connecting…</span></div>
@@ -82,6 +82,7 @@ npm start</pre>
 <!-- ============ PHOTOGRAPHER ============ -->
 <section class="view" id="view-photographer" data-testid="view-photographer">
  <p class="intro act-ph"><b>Photographer</b>: sign a photo with your device key and lock <span class="v-bond"></span>. You get it back if nobody proves it fake within <span class="v-tphoto"></span>.</p>
+ <div class="wallet act-ph" data-testid="wallet-photographer" data-role="photographer"></div>
 
  <div class="card" data-testid="register-card"><h2><span class="step">①</span> Register the device key <span class="chip m">free</span>
    <span class="status" data-testid="device-status">no key yet</span>
@@ -136,7 +137,7 @@ npm start</pre>
   <div class="row between">
    <span>Credit waiting in Paprika: <b data-testid="deposits-credit">…</b> <span class="d">(refunds and payouts are paid as credit)</span></span>
    <button data-testid="btn-deposits-withdraw">Withdraw credit</button></div>
-  <div class="clock"><span class="chip p">Demo control · local chain only</span>
+  <div class="clock"><span class="chip p">Demo control · local chain only · run by the server</span>
    <span>Chain time <b data-testid="clock-time">…</b></span>
    <button data-testid="btn-advance-time">Demo: skip to end of challenge + reveal period</button>
    <span class="hint" data-testid="advance-why"></span></div>
@@ -193,6 +194,7 @@ npm start</pre>
 <!-- ============ ACCUSER ============ -->
 <section class="view" id="view-accuser" data-testid="view-accuser">
  <p class="intro act-ac">The <b>Accuser</b> is anyone with public evidence that a photo is not a genuine capture. It stakes a bond <b>B</b> = <span class="v-bond"></span>; UMA's voters decide who is right.</p>
+ <div class="wallet act-ac" data-testid="wallet-accuser" data-role="accuser"></div>
  <div class="stepper"><div data-testid="accuse-step-1">1 · Commit<span>hidden, bond B</span></div><div data-testid="accuse-step-2">2 · Reveal<span>sent to UMA</span></div><div data-testid="accuse-step-3">3 · UMA vote<span>commit, reveal, settle</span></div><div data-testid="accuse-step-4">4 · Outcome<span>money moves</span></div></div>
 
  <div class="card" data-testid="accuse-panel-commit"><h2><span class="step">③</span> Commit</h2>
@@ -227,7 +229,7 @@ npm start</pre>
  </div>
 
  <div class="card" data-testid="accuse-panel-vote"><h2>UMA vote</h2>
-  <p class="d">Demo: you choose the 3 demo votes. Commit, reveal and settle then run on UMA's voting contract; chain time is advanced between phases.</p>
+  <p class="d"><span class="chip act-uma">run by the demo server</span> The vote is cast by three UMA voter accounts run by the demo server. They stand for UMA token holders, a third party: you choose their vote here. Commit, reveal and settle run on UMA's voting contract; chain time is advanced between phases. This and the demo clock are the only server-side actions.</p>
   <div class="row"><button class="warn" data-testid="btn-vote-fake">Voters say FAKE (evidence proves it)</button><button class="good" data-testid="btn-vote-not-fake">Voters say NOT PROVEN</button></div>
   <div class="phases" data-testid="vote-phases">
    <span data-testid="vote-phase-commit">voters commit</span> ·
@@ -273,6 +275,6 @@ npm start</pre>
 
 <div id="busy" class="hidden" data-testid="busy-indicator"></div>
 
-<footer data-testid="footer">Everything runs on a local Ethereum chain with the real Paprika, UMA and WETH contracts. Demo shortcuts: the UMA voters are demo accounts; the device key is a software key in this browser; time is advanced with a button.</footer>
+<footer data-testid="footer">Everything runs on a local Ethereum chain with the real Paprika, UMA and WETH contracts. You sign with your own wallet. Demo shortcuts: test ETH from a local faucet; UMA voters run by the demo server; time advanced with a button.</footer>
 </body>
 </html>

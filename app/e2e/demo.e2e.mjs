@@ -123,12 +123,25 @@ async function deviceOnChain(keyId) {
   const d = await ctx.contracts.paprika.devices(keyId);
   return { status: ["none", "active", "flagged"][Number(d.status ?? d[1])], reason: ["none", "fake-proven", "key-revoked"][Number(d.reason ?? d[2])] };
 }
+// The addresses of the page's own wallets (each actor signs client-side).
+const W = { photographer: "", accuser: "" };
 async function money() {
-  const b = await lib.balances(ctx);
+  const tok = ctx.contracts.token;
+  const bal = async (a) => (a ? BigInt(await tok.balanceOf(a)) : 0n);
   return {
-    photographer: b.photographer, accuser: b.accuser, store: b.store, paprika: b.paprika, oo: b.oo,
-    cPh: await lib.credits(ctx, ctx.accounts.photographer), cAcc: await lib.credits(ctx, ctx.accounts.accuser),
+    photographer: await bal(W.photographer), accuser: await bal(W.accuser), store: await bal(ctx.addresses.store),
+    paprika: await bal(ctx.addresses.paprika), oo: await bal(ctx.addresses.oo),
+    cPh: W.photographer ? await lib.credits(ctx, W.photographer) : 0n, cAcc: W.accuser ? await lib.credits(ctx, W.accuser) : 0n,
   };
+}
+// Connects the browser wallet of a role in the page and funds it from the local faucet; returns its address.
+async function connectWallet(role, p = page) {
+  await p.getByTestId(role === "photographer" ? "tab-photographer" : "tab-accuser").click();
+  await p.getByTestId(`btn-wallet-browser-${role}`).click(); await p.waitForTimeout(150);
+  await p.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
+  await p.getByTestId(`btn-faucet-${role}`).click(); await p.waitForTimeout(150);
+  await p.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
+  return p.evaluate((r) => window.paprikaState.wallets[r]?.address || "", role);
 }
 // Header balances shown by the page must equal the chain.
 async function headerMatchesChain(label) {
@@ -198,8 +211,26 @@ async function story() {
   await eq("B6: /deployment.json is this chain's deployment", served.addresses.paprika.toLowerCase(), ctx.addresses.paprika.toLowerCase());
   // M2: /rpc forwards only the methods the page needs.
   const bad = await fetch(`${BASE}/rpc`, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hardhat_setBalance", params: [ctx.accounts.accuser, "0x1"] }) });
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hardhat_setBalance", params: ["0x0000000000000000000000000000000000000001", "0x1"] }) });
   await eq("M2: /rpc refuses hardhat_setBalance", bad.status, 403);
+  // Wallets: the server signs nothing for the user. /rpc refuses eth_sendTransaction and eth_accounts.
+  for (const method of ["eth_sendTransaction", "eth_accounts"]) {
+    const r = await fetch(`${BASE}/rpc`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: method === "eth_accounts" ? [] : [{ to: ctx.addresses.paprika }] }) });
+    await eq(`wallet: /rpc refuses ${method}`, r.status, 403);
+  }
+  // Before a wallet is connected, the actor's actions are refused with the reason.
+  await t("tab-photographer").click();
+  await check("wallet: Register refused before a wallet is connected", !(await t("btn-register").isEnabled()));
+  await check("wallet: the reason is shown", /Connect a wallet/.test(await text("wallet-why-photographer")));
+  W.photographer = await connectWallet("photographer");
+  await check("wallet: photographer wallet connected (browser wallet)", /^0x[0-9a-fA-F]{40}$/.test(W.photographer));
+  await check("faucet: photographer wallet funded with test ETH (chain)", (await ctx.provider.getBalance(W.photographer)) > 0n);
+  await check("wallet: Register enabled once connected and funded", await t("btn-register").isEnabled());
+  W.accuser = await connectWallet("accuser");
+  await check("faucet: accuser wallet funded with test ETH (chain)", (await ctx.provider.getBalance(W.accuser)) > 0n);
+  await check("wallet: the two actors have different addresses", W.accuser.toLowerCase() !== W.photographer.toLowerCase());
+  await t("tab-photographer").click();
   // Layout: no horizontal scroll at 1440, 1280, 1024; the explainer is not under the footer.
   for (const w of [1440, 1280, 1024]) {
     await page.setViewportSize({ width: w, height: 900 });
@@ -423,11 +454,72 @@ async function story() {
   await t("tab-photographer").click();
   await check("B1: advance time enabled again after the vote", await t("btn-advance-time").isEnabled());
 
+  const userTxs = await page.evaluate(() => window.paprikaState.timeline.flatMap((e) => (e.items || [])
+    .filter((i) => i.role === "photographer" || i.role === "accuser").map((i) => ({ hash: i.txHash, role: i.role }))));
+  await signedByWallets(userTxs);
+
+  // A second browser context gets its own wallet.
+  const other = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const po = await other.newPage();
+  await po.goto(BASE + "/#photographer"); await po.waitForTimeout(800);
+  const addrOther = await connectWallet("photographer", po);
+  await check("wallet: a second browser context gets its own wallet", !!addrOther && addrOther.toLowerCase() !== W.photographer.toLowerCase(), addrOther);
+  await other.close();
+
+  // MetaMask path, run with a SCRIPTED FAKE EIP-1193 provider (not real MetaMask): window.ethereum forwards every
+  // request to this test, which signs with an ethers Wallet. It exercises the page's injected-wallet code in CI.
+  const { ethers } = await import("ethers");
+  const fakeKey = ethers.Wallet.createRandom();
+  const rpc = new ethers.JsonRpcProvider(`http://127.0.0.1:${RPC_PORT}`, undefined, { staticNetwork: true, cacheTimeout: -1 });
+  const fake = fakeKey.connect(rpc);
+  const mm = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await mm.exposeFunction("__fakeWallet", async (method, params) => {
+    if (method === "eth_requestAccounts" || method === "eth_accounts") return [fake.address];
+    if (method === "wallet_switchEthereumChain" || method === "wallet_addEthereumChain") return null;
+    if (method === "eth_sendTransaction") {
+      const t0 = params[0];
+      const sent = await fake.sendTransaction({ to: t0.to, data: t0.data, value: t0.value ?? 0, gasLimit: t0.gas ?? t0.gasLimit });
+      return sent.hash;
+    }
+    return rpc.send(method, params ?? []);
+  });
+  await mm.addInitScript(() => {
+    window.ethereum = { isMetaMask: true, isFakeForTests: true,
+      request: ({ method, params }) => window.__fakeWallet(method, params),
+      on() {}, removeListener() {} };
+  });
+  const pm = await mm.newPage();
+  await pm.goto(BASE + "/#photographer"); await pm.waitForTimeout(800);
+  await pm.getByTestId("btn-wallet-metamask-photographer").click(); await pm.waitForTimeout(300);
+  await pm.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
+  await eq("fake EIP-1193 (scripted, not real MetaMask): page connected the injected wallet", (await pm.evaluate(() => window.paprikaState.wallets.photographer?.address || "")).toLowerCase(), fake.address.toLowerCase());
+  await pm.getByTestId("btn-faucet-photographer").click(); await pm.waitForTimeout(300);
+  await pm.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
+  await pm.getByTestId("btn-register").click(); await pm.waitForTimeout(300);
+  await pm.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
+  const regHash = await pm.evaluate(() => window.paprikaState.registered?.txHash || "");
+  const regTx = regHash ? await ctx.provider.getTransaction(regHash) : null;
+  await check("fake EIP-1193 (scripted, not real MetaMask): register signed by the injected wallet", !!regTx && regTx.from.toLowerCase() === fake.address.toLowerCase(), regHash);
+  await check("fake EIP-1193: timeline says 'signed in MetaMask'", /signed by .* in MetaMask/.test(await pm.getByTestId("activity-log-table").innerText()));
+  await mm.close();
+
   // M4: a restarted or redeployed chain is detected (simulated: another stored fingerprint), local state cleared.
   await page.evaluate(() => localStorage.setItem("paprika-fingerprint", "another-chain"));
   await page.reload(); await page.waitForTimeout(800); await idle();
   await check("M4: chain change announced", (await t("error-banner").isVisible()) && /restarted or Paprika was redeployed/.test(await text("error-message")));
   await eq("M4: saved device key cleared", await t("device-status").getAttribute("data-status"), "none");
+}
+
+// Every write of the story was signed by the page's own wallets: read each transaction's sender on chain.
+async function signedByWallets(hashes) {
+  let n = 0, bad = [];
+  for (const { hash, role } of hashes) {
+    const tx = await ctx.provider.getTransaction(hash);
+    if (!tx) continue;
+    n += 1;
+    if (tx.from.toLowerCase() !== W[role].toLowerCase()) bad.push(`${hash.slice(0, 10)} from ${tx.from} (expected ${role} ${W[role]})`);
+  }
+  await check(`signing: all ${n} user transactions were signed by the user's browser wallets`, n > 10 && bad.length === 0, bad.join(" | "));
 }
 
 // ------------------------------------------------------------------ main
