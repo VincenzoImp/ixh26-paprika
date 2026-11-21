@@ -1,81 +1,68 @@
 # Paprika
 
-Paprika is a protocol that records the origin of photos on Ethereum, with no manufacturer and no central authority.
-A registered device key signs the SHA-256 of each photo together with a recent block hash.
-The account that records the photo locks a refundable deposit on it.
-Anyone can accuse a record by locking an equal bond, and UMA's Optimistic Oracle V3 decides by a public vote.
-The loser's stake goes to the winner, minus UMA's fee; if nobody accuses the record in time, the deposit goes back.
+Paprika records the origin of photos on Ethereum. A device key signs each photo together with a recent block hash.
+Each record carries a refundable deposit. Anyone can accuse a record with an equal bond, and UMA's open vote decides.
 
-It answers Track 1 of [IXH26](https://www.decifris.it/ixh26/) (Bari, 20-21 November 2026): *"Design a secure protocol that generalises to any device
-and guarantees authentic photo origin via decentralised blockchains technology."*
+It answers Track 1 of [IXH26](https://www.decifris.it/ixh26/): *"Design a secure protocol that generalises to any
+device and guarantees authentic photo origin via decentralised blockchains technology."*
 
-## What a record proves
+## Three design constraints
 
-A record proves that a registered key signed this exact file between two known blocks, and that a deposit is at stake.
-It does not prove that a camera captured the scene: a key can also sign a generated image ([limits](docs/limits.md)).
+The brief shows three weaknesses of a centralised design. Paprika takes each one as a constraint and meets it.
 
-## Architecture
+| Constraint | How Paprika meets it |
+|---|---|
+| No single point of failure | No manufacturer, no certificate authority, no central revocation list. Accusations are decided by UMA's open vote |
+| No cross-platform lock-in | Any device with a P-256 key registers, free. Anyone verifies a file from public chain data |
+| No retroactive censorship | Records are never erased. Every decision is recorded with its block |
+
+## How it works
+
+```mermaid
+flowchart LR
+    D[Device key] -->|signs photo hash + recent block hash| A[attest: record + deposit B]
+    A --> V[Anyone verifies: hash the file, read the record]
+    A --> C[Accuser: commit, then reveal with published evidence + bond B]
+    C --> U{UMA vote}
+    U -->|fake proven| F[Record marked Fake, key flagged, accuser paid]
+    U -->|not proven| R[Record stays, depositor paid]
+    A -->|no accusation in time| Ref[Deposit refunded, record stays]
+```
 
 | Part | Role |
 |---|---|
 | [`Paprika.sol`](contract/contracts/Paprika.sol) | Holds records, deposits and bonds. Checks device signatures. Sends accusations to UMA. Has no owner |
 | UMA | The Optimistic Oracle V3 holds the stakes of an accusation. UMA's vote (`VotingV2`) decides it |
-| Device | A P-256 key. It signs the registration, each capture and the revocation |
-| User wallet | MetaMask, the only wallet. Each user signs every transaction with it. No server holds a user key |
-| Demo server ([`app/`](app/)) | Serves the web app. Relays signed transactions to the chain. Stores published evidence under its SHA-256 |
+| User wallet | MetaMask. Each user signs every transaction. No server holds a user key |
+| Demo server ([`app/`](app/)) | Serves the web app, relays signed transactions, stores published evidence under its SHA-256 |
 
-On a local chain the demo server also runs UMA's three voter accounts and advances the chain clock.
-These tools exist only when the network configuration says the network is local.
-The command-line tool signs with local test keys instead of MetaMask.
+The full specification is in [docs/protocol.md](docs/protocol.md). The reason for each rule is in
+[docs/design-rationale.md](docs/design-rationale.md).
 
 ## Quick start
 
-Requirements: Node.js 26 or later.
+Requirements: Node.js 26 or later, and MetaMask in the browser.
 
 ```bash
-# contract tests, against UMA's contracts on an in-process chain
+# contract tests, with UMA's oracle, UMA's vote and WETH on an in-process chain
 cd contract && npm install && npx hardhat test && cd ..
 
-# the demo: local chain, UMA's contracts, Paprika and the web app on http://127.0.0.1:5173/
+# the demo: local chain, UMA's contracts, Paprika and the web app on http://localhost:5173/
 cd app && npm install && npm start
-
-# the same demo in a terminal, with checks (in a second terminal, while npm start runs)
-cd app && npm run demo:cli
 ```
 
-The web app needs MetaMask, with the local network and two test accounts added:
-see [app/README.md](app/README.md#metamask-on-the-local-chain).
-The demo, step by step, and how the local chain differs from a public network: [docs/demo.md](docs/demo.md).
-
-## How it was tested
-
-- 9 contract integration tests, with UMA's oracle, UMA's vote and WETH on a local chain (`cd contract && npx hardhat test`).
-- An end-to-end browser test of the whole demo story: 168 checks against the chain (`cd app && npm run e2e`).
-- An edge-case browser test: 18 checks (`cd app && npm run e2e:edge`).
-- Two independent staging runs and one acceptance run from a clean clone of the repository.
-
-Details: [docs/demo.md](docs/demo.md#how-it-was-tested).
+MetaMask setup and the demo steps: [docs/demo.md](docs/demo.md).
 
 ## Repository map
 
 | Path | Content |
 |---|---|
-| [`docs/`](docs/) | Protocol, design rationale, limits, demo |
+| [`docs/`](docs/) | Protocol, design rationale, demo |
 | [`contract/`](contract/) | [`Paprika.sol`](contract/contracts/Paprika.sol), its tests, the local deployment of UMA's contracts, the [case table](contract/output/cases.md) |
-| [`app/`](app/) | Device library, chain client, command-line tool and web app for the demo |
-| [`slides/`](slides/) | Pitch deck, speaker notes, answers to expected questions |
+| [`app/`](app/) | Device library, chain client, command-line tool and web app |
+| [`slides/`](slides/) | Pitch deck and speaker notes |
 | [`AI_DISCLOSURE.md`](AI_DISCLOSURE.md) | Declaration of the use of AI tools |
 | [`THIRD_PARTY.md`](THIRD_PARTY.md) | Third-party software and material, with licences |
-
-## Where to read what
-
-| Question | Document |
-|---|---|
-| How does the protocol work? Messages, steps, states, cases | [docs/protocol.md](docs/protocol.md) |
-| Why does each rule exist? Which attack does it stop? | [docs/design-rationale.md](docs/design-rationale.md) |
-| What does Paprika trust, and what can it not do? | [docs/limits.md](docs/limits.md) |
-| How do I run and present the demo? How was it tested? | [docs/demo.md](docs/demo.md) |
-| What exactly does the contract do? | [contract/contracts/Paprika.sol](contract/contracts/Paprika.sol) |
 
 ## Team
 

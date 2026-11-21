@@ -1,6 +1,6 @@
 // Paprika web app: local network tools (chain 31337 only; not in the page on any other network).
 // They are facilities of the local test network, not features of Paprika: skip a wait (move the chain clock) and
-// resolve a UMA vote with the simulated voters run by the server. Dashed lemon = local network facility.
+// resolve a UMA vote with the three local UMA voter accounts run by the server. Dashed lemon = local network facility.
 // Shown as a collapsed pill bottom-left, plus inline "Skip wait (local)" / "Resolve vote (local)" chips where a wait is shown.
 
 import { h, tid, mount } from "./dom.js";
@@ -33,7 +33,7 @@ export async function skipWait(seconds) {
 // Seconds to wait until a record is refundable (0 if it already is).
 export const untilRefundable = (rec) => Math.max(1, Number(rec.refundableAt) - S.chain.timestamp);
 
-// Resolves the UMA vote of an open accusation with the simulated voters (server-side).
+// Resolves the UMA vote of an open accusation with the three local UMA voter accounts (server-side).
 export async function resolveVote(assertionId, fakeProven) {
   S.votePhase = { assertionId, phases: [] };
   emit("change");

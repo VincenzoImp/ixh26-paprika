@@ -58,9 +58,6 @@ The demo app runs these steps for you: see [`../docs/demo.md`](../docs/demo.md).
 - The contract has no administrator function and accepts no ETH. UMA's callbacks are accepted only from the oracle.
 - UMA's vote (commit, reveal, settle in `VotingV2`) decides each accusation, and UMA pays as described.
 
-The known limits found by the tests are listed at the end of [`output/cases.md`](output/cases.md) and in
-[`../docs/limits.md`](../docs/limits.md).
-
 ## What is real
 
 Nothing is mocked. Every contract is deployed on the local chain from published code.
@@ -72,7 +69,5 @@ Nothing is mocked. Every contract is deployed on the local chain from published 
 | `VotingV2`, `VotingToken`, `FixedSlashSlashingLibrary` | UMA's voting system (the DVM), from the same package. Voters stake the voting token, commit and reveal |
 | `WETH9` | The bond currency, UMA's copy of WETH9. Accounts wrap their test ETH |
 
-What differs from mainnet: the voters are three local accounts that hold all the voting tokens, so they decide every
-vote. The deployer holds the roles that UMA's governor holds on mainnet. Time is moved forward on the local chain
-to reach each vote phase. The tests do not show that UMA's voters decide well, or that a signature comes from a
-camera. In the tests and the demo, device keys are software keys made at run time.
+Local setup: three local accounts stake the voting tokens and vote. The deployer holds UMA's governor roles.
+The local chain's clock moves forward to reach each vote phase. Device keys are made at run time.

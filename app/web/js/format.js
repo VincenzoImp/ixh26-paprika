@@ -29,7 +29,7 @@ const DEMO_NAMES = {
   "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc": "Bob",
 };
 
-// Known names for addresses (contracts, the local faucet, the simulated UMA voters).
+// Known names for addresses (contracts, the local UMA voter accounts).
 export function labelOf(address) {
   const a = String(address || "").toLowerCase();
   if (!a || !S.ctx) return "";

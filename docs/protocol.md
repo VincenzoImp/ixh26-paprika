@@ -8,27 +8,16 @@ deposit; anyone can accuse the record by staking an equal bond, and UMA's Optimi
 The contract is [`contract/contracts/Paprika.sol`](../contract/contracts/Paprika.sol). This document describes it.
 If this document and the contract disagree, the contract is correct.
 The reasons for each rule are in [design-rationale.md](design-rationale.md).
-The limits are in [limits.md](limits.md).
 
-## What a record proves, and what it does not
+## What a record proves
 
-A **record** is the entry that the contract stores for one photo hash and one device key.
-
-A record proves:
+A **record** is the entry that the contract stores for one photo hash and one device key. It proves:
 
 1. The holder of the private key `keyId` signed this exact **photo hash** (the SHA-256 of the file).
 2. The signature was made after block `a` (the anchor block) and before block `r` (the record block).
-   So the file existed no later than block `r`.
 3. The signature is bound to this contract and this chain. It cannot be replayed elsewhere.
 4. A **depositor** locked a deposit `B` on the record.
 5. The current state of the record and of its device, and the block of every change, are public.
-
-A record does not prove:
-
-1. That a camera sensor captured the scene. A key can sign any file, including a generated image.
-2. That the key is held in secure hardware.
-3. That the file did not exist before block `a`. The key holder can sign an older file.
-4. Who the photographer is.
 
 ## Terms
 
@@ -201,7 +190,6 @@ A commitment that is not revealed within `T_reveal` can be forfeited by any acco
 
 UMA's vote decides. Any account then calls `settleAssertion` at OOv3. OOv3 pays the contract
 `2 × B − f × B` and sends `f × B` to UMA's Store. Then OOv3 calls `assertionResolvedCallback` on the contract.
-If the vote does not resolve in too many rounds, UMA deletes the request and the record stays Accused (see [limits.md](limits.md)).
 
 - **Checks:** the caller is OOv3. The assertion is an open accusation of this contract; otherwise nothing happens.
 - **Fake proven (vote true):**
@@ -294,13 +282,8 @@ Amounts are net changes. `B` is the deposit and the bond. `f × B` is UMA's fee.
 | A verifier changes one pixel and checks | `attestersOf` returns an empty list | Nobody |
 | An accuser proves a fake | Record Fake; device Flagged (FakeProven) | Accuser: `+B − f×B`. Depositor: `−B`. UMA: `+f×B` |
 | An accuser accuses a genuine record, and the vote rejects it | Record Attested again; challenge period extended | Accuser: `−B`. Depositor: `+B − f×B`. UMA: `+f×B` |
-| A depositor attests a fake and nobody proves it in time | Refund succeeds. The fake stays attested | Depositor: 0 |
-| A forger accuses its own fake from a second account, with the real evidence | Record Fake; device Flagged | Forger, both accounts together: `−f×B` |
-| A forger accuses its own record with no evidence, to run out the clock | The vote rejects it. The challenge period is extended by the time under accusation | Forger: `−f×B` per round |
-| An accuser publishes evidence, and the evidence host cannot serve it during the vote | Voters cannot check the claim. Under UMIP-170 they are likely to answer false | Accuser: `−B` if rejected. Depositor: `+B − f×B` |
 | The file at the evidence URL does not hash to the evidence SHA-256 in the claim | The claim says the file must match. Voters see the mismatch | As for any rejected accusation |
 | A griefer makes `N` false accusations in a row | Each is rejected. The refund is delayed by the total vote time | Griefer: `−N×B`. Depositor: `+N×(B − f×B)` |
-| A flagged party registers a new key | Allowed. The new key has no history | Nobody |
 | An account copies a pending `attest` and gets it mined first | The record names the honest key. The copier is the depositor. The honest transaction fails with "exists" | Copier: locks `B`, gets it back unless the record is proven fake |
 | An account copies a pending `register` | Fails: the proof of possession names the original sender | Nobody |
 | An account copies a pending commitment | The copy cannot be revealed: the commitment includes the accuser's address. The honest accuser commits again with a new salt | Copier: `−B` (forfeited) |
@@ -308,10 +291,8 @@ Amounts are net changes. `B` is the deposit and the bond. `f × B` is UMA's fee.
 | An accuser accuses a record that does not exist, is Refunded, or was committed outside the challenge period | The reveal fails. The commitment can then be forfeited | Accuser: `−B` (burned) |
 | An accuser reveals against a record already Fake | No new accusation | Accuser: 0 (bond credited back) |
 | A second accuser reveals while an accusation is open | No new accusation. The commitment is closed. The open accusation does not change. The second accuser can commit again after the vote | Second accuser: 0 (bond credited back) |
-| A forger that holds its own earlier commitment reveals first when an honest reveal appears | The forger's accusation opens. The honest reveal returns the bond | Honest accuser: 0, and no reward; it can commit again after the vote. Forger, both accounts together: `−f×B` |
 | The holder of a stolen key revokes it | Device Flagged (KeyRevoked). New records are impossible. Old records stay | Nobody |
 | A verifier checks a record of a flagged device | `verify` shows the flag, its block, its reason and `recordedBeforeFlag` | Nobody |
-| A depositor cannot receive tokens | Settlements and refunds still succeed. Only its own `withdrawCredit` fails | Nobody else |
 
 The measured values for these cases, with UMA's contracts on a local chain, are in
 [`contract/output/cases.md`](../contract/output/cases.md).

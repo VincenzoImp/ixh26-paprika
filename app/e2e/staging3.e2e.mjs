@@ -220,7 +220,7 @@ async function run() {
   const fB = (B * BigInt(Math.round(ctx.params.feeShare * 1e6))) / 1000000n;
   await eq("lost: fake proven pays UMA's Store the fee fB (chain)", BigInt(await ctx.contracts.token.balanceOf(ctx.addresses.store)) - store0, fB);
   await check("lost B4: a proven-fake record offers no accusation", !(await t("btn-accuse").isVisible().catch(() => false)));
-  await check("lost F2: 'Not shown: that a camera took this photo' on the record", /Not shown:.*camera/i.test(await bodyText()));
+  await check("lost F2: 'What this record shows' sentence on the record", /What this record shows:/i.test(await bodyText()));
   await eq("vote fake: Y fake (chain)", await stateOf(Y), "fake");
   await check("evidence: a binary file shows size + hash check, no garbage preview", (await t("evidence-hash-ok").first().isVisible()) && !(await t("evidence-text").first().isVisible().catch(() => false)));
   const kY = await keyOf(Y);

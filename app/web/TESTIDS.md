@@ -34,7 +34,7 @@ ids with a stand-in for MetaMask (`e2e/fake-metamask.mjs`).
 `verify-error` (empty file), `verify-warning` (non-image, several files), `verify-status` (`data-state` = `no-record`
 / `attested` / `accused` / `unchallenged` / `fake` / `flagged-fake-proven` / `flagged-key-revoked`; `data-record-state`),
 `verify-status-seal`, `verify-status-title`, `verify-status-detail`, `record-scope`, `verify-honest-sentence`,
-`verify-not-shown`, `verify-attesters`, `verify-hash-compare`, `btn-open-record`, `btn-change-pixel` ("Tamper test"),
+`verify-attesters`, `verify-hash-compare`, `btn-open-record`, `btn-change-pixel` ("Tamper test"),
 `verify-hash`, `recent-records`, `recent-row` (many), `recent-empty`.
 
 ## Attest (`#/attest`)

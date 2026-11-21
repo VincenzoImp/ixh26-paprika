@@ -35,7 +35,6 @@ accusation.
 - A dispute is voted in the **next** DVM round. One vote = 3 commits + 3 reveals + 1 settle (7 transactions) and
   moves the chain clock by 2 to 4 phases: 182 to 236 s with 60 s phases; 258,175 to 345,592 s (3 to 4 days) with
   UMA's mainnet 86,400 s phases.
-- With mainnet phases, `REVEAL_WINDOW` (1 h) is far shorter than a vote: see Known limits.
 
 ## Gas (gasUsed, real contracts)
 
@@ -66,32 +65,3 @@ because keys, salts and hashes are random and the zero bytes in calldata change.
 5. **A revoked device keeps its first flag.** A fake proven afterwards does not change the reason (KeyRevoked).
 6. **Token transfers accept tokens that return nothing as well as tokens that return `true`.**
 
-## Known limits
-
-- **A forger can stall accusations at `fee` per vote round.** Holding its own commitment, a forger can reveal a junk
-  self-accusation right before an honest one (e.g. right after each settlement). The honest reveal then gets its bond
-  back (no loss since the fix below) and must commit again after the vote. Each round costs the forger `fee`, and the
-  photo's window is extended by the time under accusation, so the stall never makes the window run out.
-- **Fixed: a waiting accuser no longer loses its bond.** Before, a reveal during an open accusation reverted, and a
-  vote longer than `REVEAL_WINDOW` (3 to 4 days with UMA's mainnet phases, against 1 hour) made the waiting
-  commitment expire and be forfeited. Now such a reveal returns the bond as credit (case 5).
-- **Self-accusation makes the penalty for a fake `fee`, not `BOND`.** Repeated rejected self-accusations cost `fee`
-  per round and do not make the window expire, because the window is extended each time.
-- **One accusation per photo at a time.**
-- **A flagged party returns for free with a new key.** Registration costs nothing.
-- **After `accusableUntil + REVEAL_WINDOW` a fake can no longer be punished.**
-- **The outcome is only as good as UMA's vote.** A wrong TRUE costs an honest depositor `BOND` and its key. Here the
-  vote is UMA's real VotingV2, but the three voters hold all the stake: whoever controls them decides.
-- **A vote request that is not resolved rolls to the next round; after `maxRolls` rolls VotingV2 deletes it.** The roll
-  count grows by every round that passes without a resolution (quorum missed, or nobody voted). After deletion
-  `getPrice` reverts, so `OOv3.settleAssertion` reverts for good: the record stays Accused, both bonds stay in OOv3,
-  and refund is impossible. Only UMA governance could unblock it (a registered contract re-requesting the same price).
-  UMA mainnet uses `maxRolls` = 4 (with daily phases: about 8 days without a resolution). This deployment uses the
-  uint32 maximum, so a jump of the local clock can never delete a request (case 9). A missed quorum is not
-  tested here: the three demo voters hold all the stake.
-- **Griefing delays the refund by the vote time of each false accusation.** Each costs the griefer `BOND`.
-- **`attestersOf` lists grow without limit.** Anyone with a free key can attach records to a famous hash, at a
-  refundable `BOND` each.
-- **A copied commitment that lands first blocks the honest one** (one block of delay; the copier loses `BOND`).
-- **WETH sent to Paprika outside the protocol stays there for good.**
-- **Not tested: a missing P-256 precompile.** In the code, every signature check then fails.

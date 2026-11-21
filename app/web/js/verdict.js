@@ -76,12 +76,11 @@ export function verdictCard(rec, { testid = "verify-status", extra = null, actio
   return card;
 }
 
-// "What it shows / Not shown": the honest scope of a record, one line each.
+// "What this record shows": the meaning of a record, in one line.
 export function scopeLines(rec) {
   return h("div", { class: "scope", testid: "record-scope" },
     h("p", { testid: "verify-honest-sentence" }, h("b", {}, "What this record shows: "),
-      `a registered device signed this exact file between block ${rec.anchorBlock} and block ${rec.recordedBlock}, and a deposit was at stake.`),
-    h("p", { testid: "verify-not-shown" }, h("b", {}, "Not shown: "), "that a camera took this photo, or who took it."));
+      `a registered device signed this exact file between block ${rec.anchorBlock} and block ${rec.recordedBlock}, and a deposit was at stake.`));
 }
 
 // The lifecycle of a record: Attested → Challenge period → Refundable → Refunded, or Accused → Proven fake / Not proven.

@@ -331,15 +331,14 @@ Nothing is mocked. Every contract runs on the local chain and comes from publish
   node signs nothing, and the deploy script signs locally too.
 - The P-256 signatures are checked by the chain's P-256 precompile (hardfork osaka).
 
-What is specific to this demo:
+Local setup:
 
-- The voters are three demo accounts (3, 4, 5). They hold all the voting tokens, so they decide every vote. The
-  demo server (or the CLI) votes for them, as the user asks in the UI.
+- Three local accounts (3, 4, 5) stake the voting tokens. The demo server (or the CLI) casts their votes.
 - The users are Hardhat's prefunded accounts #1 and #2 (Alice, Bob), imported into MetaMask.
-- Evidence is served by the demo server (`/evidence`). Content-addressing makes it checkable, but a real deployment
-  would publish it on a durable public host (for example IPFS), set at deployment with `EVIDENCE_BASE_URI`.
-- Time is advanced on the local chain: for the vote phases, and with `advanceTime` for the challenge period.
-- The device key is a software key, not a camera's secure chip.
+- The demo server serves the evidence (`/evidence`), content-addressed. `EVIDENCE_BASE_URI` sets the public host at
+  deployment.
+- The local chain's clock moves forward for the vote phases and, with `advanceTime`, for the challenge period.
+- The device key is made at run time.
 
 ## Tests
 

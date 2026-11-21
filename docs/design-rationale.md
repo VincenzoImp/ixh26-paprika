@@ -1,7 +1,7 @@
 # Paprika: why each rule exists
 
-Each section states one rule of [`Paprika.sol`](../contract/contracts/Paprika.sol), the attack or failure that the
-rule stops, and what the rule costs. Terms and symbols (`B`, `T_photo`, `T_reveal`, `f`) are defined in
+Each section states one rule of [`Paprika.sol`](../contract/contracts/Paprika.sol), and the attack or failure that the
+rule stops. Terms and symbols (`B`, `T_photo`, `T_reveal`, `f`) are defined in
 [protocol.md](protocol.md).
 
 ## 1. Proof of possession at registration
@@ -12,7 +12,6 @@ rule stops, and what the rule costs. Terms and symbols (`B`, `T_photo`, `T_revea
 A key registers only once, so the real holder can never register it.
 A copy of a pending registration sent from another address also fails, because the signed message names the sender.
 
-**Cost.** One P-256 signature on the device and one signature check on the chain.
 
 ## 2. Device signature checked on the chain
 
@@ -28,7 +27,6 @@ The message contains a label, the chain identifier, the contract address, `keyId
 3. The labels `PAPRIKA/REGISTER`, `PAPRIKA/CAPTURE` and `PAPRIKA/REVOKE` stop the reuse of one kind of signature as another.
 4. The low-s rule gives each signature exactly one valid form.
 
-**Cost.** The chain must offer the P-256 precompile (EIP-7951). On a chain without it, every signature fails.
 
 ## 3. Block hash in the signed message, and the record block
 
@@ -41,8 +39,6 @@ Nobody can predict a block hash, so the signature was made after block `a`.
 The record exists in block `r`, so the signature was made before block `r`.
 The window `[a, r]` is at most 256 blocks long. No timestamp server is needed for either bound.
 
-**Cost.** The device must read a recent block hash before it signs. The record must reach the chain within 256 blocks.
-The window bounds the signature, not the scene: the key holder can still sign an older file.
 
 ## 4. A deposit per photo, not a fee or a treasury
 
@@ -55,8 +51,6 @@ The window bounds the signature, not the scene: the key holder can still sign an
    A reward pool can be drained: a forger attests a fake, accuses it from a second account, and collects the reward.
 3. With a deposit, the reward for a proven fake is that record's own deposit. There is no shared fund to drain.
 
-**Cost.** An account that attests `N` photos keeps `N × B` locked for at least `T_photo + T_reveal`.
-Honest depositors pay gas and the cost of locked capital, and nothing more.
 
 ## 5. Refund only after the challenge period
 
@@ -66,7 +60,6 @@ Honest depositors pay gas and the cost of locked capital, and nothing more.
 If the refund came earlier, a depositor could take the deposit back between that commitment and its reveal.
 The accusation would then find nothing at stake. A refund is also impossible while the record is Accused.
 
-**Cost.** Every deposit stays locked for `T_reveal` more than the challenge period.
 
 ## 6. Accusation bound to an existing record
 
@@ -80,7 +73,6 @@ The commitment must be made at or after the record block, and no later than `acc
 3. Nobody can place a commitment before a record exists and hold it in reserve against that record.
 4. A Fake record cannot be accused again. A deposit is lost once.
 
-**Cost.** An accuser must act within the challenge period of that record.
 
 ## 7. A bond for the accuser
 
@@ -90,7 +82,6 @@ The commitment must be made at or after the record block, and no later than `acc
 for days. A griefer could then block any record at almost no cost. With the bond, a rejected accusation costs
 the accuser `B`, and the depositor receives `B − f × B`.
 
-**Cost.** An honest accuser needs `B` and risks it if the vote goes against the evidence.
 
 ## 8. Commit-reveal
 
@@ -104,10 +95,6 @@ later and within `T_reveal`. The commitment includes the accuser's address.
 3. A copied commitment is useless: the reveal recomputes it from the sender's address.
 4. A party that sees a reveal pending cannot get in first: it needs a commitment from an earlier block.
 
-**Cost.** Two transactions and at least one block of delay. An unrevealed commitment loses `B` to the burn address.
-The bond is burned because the target is hidden: no depositor is known to receive it.
-A forger that already holds its own commitment can still reveal first. The honest accuser then gets its bond
-back but no reward. See [limits.md](limits.md).
 
 ## 9. The contract disputes each accusation at once
 
@@ -118,8 +105,6 @@ and disputes it with the record's deposit.
 If the contract only asserted, a false accusation would win by silence. The victim would be any depositor who
 was not watching the chain. With the immediate dispute, every accusation goes to UMA's token-holder vote.
 
-**Cost.** Every accusation waits for a vote. On a real network UMA returns results
-["within 48-72 hours"](https://docs.uma.xyz/developers/resolving-disputes). There is no fast path for a clear fake.
 
 ## 10. The burden of proof is on the accusation
 
@@ -132,7 +117,6 @@ claim is "true and publicly verifiable".
 "indistinguishable from genuine camera captures" (the [IXH26](https://www.decifris.it/ixh26/) Track 1 brief, slide 2). No depositor could prove it, so every accusation
 would win. With the burden on the accusation, an accusation without public evidence fails.
 
-**Cost.** A fake that leaves no public evidence is not caught.
 
 ## 11. The evidence is published and linked from the claim
 
@@ -145,9 +129,6 @@ answer true only if the claim is "true and publicly verifiable". A hash alone is
 recover the evidence from it. A claim that carried only a hash would fail even when the evidence is sound.
 With the URL, a voter fetches the file, hashes it and compares the result with the claim.
 
-**Cost.** The evidence host must stay reachable during the vote. If it does not serve the file, the accusation is
-likely to fail. The host can withhold a file but cannot change it unnoticed: a changed file has another SHA-256.
-The readable claim costs more gas than a hash.
 
 ## 12. One open accusation per photo, and the extension of the challenge period
 
@@ -164,10 +145,6 @@ is credited back. When the vote rejects an accusation, `accusableUntil` grows by
 3. The waiting accuser does not lose its bond to a vote that outlasts its `T_reveal`.
    It gets the bond back and can commit again after the vote, inside the extended challenge period.
 
-**Cost.** False accusations delay an honest refund by the vote time of each one.
-Each costs the griefer `B` and pays the depositor `B − f × B`.
-A forger that holds its own earlier commitment can get its accusation in first. The honest accuser then loses
-only the reward, not the bond.
 
 ## 13. Flags do not erase records
 
@@ -179,7 +156,6 @@ device unverifiable. That is retroactive censorship. If a flag left no mark, a v
 records from new ones. With the flag block, the verifier sees which records came before the flag.
 Each other record keeps its own deposit and its own challenge period, so each is judged on its own.
 
-**Cost.** Records that a compromised key made before the flag stay Attested until someone accuses them.
 
 ## 14. Key revocation
 
@@ -189,8 +165,6 @@ No vote and no money are involved.
 **Failure stopped.** Without revocation, a copied or stolen key stays Active, and the thief makes records in the
 holder's name. A copy of a pending revocation from another address fails.
 
-**Cost.** A thief who holds the key can also revoke it. The holder then registers a new key.
-Records that the thief made before the revocation stay, marked as made before the flag.
 
 ## 15. No owner, and immutable parameters
 
@@ -200,7 +174,6 @@ Records that the thief made before the revocation stay, marked as made before th
 **Attack stopped.** An administrator key could change the parameters, replace the oracle or move the locked deposits.
 That key would be a single point of failure and a target.
 
-**Cost.** A flaw cannot be patched. A fix needs a new deployment, and records do not move to it.
 
 ## 16. Payments as credits
 
@@ -210,7 +183,6 @@ That key would be a single point of failure and a target.
 rejects it. If the contract paid inside the UMA callback, that failure would revert UMA's settlement.
 The accusation could then never close. With credits, such an account blocks only its own withdrawal.
 
-**Cost.** One extra transaction for each account that wants its tokens.
 
 ## 17. Equal deposit and bond
 
@@ -220,16 +192,13 @@ The accusation could then never close. With credits, such an account blocks only
 accuser's bond and disputes with the record's deposit, so the two must be equal. The stakes are also symmetric:
 each side risks `B`, and the winner receives `B − f × B` from the loser.
 
-**Cost.** One value sets two incentives. A large `B` deters forgers more, and also deters accusers.
-A small `B` does the reverse.
 
-## The three weaknesses of the brief
+## The three constraints of the brief
 
-The brief (slide 10) lists three weaknesses of a centralised system. The table states what Paprika removes and what
-it only moves. Paprika does not remove trust. It moves trust to UMA's vote and to the deposit.
+The brief lists three weaknesses of a centralised design. Paprika takes each one as a design constraint and meets it.
 
-| Weakness | What Paprika removes | What Paprika moves |
-|---|---|---|
-| Single point of failure: central revocation lists; a compromised certificate authority invalidates millions of devices | No certificate authority, no revocation list, no operator. A flag concerns one key. Only the key holder or a vote on one record can set it | Trust goes to UMA's vote, which can err or be captured. A wrong vote harms one record and one key, not all devices |
-| Cross-platform lock-in: other devices cannot verify without the vendor's servers | Any device with a P-256 key can register, free. Any party verifies with a read call to any node | The verifier needs access to the chain. The device needs network access to read a recent block hash |
-| Retroactive censorship: historic photos become unverifiable if servers shut down or keys change | No function deletes or edits a record or a key. There is no owner. Flags carry their block, so older records stay checkable | Records live as long as the chain does. A vote can still mark one record Fake, if the accusation was committed inside its challenge period |
+| Constraint | How Paprika meets it |
+|---|---|
+| No single point of failure | No manufacturer, no certificate authority, no revocation list, no operator. A flag concerns one key. Only the key holder, or UMA's open vote on one record, can set it |
+| No cross-platform lock-in | Any device with a P-256 key registers, free. Any party verifies with a read call to any node, from public data |
+| No retroactive censorship | No function deletes or edits a record or a key. There is no owner. Every decision carries its block, so older records stay checkable |
