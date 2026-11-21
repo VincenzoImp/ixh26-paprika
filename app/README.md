@@ -80,8 +80,8 @@ This is the contract between the library and the web UI. Every name below exists
   `GET /demo/vote/status?assertionId=` and `POST /demo/advance` need the header `X-Paprika-Session: <token>`, and
   only same-origin requests. They answer 404 when the configuration is not local. The library fetches the token and
   sends it for you.
-- Removed: the faucet (`/demo/faucet`, `requestTestFunds`, `faucetAmount`). Alice and Bob already hold Hardhat's
-  genesis ETH. `browserWallet` remains only as an internal helper for the CLI and tests.
+- Alice and Bob already hold Hardhat's genesis ETH. `browserWallet` is an internal helper for the
+  CLI and the tests only; the page uses MetaMask.
 
 ## Who signs what
 
@@ -327,7 +327,7 @@ Nothing is mocked. Every contract runs on the local chain and comes from publish
 - **UMA's Optimistic Oracle V3** and its plumbing: Finder, Store, AddressWhitelist, IdentifierWhitelist, Registry.
 - **UMA's voting system**: `VotingV2` and the UMA voting token. Voters stake, commit a hidden vote, then reveal it.
 - **WETH9**, the bond currency. Users wrap their test ETH.
-- **Client-side signing**, as on a real network. Users sign with their own wallet (the page's key or MetaMask). The
+- **Client-side signing**, as on a real network. Users sign with their own wallet (MetaMask; the CLI signs with local test keys). The
   node signs nothing, and the deploy script signs locally too.
 - The P-256 signatures are checked by the chain's P-256 precompile (hardfork osaka).
 

@@ -123,7 +123,8 @@ was not watching the chain. With the immediate dispute, every accusation goes to
 
 ## 10. The burden of proof is on the accusation
 
-**Rule.** The claim sent to UMA is "this photo is not a genuine capture by that device", with the evidence hash.
+**Rule.** The claim sent to UMA asks whether the photo is NOT a genuine capture by that device. It tells voters to
+answer true only if the evidence publicly proves it, and false otherwise.
 Under [UMIP-170](https://github.com/UMAprotocol/UMIPs/blob/master/UMIPs/umip-170.md), voters answer true only if the
 claim is "true and publicly verifiable".
 
@@ -133,7 +134,22 @@ would win. With the burden on the accusation, an accusation without public evide
 
 **Cost.** A fake that leaves no public evidence is not caught.
 
-## 11. One open accusation per photo, and the extension of the challenge period
+## 11. The evidence is published and linked from the claim
+
+**Rule.** The accuser publishes the evidence before the reveal. The evidence host stores it under its SHA-256.
+The claim names the evidence SHA-256 and the URL `<evidenceBaseURI>/<evidence SHA-256 in hex>`.
+`evidenceBaseURI` is set once, at deployment. The claim also names the chain id, the contract, the photo hash and the key.
+
+**Failure stopped.** Under [UMIP-170](https://github.com/UMAprotocol/UMIPs/blob/master/UMIPs/umip-170.md), voters
+answer true only if the claim is "true and publicly verifiable". A hash alone is not verifiable: a voter cannot
+recover the evidence from it. A claim that carried only a hash would fail even when the evidence is sound.
+With the URL, a voter fetches the file, hashes it and compares the result with the claim.
+
+**Cost.** The evidence host must stay reachable during the vote. If it does not serve the file, the accusation is
+likely to fail. The host can withhold a file but cannot change it unnoticed: a changed file has another SHA-256.
+The readable claim costs more gas than a hash.
+
+## 12. One open accusation per photo, and the extension of the challenge period
 
 **Rule.** A reveal that arrives while the record is Accused opens no accusation. Its commitment is closed and its bond
 is credited back. When the vote rejects an accusation, `accusableUntil` grows by the time the record spent Accused.
@@ -153,7 +169,7 @@ Each costs the griefer `B` and pays the depositor `B − f × B`.
 A forger that holds its own earlier commitment can get its accusation in first. The honest accuser then loses
 only the reward, not the bond.
 
-## 12. Flags do not erase records
+## 13. Flags do not erase records
 
 **Rule.** A flag changes only the device status, with the reason and the block. Records keep their states.
 `verify` returns `flaggedAtBlock` and `recordedBeforeFlag`.
@@ -165,7 +181,7 @@ Each other record keeps its own deposit and its own challenge period, so each is
 
 **Cost.** Records that a compromised key made before the flag stay Attested until someone accuses them.
 
-## 13. Key revocation
+## 14. Key revocation
 
 **Rule.** The key holder can flag its own device with a signature over a message that names the sender.
 No vote and no money are involved.
@@ -176,17 +192,17 @@ holder's name. A copy of a pending revocation from another address fails.
 **Cost.** A thief who holds the key can also revoke it. The holder then registers a new key.
 Records that the thief made before the revocation stay, marked as made before the flag.
 
-## 14. No owner, and immutable parameters
+## 15. No owner, and immutable parameters
 
 **Rule.** The contract has no owner, no administrator function and no upgrade path.
-`B`, `T_photo`, `T_reveal`, the oracle and the token are set once, at deployment. The contract accepts no ETH.
+`B`, `T_photo`, `T_reveal`, the oracle, the token and `evidenceBaseURI` are set once, at deployment. The contract accepts no ETH.
 
 **Attack stopped.** An administrator key could change the parameters, replace the oracle or move the locked deposits.
 That key would be a single point of failure and a target.
 
 **Cost.** A flaw cannot be patched. A fix needs a new deployment, and records do not move to it.
 
-## 15. Payments as credits
+## 16. Payments as credits
 
 **Rule.** Refunds and payouts add to a credit. Each account withdraws its own credit with `withdrawCredit`.
 
@@ -196,7 +212,7 @@ The accusation could then never close. With credits, such an account blocks only
 
 **Cost.** One extra transaction for each account that wants its tokens.
 
-## 16. Equal deposit and bond
+## 17. Equal deposit and bond
 
 **Rule.** One value, `B`, is both the deposit and the bond.
 

@@ -46,7 +46,8 @@ A record does not prove:
 | Bond | The amount `B` that the accuser locks on one accusation |
 | Accusation | A claim that a record is not a genuine capture by its device, sent to UMA |
 | Commitment | `keccak256(abi.encode(accuser, photoHash, keyId, evidenceHash, salt))`. It hides the target of an accusation |
-| Evidence hash | The SHA-256 of the evidence file. The accuser publishes the evidence off-chain |
+| Evidence | The file or text that proves the accusation. The accuser publishes it at `<evidenceBaseURI>/<evidence SHA-256 in hex>` |
+| Evidence hash | The SHA-256 of the evidence. It names the evidence and lets anyone check it |
 | Challenge period | The time during which a commitment against a record is valid: until `accusableUntil` |
 | Flag | A device status. A flagged device cannot make new records. Its records stay |
 | Credit | An amount that the contract owes to an account. The account withdraws it with `withdrawCredit` |
@@ -63,7 +64,7 @@ The token is a deployment parameter; this document and the demo use WETH.
 | Device | Holds a P-256 private key. Signs registration, captures and revocation | Read access to a recent block hash |
 | Registrant | Sends the registration of a key. Any account | Only gas |
 | Depositor | Sends a signed capture and locks `B`. Often a relayer, not the device | `B` in WETH, approved to the contract |
-| Accuser | Commits and reveals an accusation, with evidence | `B` in WETH, approved to the contract |
+| Accuser | Publishes the evidence, then commits and reveals an accusation | `B` in WETH, approved to the contract |
 | UMA | OOv3 holds both stakes. The UMA token holders vote on the accusation | Nothing from Paprika beyond the claim |
 | Verifier | Hashes a file and reads the contract. Any party | Read access to any node of the chain |
 
@@ -82,9 +83,10 @@ The deployer sets the parameters once, in the constructor. No function changes t
 | - | `oo`, `currency` | The OOv3 address and the token (WETH) |
 | - | `LIVENESS` | Passed to UMA. It has no effect: Paprika disputes every accusation at once |
 | - | `identifier` | UMA's default identifier, read at deployment |
+| - | `evidenceBaseURI` | The base URL where evidence is published. The claim links to `<evidenceBaseURI>/<evidence SHA-256 in hex>` |
 
 The constructor rejects the deployment unless `B > 0`, `B` is at least UMA's minimum bond for the token,
-and `T_photo`, `T_reveal` and `LIVENESS` are not zero.
+`T_photo`, `T_reveal` and `LIVENESS` are not zero, and `evidenceBaseURI` is not empty.
 
 ## Signed messages
 
@@ -104,8 +106,12 @@ Rules for every signature:
 - The chain's P-256 precompile at address `0x100` (EIP-7951) checks it.
   If the precompile is missing, every signature fails.
 
-The accusation commitment is not a device signature. It is
-`keccak256(abi.encode(accuser, photoHash, keyId, evidenceHash, salt))`, with five 32-byte words.
+The accusation uses two more messages. Neither is a device signature.
+
+| Message | Content |
+|---|---|
+| Commitment | `keccak256(abi.encode(accuser, photoHash, keyId, evidenceHash, salt))`, with five 32-byte words |
+| Claim sent to UMA | A readable question with the chain id, the contract address, the photo hash, `keyId`, the evidence SHA-256 and the evidence URL. The contract builds it at the reveal. The text is in step 6 |
 
 ## Steps
 
@@ -142,7 +148,14 @@ Several devices can attest the same photo hash. Each record is independent.
 - **Changes:** the record becomes Refunded. The record stays.
 - **Money:** credit `B` to the depositor.
 
-### 4. Accuse, step 1: commit
+### 4. Accuse, step 1: publish the evidence
+
+- **Who acts:** the accuser, off the chain.
+- **What happens:** the accuser uploads the evidence. The evidence host stores it under its SHA-256 and serves it at
+  `<evidenceBaseURI>/<evidence SHA-256 in hex>`. The name is the hash, so anyone can check that the file is unchanged.
+- **Money:** none.
+
+### 5. Accuse, step 2: commit
 
 - **Who calls:** any account, with `commitClaim(commitment)`. This account is the accuser.
 - **Checks:** this commitment value was never used.
@@ -151,7 +164,7 @@ Several devices can attest the same photo hash. Each record is independent.
 
 Nobody can read the target photo from the commitment.
 
-### 5. Accuse, step 2: reveal
+### 6. Accuse, step 3: reveal
 
 - **Who calls:** the accuser, with `revealClaim(photoHash, keyId, evidenceHash, salt)`.
 - **Checks:**
@@ -170,10 +183,13 @@ Nobody can read the target photo from the commitment.
   The dispute sends the accusation to the UMA token-holder vote.
   **Money:** OOv3 pulls `2 × B` from the contract and holds it.
 
-The claim sent to UMA is:
+The claim sent to UMA is this text. Hashes and the address are lowercase hex; the chain id is decimal.
 
-> Paprika accusation: the photo with SHA-256 0x`photoHash` attested by the device key with id 0x`keyId`
-> is not a genuine capture by that device. Evidence SHA-256: 0x`evidenceHash`.
+> Paprika accusation. Question: is the photo with SHA-256 0x`photoHash`, attested with the device key id 0x`keyId`
+> on chain id `chainid` by the Paprika contract 0x`address`, NOT a genuine capture by that device (for example
+> generated, edited, or a copy of an earlier image)? Answer true only if the evidence publicly proves it; otherwise
+> answer false. Evidence SHA-256: 0x`evidenceHash`. Evidence URL: `evidenceBaseURI`/`evidenceHash` (the file at that
+> URL must hash to the SHA-256 above).
 
 Under UMA's rules for this identifier ([UMIP-170](https://github.com/UMAprotocol/UMIPs/blob/master/UMIPs/umip-170.md)),
 voters answer true only if the claim is "true and publicly verifiable". So the accusation carries the burden of proof.
@@ -181,7 +197,7 @@ voters answer true only if the claim is "true and publicly verifiable". So the a
 A commitment that is not revealed within `T_reveal` can be forfeited by any account with
 `forfeitCommit(commitment)`. Its bond `B` goes to the burn address `0x…dEaD`.
 
-### 6. UMA decision
+### 7. UMA decision
 
 UMA's vote decides. Any account then calls `settleAssertion` at OOv3. OOv3 pays the contract
 `2 × B − f × B` and sends `f × B` to UMA's Store. Then OOv3 calls `assertionResolvedCallback` on the contract.
@@ -197,19 +213,19 @@ If the vote does not resolve in too many rounds, UMA deletes the request and the
   - `accusableUntil` grows by the time the record spent Accused.
   - **Money:** credit `B − f × B` to the depositor.
 
-### 7. Revoke a key
+### 8. Revoke a key
 
 - **Who calls:** any account that holds the key, with `revokeKey(keyId, sig)`.
 - **Checks:** the device is Active. `sig` is the key's signature over the revocation message, which names the sender.
 - **Changes:** the device becomes Flagged with reason KeyRevoked, at the current block. Records do not change.
 - **Money:** none.
 
-### 8. Withdraw a credit
+### 9. Withdraw a credit
 
 - **Who calls:** any account with a credit, with `withdrawCredit()`.
 - **Money:** the contract transfers the whole credit of the sender to the sender.
 
-### 9. Verify a file
+### 10. Verify a file
 
 Any party can verify. No transaction and no permission are needed.
 
@@ -281,6 +297,8 @@ Amounts are net changes. `B` is the deposit and the bond. `f × B` is UMA's fee.
 | A depositor attests a fake and nobody proves it in time | Refund succeeds. The fake stays attested | Depositor: 0 |
 | A forger accuses its own fake from a second account, with the real evidence | Record Fake; device Flagged | Forger, both accounts together: `−f×B` |
 | A forger accuses its own record with no evidence, to run out the clock | The vote rejects it. The challenge period is extended by the time under accusation | Forger: `−f×B` per round |
+| An accuser publishes evidence, and the evidence host cannot serve it during the vote | Voters cannot check the claim. Under UMIP-170 they are likely to answer false | Accuser: `−B` if rejected. Depositor: `+B − f×B` |
+| The file at the evidence URL does not hash to the evidence SHA-256 in the claim | The claim says the file must match. Voters see the mismatch | As for any rejected accusation |
 | A griefer makes `N` false accusations in a row | Each is rejected. The refund is delayed by the total vote time | Griefer: `−N×B`. Depositor: `+N×(B − f×B)` |
 | A flagged party registers a new key | Allowed. The new key has no history | Nobody |
 | An account copies a pending `attest` and gets it mined first | The record names the honest key. The copier is the depositor. The honest transaction fails with "exists" | Copier: locks `B`, gets it back unless the record is proven fake |

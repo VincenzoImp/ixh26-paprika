@@ -23,7 +23,7 @@
 //                   Sec-Fetch-Site) that carry the session token from GET /demo/session (header X-Paprika-Session).
 // The page talks only to its own origin, so one port serves everything. It never serves files outside the three
 // folders (and never lib/demo-keys.js). Keep the default HOST=127.0.0.1 and use an SSH tunnel from another computer:
-// the demo endpoints give test ETH and move the clock for anyone who can reach them.
+// the demo endpoints run UMA's voter accounts and move the clock; they accept same-origin requests with a session token only.
 
 import http from "node:http";
 import fs from "node:fs";

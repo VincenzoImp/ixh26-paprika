@@ -14,6 +14,20 @@ and guarantees authentic photo origin via decentralised blockchains technology."
 A record proves that a registered key signed this exact file between two known blocks, and that a deposit is at stake.
 It does not prove that a camera captured the scene: a key can also sign a generated image ([limits](docs/limits.md)).
 
+## Architecture
+
+| Part | Role |
+|---|---|
+| [`Paprika.sol`](contract/contracts/Paprika.sol) | Holds records, deposits and bonds. Checks device signatures. Sends accusations to UMA. Has no owner |
+| UMA | The Optimistic Oracle V3 holds the stakes of an accusation. UMA's vote (`VotingV2`) decides it |
+| Device | A P-256 key. It signs the registration, each capture and the revocation |
+| User wallet | MetaMask, the only wallet. Each user signs every transaction with it. No server holds a user key |
+| Demo server ([`app/`](app/)) | Serves the web app. Relays signed transactions to the chain. Stores published evidence under its SHA-256 |
+
+On a local chain the demo server also runs UMA's three voter accounts and advances the chain clock.
+These tools exist only when the network configuration says the network is local.
+The command-line tool signs with local test keys instead of MetaMask.
+
 ## Quick start
 
 Requirements: Node.js 26 or later.
@@ -29,6 +43,8 @@ cd app && npm install && npm start
 cd app && npm run demo:cli
 ```
 
+The web app needs MetaMask, with the local network and two test accounts added:
+see [app/README.md](app/README.md#metamask-on-the-local-chain).
 The demo, step by step, and how the local chain differs from a public network: [docs/demo.md](docs/demo.md).
 
 ## How it was tested

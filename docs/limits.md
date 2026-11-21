@@ -9,9 +9,11 @@ This document states what Paprika depends on and what it cannot do. Terms and sy
 |---|---|
 | UMA | The token-holder vote answers each accusation correctly, under the rule "true and publicly verifiable" ([UMIP-170](https://github.com/UMAprotocol/UMIPs/blob/master/UMIPs/umip-170.md)). UMA keeps accepting the token and the identifier that the deployment uses |
 | The chain | The chain keeps records, orders transactions and stays available. It offers the P-256 precompile. Its block hashes are not predictable |
+| The evidence host | The host at `evidenceBaseURI` serves each published evidence file during the vote. It cannot change a file unnoticed, because the claim names its SHA-256. It can withhold a file |
 | The key holder | The key holder keeps the private key secret. The key holder signs only real captures. If the key leaks, the key holder revokes it |
 
 Nobody else is trusted. There is no manufacturer, no certificate authority, no committee and no administrator.
+Every user signs every transaction with their own wallet. No server holds a user key.
 
 ### What UMA can and cannot do
 
@@ -41,10 +43,28 @@ Nobody else is trusted. There is no manufacturer, no certificate authority, no c
 | The vote takes days and can err | Every accusation goes to a vote. Each vote takes days on a real network. A wrong vote affects one record and one key |
 | A vote can fail to resolve | If UMA's vote misses its quorum in too many rounds in a row, UMA deletes the request. Then `settleAssertion` fails for good. The record stays Accused, no refund is possible, and the deposit and the bond stay locked in UMA's oracle. Only UMA governance can unblock it |
 | A forger can get its accusation in first | A forger that holds its own earlier commitment can reveal first when an honest reveal appears. The honest accuser then gets its bond back, but no reward. The forger loses `f × B`, as in a self-accusation. If the forger's accusation is rejected, the honest accuser can commit again inside the extended challenge period |
-| Evidence lives off the chain | The chain stores only the evidence hash. The accuser must publish the evidence where voters can find it |
+| The evidence host is a point of failure | The chain stores only the evidence hash; the file lives at `<evidenceBaseURI>/<hash>`. If the host is down during the vote, voters cannot check the claim, and the accusation is likely to fail. `evidenceBaseURI` cannot change after deployment |
 | Open lists | Any account with a free key can attest a well-known file, at a refundable `B` each. `attestersOf` then lists every such key, and the verifier must judge each key |
 | The contract cannot be patched | There is no owner and no upgrade. A fix needs a new deployment, and records do not move to it |
 | No post-quantum signatures | Device keys are ECDSA on P-256. A large quantum computer could forge them |
+
+## The demo server on a local chain
+
+In the demo, every user signs with their own wallet: MetaMask in the browser, or a local key in the command-line tool.
+The server never signs for a user. It relays only transactions that a wallet already signed.
+
+On a local chain the server also does these things:
+
+| Task | Detail |
+|---|---|
+| Relays JSON-RPC | It forwards read calls and signed transactions to the local chain. It refuses calls that would sign or change the chain state directly |
+| Stores evidence | It is the evidence host: it stores evidence under its SHA-256 and serves it at `/evidence/<hash>` |
+| Runs UMA's voters | It holds the keys of the three demo voter accounts and the operator account. It casts their votes and calls `settleAssertion` |
+| Advances time | It moves the chain clock forward on request, for the challenge period and the vote phases |
+
+The voter and clock tools exist only when the network configuration says the network is local.
+They answer only requests from the server's own page that carry its session token.
+On a public network, UMA's own voters vote and time passes normally.
 
 ## How much the deposit protects
 
