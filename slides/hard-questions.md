@@ -1,7 +1,8 @@
 # Hard questions, with short honest answers
 
-For the 2 minutes of questions. Source of truth: `docs/1-come-funziona.md`; context in `docs/2` and
-`docs/3`. Not claim-audited.
+For the 2 minutes of questions. Source of truth: [`docs/protocol.md`](../docs/protocol.md); context in
+[`docs/design-rationale.md`](../docs/design-rationale.md) and [`docs/limits.md`](../docs/limits.md).
+Not claim-audited.
 
 **1. What stops a software key attesting an AI image?**
 Nothing at attestation time. Any registered key, hardware or software, can sign any bytes, and the

@@ -1,7 +1,7 @@
 # Speaker notes: Paprika
 
 Five minutes: about 40 seconds per slide, 90 seconds for the demo. Source of truth:
-`docs/1-come-funziona.md`. Amounts and durations are deployment parameters, so we say `B`,
+[`docs/protocol.md`](../docs/protocol.md). Amounts and durations are deployment parameters, so we say `B`,
 `T_photo`, `T_reveal` and `f`, not numbers.
 
 ## 1. Title (30 s)

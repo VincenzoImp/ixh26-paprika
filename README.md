@@ -22,8 +22,11 @@ Requirements: Node.js 26 or later.
 # contract tests, against UMA's contracts on an in-process chain
 cd contract && npm install && npx hardhat test && cd ..
 
-# the demo: local chain, UMA's contracts, Paprika and the web app
+# the demo: local chain, UMA's contracts, Paprika and the web app on http://127.0.0.1:5173/
 cd app && npm install && npm start
+
+# the same demo in a terminal, with checks (in a second terminal, while npm start runs)
+cd app && npm run demo:cli
 ```
 
 The demo, step by step, and what in it is real or simulated: [docs/demo.md](docs/demo.md).

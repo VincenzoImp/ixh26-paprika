@@ -1,0 +1,395 @@
+npm notice run npx
+npm notice run 'hardhat' test
+
+
+  UMA OOv3 + real DVM (VotingV2) on a plain local chain
+    network hardhat, hardfork osaka, chainId 31337
+    deployUmaWithVoting(TestnetERC20): 32 transactions in 455 ms
+      [gas] deploy Finder                                 344306
+      [gas] deploy Store                                  2099879
+      [gas] deploy AddressWhitelist                       709282
+      [gas] deploy IdentifierWhitelist                    321146
+      [gas] deploy Registry                               1644591
+      [gas] deploy VotingToken                            2158939
+      [gas] deploy TestnetERC20                           807142
+      [gas] Finder.set Store                              47825
+      [gas] Finder.set CollateralWhitelist                47993
+      [gas] Finder.set IdentifierWhitelist                47993
+      [gas] Finder.set Registry                           47849
+      [gas] AddressWhitelist.addToWhitelist               92570
+      [gas] IdentifierWhitelist.addSupportedIdentifier    47243
+      [gas] Store.setFinalFee                             49883
+      [gas] VotingToken.addMember(Minter, deployer)       55087
+      [gas] VotingToken.mint voter0                       80328
+      [gas] VotingToken.mint voter1                       63216
+      [gas] VotingToken.mint voter2                       63228
+      [gas] deploy FixedSlashSlashingLibrary              202355
+      [gas] deploy VotingV2                               5162733
+      [gas] VotingToken.addMember(Minter, VotingV2)       55087
+      [gas] Finder.set Oracle (VotingV2)                  47837
+      [gas] deploy OptimisticOracleV3                     4097379
+      [gas] Finder.set OptimisticOracleV3                 47981
+      [gas] Registry.addMember(ContractCreator, deployer) 55011
+      [gas] Registry.registerContract(OOv3)               96045
+      [gas] voter0 VotingToken.approve                    46270
+      [gas] voter0 VotingV2.stake                         132911
+      [gas] voter1 VotingToken.approve                    46270
+      [gas] voter1 VotingV2.stake                         100087
+      [gas] voter2 VotingToken.approve                    46270
+      [gas] voter2 VotingV2.stake                         100087
+      [gas] TOTAL deployUmaWithVoting                     18964823
+    params: finalFee 50.0, minimumBond 100.0, liveness 7200s, phaseLength 86400s, voters 3 x 1000000.0 staked, GAT 1500000.0, SPAT 0.5, emissionRate 0, maxRolls 4, baseSlash 0.001
+      voter stakes after deploy         1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    --- TestnetERC20: resolve TRUE by vote of all 3 voters, bond 100.0 ---
+      balances before                   Probe   1000.0 | OOv3    0.0 | Store    0.0  (TestnetERC20)
+      assertionId 0x7246fa8faaf9b702e1f12b90946354ad16e4210a5ec82ddd948ee61c1c6a532a; [gas] assertTruth+disputeAssertion (incl. VotingV2.requestPrice) 598438
+      VotingV2 request status 3 (3 = Future), voting round 10390, current round 10389; getPendingRequests() length 0
+      settle before the vote reverts: Price is still to be voted on
+      balances after assert+dispute     Probe    800.0 | OOv3  200.0 | Store    0.0  (TestnetERC20)
+      [start] block time 1795219721 (2026-11-21T00:08:41.000Z), round 10389, phase Commit
+      DVM request status Future, lastVotingRound 10390, stored rollCount 0
+      voting round 10390: commit [1795392000, 1795478400), reveal [1795478400, 1795564800)
+      [commit phase] block time 1795392000 (2026-11-23T00:00:00.000Z), round 10390, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0xf9f46c51bf42ed7cec55ef9cc4a37364540fccdaa741e8c4ffa8c5f5071bb20c gas 94683
+        commit  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC tx 0xc6ac591af4a63bd4f4c3bf87e219e9f8b70e92e987d0095fb3507cfcc8f1364b gas 89225
+        commit  0x90F79bf6EB2c4f870365E785982E1f101E93b906 tx 0x8e9372ae409aa86b2a8b1bf2a20943d358ceb04ea6f88af576a5047a5a0a7c47 gas 89225
+      [reveal phase] block time 1795478400 (2026-11-24T00:00:00.000Z), round 10390, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 1000000000000000000 tx 0x29d7c762231668432c8add125f98c45ea7487b77f17acb90beff1403a3e324be gas 193809
+        reveal  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC price 1000000000000000000 tx 0x34b8d411aff1519331d423fb715654949035b0076a160970589a15dc64a52988 gas 82557
+        reveal  0x90F79bf6EB2c4f870365E785982E1f101E93b906 price 1000000000000000000 tx 0x0c42d7235a1b1e0ce7d894423cad058be562c133d84af5239dbd78ff85092358 gas 82557
+      [round ended] block time 1795564800 (2026-11-25T00:00:00.000Z), round 10391, phase Commit
+        settleAssertion tx 0x011c97aac18ed56b7155c3079de5d00e6bb8bec01ccb5effbb273a15ab66fbaa gas 204097
+      simulated time advanced: 345073 s (95.8536111111111 h)
+      balances after settle             Probe    950.0 | OOv3    0.0 | Store   50.0  (TestnetERC20)
+      round 10390: resolved callback assertedTruthfully=true, Store +50.0
+      voter stakes after round          1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    ✔ disputed assertion resolved TRUE by a real commit/reveal vote (161ms)
+    --- TestnetERC20: resolve FALSE by vote of all 3 voters, bond 200.0 ---
+      balances before                   Probe    950.0 | OOv3    0.0 | Store   50.0  (TestnetERC20)
+      assertionId 0x93b9bbc97876c671d7184a817cb5267b56b5a03372674705f867951b5736a178; [gas] assertTruth+disputeAssertion (incl. VotingV2.requestPrice) 530050
+      VotingV2 request status 3 (3 = Future), voting round 10392, current round 10391; getPendingRequests() length 0
+      settle before the vote reverts: Price is still to be voted on
+      balances after assert+dispute     Probe    550.0 | OOv3  400.0 | Store   50.0  (TestnetERC20)
+      [start] block time 1795564802 (2026-11-25T00:00:02.000Z), round 10391, phase Commit
+      DVM request status Future, lastVotingRound 10392, stored rollCount 0
+      voting round 10392: commit [1795737600, 1795824000), reveal [1795824000, 1795910400)
+      [commit phase] block time 1795737600 (2026-11-27T00:00:00.000Z), round 10392, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0x92ab75ec6099a8fb4642a6740a00edcc26ee3221312c1d4ce24d072f5f191425 gas 215410
+        commit  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC tx 0x69eccc9272e3c7689d731abba3cc13167883bf23286ca6ddec37e358a08fb42d gas 140941
+        commit  0x90F79bf6EB2c4f870365E785982E1f101E93b906 tx 0xdcf85c95a5b88c76ff36b30e783167ab38c0fde63d9f60fde6343a146cbd89d2 gas 140953
+      [reveal phase] block time 1795824000 (2026-11-28T00:00:00.000Z), round 10392, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 0 tx 0x43812d20c3efc71607929b5b706982adcb95436eedcfbeaa6763885d5c417e66 gas 171266
+        reveal  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC price 0 tx 0x031f70bf9aa2ea8257c3e4954f7931d8e354b3482155a795dc0dfe702175f4df gas 82497
+        reveal  0x90F79bf6EB2c4f870365E785982E1f101E93b906 price 0 tx 0x3b28441e8471e8e76c4ce7ad020726da607b76c8bdf8d280fefab70cbd5e8179 gas 82485
+      [round ended] block time 1795910400 (2026-11-29T00:00:00.000Z), round 10393, phase Commit
+        settleAssertion tx 0x27c4217e6aa2c34310ca391d504382348b5f328042e736fbed1e24fa3d616d8d gas 128107
+      simulated time advanced: 345592 s (95.99777777777778 h)
+      balances after settle             Probe    850.0 | OOv3    0.0 | Store  150.0  (TestnetERC20)
+      round 10392: resolved callback assertedTruthfully=false, Store +100.0
+      voter stakes after round          1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    ✔ disputed assertion resolved FALSE by a real commit/reveal vote (157ms)
+    --- below quorum: only voter0 (1000000.0 staked) votes; GAT 1500000.0 ---
+      balances before                   Probe    850.0 | OOv3    0.0 | Store  150.0  (TestnetERC20)
+      assertionId 0x01c2d1c77df012f87390a46b333e0d7ec7f8a0126bcdf83fbffe3912a6f57ced; [gas] assertTruth+disputeAssertion (incl. VotingV2.requestPrice) 530062
+      VotingV2 request status 3 (3 = Future), voting round 10394, current round 10393; getPendingRequests() length 0
+      settle before the vote reverts: Price is still to be voted on
+      balances after assert+dispute     Probe    650.0 | OOv3  200.0 | Store  150.0  (TestnetERC20)
+      [start] block time 1795910402 (2026-11-29T00:00:02.000Z), round 10393, phase Commit
+      DVM request status Future, lastVotingRound 10394, stored rollCount 0
+      voting round 10394: commit [1796083200, 1796169600), reveal [1796169600, 1796256000)
+      [commit phase] block time 1796083200 (2026-12-01T00:00:00.000Z), round 10394, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0x42e2bcf31f8bceb3539e36f908608bebcd4790a9794236ee5026bf71527e8eae gas 181210
+      [reveal phase] block time 1796169600 (2026-12-02T00:00:00.000Z), round 10394, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 1000000000000000000 tx 0xb33774c7857d083a69fa6fb3e47312f92ebcfd59319a0a7daf3047755d4000da gas 193821
+      [round ended] block time 1796256000 (2026-12-03T00:00:00.000Z), round 10395, phase Commit
+        settleAssertion REVERTED: Current voting round not ended
+      simulated time advanced: 345596 s (95.99888888888889 h)
+      balances after failed settle      Probe    650.0 | OOv3  200.0 | Store  150.0  (TestnetERC20)
+      request still pending (Active): lastVotingRound 10394, rollCount 1 (current round 10395; deleted once rollCount > maxRolls=4)
+      voter stakes after failed round   1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    --- same request, next round, all voters vote TRUE ---
+      [start] block time 1796256000 (2026-12-03T00:00:00.000Z), round 10395, phase Commit
+      DVM request status Active, lastVotingRound 10395, stored rollCount 0
+      voting round 10395: commit [1796256000, 1796342400), reveal [1796342400, 1796428800)
+      [commit phase] block time 1796256000 (2026-12-03T00:00:00.000Z), round 10395, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0x86cc0625693074b81cef90f7d9f91e0c18df253a03f79ef8962f5f79d3807fdb gas 145368
+        commit  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC tx 0xf4045882900237da4099b891060a403aa4b755a84ca947b1ca20e57b6158fb81 gas 123853
+        commit  0x90F79bf6EB2c4f870365E785982E1f101E93b906 tx 0xf090121d96c65fb4235a37e97a047dba3bf823f43418004543f300edfc5418cc gas 123853
+      [reveal phase] block time 1796342400 (2026-12-04T00:00:00.000Z), round 10395, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 1000000000000000000 tx 0x4b0bc006cc133e98d03d0e3d7804594d23af6d5326d5e21ffde714a539ea366f gas 193821
+        reveal  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC price 1000000000000000000 tx 0x51a84eaef1a2d79af41b40faeb6efa7890fcc95d2828915540304889285da0f2 gas 82569
+        reveal  0x90F79bf6EB2c4f870365E785982E1f101E93b906 price 1000000000000000000 tx 0xad78e8c5d79e1a790624a68888c7e9556283d9e62d7fc3dee0cdb806e3a860eb gas 82569
+      [round ended] block time 1796428800 (2026-12-05T00:00:00.000Z), round 10396, phase Commit
+        settleAssertion tx 0x9ddefb26942228553a3a358da2411bfcc7452b9683608f934602d97161efdecf gas 152797
+      simulated time advanced: 172794 s (47.998333333333335 h)
+      balances after settle             Probe    800.0 | OOv3    0.0 | Store  200.0  (TestnetERC20)
+      voter stakes after round          1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    ✔ vote below quorum (1 of 3 voters, stake <= GAT): no resolution, request rolls; next round resolves it (217ms)
+    bond currency = UMA's WETH9 (fresh stack)
+    deployUmaWithVoting(WETH9): 32 transactions in 248 ms
+      [gas] deploy Finder                                 344306
+      [gas] deploy Store                                  2099879
+      [gas] deploy AddressWhitelist                       709282
+      [gas] deploy IdentifierWhitelist                    321146
+      [gas] deploy Registry                               1644591
+      [gas] deploy VotingToken                            2158939
+      [gas] deploy WETH9                                  615313
+      [gas] Finder.set Store                              47825
+      [gas] Finder.set CollateralWhitelist                47993
+      [gas] Finder.set IdentifierWhitelist                47993
+      [gas] Finder.set Registry                           47861
+      [gas] AddressWhitelist.addToWhitelist               92570
+      [gas] IdentifierWhitelist.addSupportedIdentifier    47243
+      [gas] Store.setFinalFee                             49883
+      [gas] VotingToken.addMember(Minter, deployer)       55087
+      [gas] VotingToken.mint voter0                       80328
+      [gas] VotingToken.mint voter1                       63216
+      [gas] VotingToken.mint voter2                       63228
+      [gas] deploy FixedSlashSlashingLibrary              202355
+      [gas] deploy VotingV2                               5162733
+      [gas] VotingToken.addMember(Minter, VotingV2)       55087
+      [gas] Finder.set Oracle (VotingV2)                  47837
+      [gas] deploy OptimisticOracleV3                     4097379
+      [gas] Finder.set OptimisticOracleV3                 47981
+      [gas] Registry.addMember(ContractCreator, deployer) 55011
+      [gas] Registry.registerContract(OOv3)               96045
+      [gas] voter0 VotingToken.approve                    46270
+      [gas] voter0 VotingV2.stake                         132911
+      [gas] voter1 VotingToken.approve                    46270
+      [gas] voter1 VotingV2.stake                         100087
+      [gas] voter2 VotingToken.approve                    46270
+      [gas] voter2 VotingV2.stake                         100087
+      [gas] TOTAL deployUmaWithVoting                     18773006
+    params: finalFee 50.0, minimumBond 100.0, liveness 7200s, phaseLength 86400s, voters 3 x 1000000.0 staked, GAT 1500000.0, SPAT 0.5, emissionRate 0, maxRolls 4, baseSlash 0.001
+    --- WETH9: resolve TRUE by vote of all 3 voters, bond 100.0 ---
+      balances before                   Probe   1000.0 | OOv3    0.0 | Store    0.0  (WETH9)
+      assertionId 0x28dff7224489bfcefdab09d4318510a82a53bd32657e5e6aeaab49c9f41c2c40; [gas] assertTruth+disputeAssertion (incl. VotingV2.requestPrice) 595787
+      VotingV2 request status 3 (3 = Future), voting round 10397, current round 10396; getPendingRequests() length 0
+      settle before the vote reverts: Price is still to be voted on
+      balances after assert+dispute     Probe    800.0 | OOv3  200.0 | Store    0.0  (WETH9)
+      [start] block time 1796428837 (2026-12-05T00:00:37.000Z), round 10396, phase Commit
+      DVM request status Future, lastVotingRound 10397, stored rollCount 0
+      voting round 10397: commit [1796601600, 1796688000), reveal [1796688000, 1796774400)
+      [commit phase] block time 1796601600 (2026-12-07T00:00:00.000Z), round 10397, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0x2eb2ef80cb0d1b0aeef46385624932d47c55291998b1115ea2e25cc415617d58 gas 94695
+        commit  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC tx 0x1226b7d421990deab66500964a4248ef33381379a5666810719dc9ff03805a07 gas 89237
+        commit  0x90F79bf6EB2c4f870365E785982E1f101E93b906 tx 0x402a98500402b13fe983b8385942a951c8e36648b2868f354205656269c03900 gas 89249
+      [reveal phase] block time 1796688000 (2026-12-08T00:00:00.000Z), round 10397, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 1000000000000000000 tx 0xc1938960ec110c8064ca30cc0da833e66083185890df28b56917a7205c7f61b4 gas 193821
+        reveal  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC price 1000000000000000000 tx 0x0c7dd11cad116de12c70b3304a78428d12ac6d679339f32baae382a183733c8e gas 82569
+        reveal  0x90F79bf6EB2c4f870365E785982E1f101E93b906 price 1000000000000000000 tx 0xbb9f7053cc52d46243df0b373852b2e6ac0a95811f1aa875373aeb0c1a789876 gas 82569
+      [round ended] block time 1796774400 (2026-12-09T00:00:00.000Z), round 10398, phase Commit
+        settleAssertion tx 0x9e87d9aebab639eeb8f927da26a8ea3fce6bf6d4594330069efac585470052e1 gas 204649
+      simulated time advanced: 345557 s (95.98805555555556 h)
+      balances after settle             Probe    950.0 | OOv3    0.0 | Store   50.0  (WETH9)
+      round 10397: resolved callback assertedTruthfully=true, Store +50.0
+      voter stakes after round          1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+      ✔ disputed assertion with a WETH9 bond resolved TRUE by vote (148ms)
+    --- summary ---
+      [gas] commitVote       n=13 min 89225 max 215410
+      [gas] revealVote       n=13 min 82485 max 193821
+      [gas] settleAssertion  n=4 min 128107 max 204649
+      total simulated time advanced on the chain: 1554612 s = 17.99 days (4 settled votes + 1 failed round)
+      wall-clock time of the whole test: 1442 ms
+
+
+  4 passing (1s)
+
+=== same test with PHASE_LENGTH=60 ===
+npm notice run npx
+npm notice run 'hardhat' test
+
+
+  UMA OOv3 + real DVM (VotingV2) on a plain local chain
+    network hardhat, hardfork osaka, chainId 31337
+    deployUmaWithVoting(TestnetERC20): 32 transactions in 453 ms
+      [gas] deploy Finder                                 344306
+      [gas] deploy Store                                  2099879
+      [gas] deploy AddressWhitelist                       709282
+      [gas] deploy IdentifierWhitelist                    321146
+      [gas] deploy Registry                               1644591
+      [gas] deploy VotingToken                            2158939
+      [gas] deploy TestnetERC20                           807142
+      [gas] Finder.set Store                              47825
+      [gas] Finder.set CollateralWhitelist                47993
+      [gas] Finder.set IdentifierWhitelist                47993
+      [gas] Finder.set Registry                           47849
+      [gas] AddressWhitelist.addToWhitelist               92570
+      [gas] IdentifierWhitelist.addSupportedIdentifier    47243
+      [gas] Store.setFinalFee                             49883
+      [gas] VotingToken.addMember(Minter, deployer)       55087
+      [gas] VotingToken.mint voter0                       80328
+      [gas] VotingToken.mint voter1                       63216
+      [gas] VotingToken.mint voter2                       63228
+      [gas] deploy FixedSlashSlashingLibrary              202355
+      [gas] deploy VotingV2                               5162709
+      [gas] VotingToken.addMember(Minter, VotingV2)       55087
+      [gas] Finder.set Oracle (VotingV2)                  47837
+      [gas] deploy OptimisticOracleV3                     4097379
+      [gas] Finder.set OptimisticOracleV3                 47981
+      [gas] Registry.addMember(ContractCreator, deployer) 55011
+      [gas] Registry.registerContract(OOv3)               96045
+      [gas] voter0 VotingToken.approve                    46270
+      [gas] voter0 VotingV2.stake                         132911
+      [gas] voter1 VotingToken.approve                    46270
+      [gas] voter1 VotingV2.stake                         100087
+      [gas] voter2 VotingToken.approve                    46270
+      [gas] voter2 VotingV2.stake                         100087
+      [gas] TOTAL deployUmaWithVoting                     18964799
+    params: finalFee 50.0, minimumBond 100.0, liveness 7200s, phaseLength 60s, voters 3 x 1000000.0 staked, GAT 1500000.0, SPAT 0.5, emissionRate 0, maxRolls 4, baseSlash 0.001
+      voter stakes after deploy         1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    --- TestnetERC20: resolve TRUE by vote of all 3 voters, bond 100.0 ---
+      balances before                   Probe   1000.0 | OOv3    0.0 | Store    0.0  (TestnetERC20)
+      assertionId 0xb3c140e567f612f25092ea276c42245be1457630c7388e9c035f4c35eca78d53; [gas] assertTruth+disputeAssertion (incl. VotingV2.requestPrice) 598438
+      VotingV2 request status 3 (3 = Future), voting round 14960165, current round 14960164; getPendingRequests() length 0
+      settle before the vote reverts: Price is still to be voted on
+      balances after assert+dispute     Probe    800.0 | OOv3  200.0 | Store    0.0  (TestnetERC20)
+      [start] block time 1795219723 (2026-11-21T00:08:43.000Z), round 14960164, phase Commit
+      DVM request status Future, lastVotingRound 14960165, stored rollCount 0
+      voting round 14960165: commit [1795219800, 1795219860), reveal [1795219860, 1795219920)
+      [commit phase] block time 1795219800 (2026-11-21T00:10:00.000Z), round 14960165, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0xfd8f5fe631a750fc08e1c6e91d11efc47d23f2d7876d8973e71cf8c7ebe59aaa gas 94683
+        commit  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC tx 0xff4f0bf716ecc4215e2ede00d7a367487fae68dbc1bdf5bf5d17f13d3873ad7d gas 89237
+        commit  0x90F79bf6EB2c4f870365E785982E1f101E93b906 tx 0x837387acaae917759ad8ce571d2324e713fa95e871827f4590e879f8072654d8 gas 89237
+      [reveal phase] block time 1795219860 (2026-11-21T00:11:00.000Z), round 14960165, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 1000000000000000000 tx 0x706da47aab8333707cabf92e8024be7b88c90c980230b9e70b877c099ceaf712 gas 193809
+        reveal  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC price 1000000000000000000 tx 0x545321b475f642eeec5bc522d7d0771eb781410e11bf127b7aa6ebb728abc0ce gas 82557
+        reveal  0x90F79bf6EB2c4f870365E785982E1f101E93b906 price 1000000000000000000 tx 0x02f355f33edf867681d33a32b1c729e809b32f658d4c8122267be51596f997ef gas 82557
+      [round ended] block time 1795219920 (2026-11-21T00:12:00.000Z), round 14960166, phase Commit
+        settleAssertion tx 0x7a39005e60dd588c39adb7bdff917682262fb77761c26c0d9e20454a4c05a271 gas 204097
+      simulated time advanced: 191 s (0.05305555555555556 h)
+      balances after settle             Probe    950.0 | OOv3    0.0 | Store   50.0  (TestnetERC20)
+      round 14960165: resolved callback assertedTruthfully=true, Store +50.0
+      voter stakes after round          1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    ✔ disputed assertion resolved TRUE by a real commit/reveal vote (158ms)
+    --- TestnetERC20: resolve FALSE by vote of all 3 voters, bond 200.0 ---
+      balances before                   Probe    950.0 | OOv3    0.0 | Store   50.0  (TestnetERC20)
+      assertionId 0x07c5d92edd5d1114d9d6f8163dedf8ff88d0f6c5b8cbc94c28951cf10a7f7bb3; [gas] assertTruth+disputeAssertion (incl. VotingV2.requestPrice) 530050
+      VotingV2 request status 3 (3 = Future), voting round 14960167, current round 14960166; getPendingRequests() length 0
+      settle before the vote reverts: Price is still to be voted on
+      balances after assert+dispute     Probe    550.0 | OOv3  400.0 | Store   50.0  (TestnetERC20)
+      [start] block time 1795219922 (2026-11-21T00:12:02.000Z), round 14960166, phase Commit
+      DVM request status Future, lastVotingRound 14960167, stored rollCount 0
+      voting round 14960167: commit [1795220040, 1795220100), reveal [1795220100, 1795220160)
+      [commit phase] block time 1795220040 (2026-11-21T00:14:00.000Z), round 14960167, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0x8b9884e81df17243520c8048ea1acc142e0453cda166595c7c181034a0638473 gas 215398
+        commit  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC tx 0x44a001a6b64e709a34c5b846e7a6148af64d462356eaf74f09468e33bf71f648 gas 140941
+        commit  0x90F79bf6EB2c4f870365E785982E1f101E93b906 tx 0x708f377be06559e5a2f45e6ab11fff6d403fb501391141cbc07f093c6b222ba2 gas 140929
+      [reveal phase] block time 1795220100 (2026-11-21T00:15:00.000Z), round 14960167, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 0 tx 0x51444e5428476098d09729e21f15f78a12f9855d65d3bc600f67a252432f5a5d gas 171254
+        reveal  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC price 0 tx 0x07497ef384ba6f03d11babb4f411ea09c91671f9225b4ff9482abbcba2299974 gas 82473
+        reveal  0x90F79bf6EB2c4f870365E785982E1f101E93b906 price 0 tx 0x31ba357469c5c714079fa4ae891870cb2ee5f3e2e0e4ea45b268676a08adca6e gas 82485
+      [round ended] block time 1795220160 (2026-11-21T00:16:00.000Z), round 14960168, phase Commit
+        settleAssertion tx 0x77fe405fe8f4f54ba941c657e4e74cd90d3c7496e839213dd5771962bc2089ad gas 128107
+      simulated time advanced: 232 s (0.06444444444444444 h)
+      balances after settle             Probe    850.0 | OOv3    0.0 | Store  150.0  (TestnetERC20)
+      round 14960167: resolved callback assertedTruthfully=false, Store +100.0
+      voter stakes after round          1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    ✔ disputed assertion resolved FALSE by a real commit/reveal vote (152ms)
+    --- below quorum: only voter0 (1000000.0 staked) votes; GAT 1500000.0 ---
+      balances before                   Probe    850.0 | OOv3    0.0 | Store  150.0  (TestnetERC20)
+      assertionId 0x1440c9b2b274915647b31f54d740c657bde7ed8cc5db68e8ebf9edaff4077979; [gas] assertTruth+disputeAssertion (incl. VotingV2.requestPrice) 530062
+      VotingV2 request status 3 (3 = Future), voting round 14960169, current round 14960168; getPendingRequests() length 0
+      settle before the vote reverts: Price is still to be voted on
+      balances after assert+dispute     Probe    650.0 | OOv3  200.0 | Store  150.0  (TestnetERC20)
+      [start] block time 1795220162 (2026-11-21T00:16:02.000Z), round 14960168, phase Commit
+      DVM request status Future, lastVotingRound 14960169, stored rollCount 0
+      voting round 14960169: commit [1795220280, 1795220340), reveal [1795220340, 1795220400)
+      [commit phase] block time 1795220280 (2026-11-21T00:18:00.000Z), round 14960169, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0x6dd1add3536b8cb4fb69d0796da547af420ff585af0b3f20f0265ddc3608f328 gas 181186
+      [reveal phase] block time 1795220340 (2026-11-21T00:19:00.000Z), round 14960169, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 1000000000000000000 tx 0x25d95c68189841b79b91b29034e653ae3a94c4b8cdb61e0ef799a7a44426ecd6 gas 193797
+      [round ended] block time 1795220400 (2026-11-21T00:20:00.000Z), round 14960170, phase Commit
+        settleAssertion REVERTED: Current voting round not ended
+      simulated time advanced: 236 s (0.06555555555555556 h)
+      balances after failed settle      Probe    650.0 | OOv3  200.0 | Store  150.0  (TestnetERC20)
+      request still pending (Active): lastVotingRound 14960169, rollCount 1 (current round 14960170; deleted once rollCount > maxRolls=4)
+      voter stakes after failed round   1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    --- same request, next round, all voters vote TRUE ---
+      [start] block time 1795220400 (2026-11-21T00:20:00.000Z), round 14960170, phase Commit
+      DVM request status Active, lastVotingRound 14960170, stored rollCount 0
+      voting round 14960170: commit [1795220400, 1795220460), reveal [1795220460, 1795220520)
+      [commit phase] block time 1795220400 (2026-11-21T00:20:00.000Z), round 14960170, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0x89921e07d168e393fe0507bb1b674ddd03f9e688c058299931d27af20e32fd07 gas 145356
+        commit  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC tx 0x855df9d92ea2f659451c9512d8c432ae5c9095626798b731e48da69c1a7fade8 gas 123841
+        commit  0x90F79bf6EB2c4f870365E785982E1f101E93b906 tx 0x971c23bd190e3b4da6d4dc9496805be6c7f5ac30a3ffd71e1c64ca85df67a7d3 gas 123841
+      [reveal phase] block time 1795220460 (2026-11-21T00:21:00.000Z), round 14960170, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 1000000000000000000 tx 0x1abde91d40382ea82d7efdd8e57095c4d9119de79a207a6a1edb78f1b64a9f2f gas 193809
+        reveal  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC price 1000000000000000000 tx 0x57c0d0d6caa527275f07af09adc2a6ed34b18d2f27b72f7e722ba72c07a75e70 gas 82557
+        reveal  0x90F79bf6EB2c4f870365E785982E1f101E93b906 price 1000000000000000000 tx 0x7300618e1f3a310725a601b5bbf98752a8225042c63ed4ebaa1c4058878ca437 gas 82557
+      [round ended] block time 1795220520 (2026-11-21T00:22:00.000Z), round 14960171, phase Commit
+        settleAssertion tx 0x43c50f3ca2cacd1ef8fa44d175381c2ded54e2bafab579e995e0a80585d392f7 gas 152797
+      simulated time advanced: 114 s (0.03166666666666667 h)
+      balances after settle             Probe    800.0 | OOv3    0.0 | Store  200.0  (TestnetERC20)
+      voter stakes after round          1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+    ✔ vote below quorum (1 of 3 voters, stake <= GAT): no resolution, request rolls; next round resolves it (219ms)
+    bond currency = UMA's WETH9 (fresh stack)
+    deployUmaWithVoting(WETH9): 32 transactions in 245 ms
+      [gas] deploy Finder                                 344306
+      [gas] deploy Store                                  2099879
+      [gas] deploy AddressWhitelist                       709282
+      [gas] deploy IdentifierWhitelist                    321146
+      [gas] deploy Registry                               1644591
+      [gas] deploy VotingToken                            2158939
+      [gas] deploy WETH9                                  615313
+      [gas] Finder.set Store                              47825
+      [gas] Finder.set CollateralWhitelist                47993
+      [gas] Finder.set IdentifierWhitelist                47993
+      [gas] Finder.set Registry                           47861
+      [gas] AddressWhitelist.addToWhitelist               92570
+      [gas] IdentifierWhitelist.addSupportedIdentifier    47243
+      [gas] Store.setFinalFee                             49883
+      [gas] VotingToken.addMember(Minter, deployer)       55087
+      [gas] VotingToken.mint voter0                       80328
+      [gas] VotingToken.mint voter1                       63216
+      [gas] VotingToken.mint voter2                       63228
+      [gas] deploy FixedSlashSlashingLibrary              202355
+      [gas] deploy VotingV2                               5162709
+      [gas] VotingToken.addMember(Minter, VotingV2)       55087
+      [gas] Finder.set Oracle (VotingV2)                  47837
+      [gas] deploy OptimisticOracleV3                     4097379
+      [gas] Finder.set OptimisticOracleV3                 47981
+      [gas] Registry.addMember(ContractCreator, deployer) 55011
+      [gas] Registry.registerContract(OOv3)               96045
+      [gas] voter0 VotingToken.approve                    46270
+      [gas] voter0 VotingV2.stake                         132911
+      [gas] voter1 VotingToken.approve                    46270
+      [gas] voter1 VotingV2.stake                         100087
+      [gas] voter2 VotingToken.approve                    46270
+      [gas] voter2 VotingV2.stake                         100087
+      [gas] TOTAL deployUmaWithVoting                     18772982
+    params: finalFee 50.0, minimumBond 100.0, liveness 7200s, phaseLength 60s, voters 3 x 1000000.0 staked, GAT 1500000.0, SPAT 0.5, emissionRate 0, maxRolls 4, baseSlash 0.001
+    --- WETH9: resolve TRUE by vote of all 3 voters, bond 100.0 ---
+      balances before                   Probe   1000.0 | OOv3    0.0 | Store    0.0  (WETH9)
+      assertionId 0xe7caf6ede04d6a74def91ea383e64c219a8726be9f7e2f229bd83becdf2db275; [gas] assertTruth+disputeAssertion (incl. VotingV2.requestPrice) 595787
+      VotingV2 request status 3 (3 = Future), voting round 14960172, current round 14960171; getPendingRequests() length 0
+      settle before the vote reverts: Price is still to be voted on
+      balances after assert+dispute     Probe    800.0 | OOv3  200.0 | Store    0.0  (WETH9)
+      [start] block time 1795220557 (2026-11-21T00:22:37.000Z), round 14960171, phase Commit
+      DVM request status Future, lastVotingRound 14960172, stored rollCount 0
+      voting round 14960172: commit [1795220640, 1795220700), reveal [1795220700, 1795220760)
+      [commit phase] block time 1795220640 (2026-11-21T00:24:00.000Z), round 14960172, phase Commit
+        commit  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 tx 0x947f50c850252dda6539e9a50dca7e03cc5c3cb83fe8f08fbd8a04bc0937b686 gas 94683
+        commit  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC tx 0xa745b2b24a253f476f99fcdab05bc309742e3176ae281b59507cb2d6e9014eb6 gas 89225
+        commit  0x90F79bf6EB2c4f870365E785982E1f101E93b906 tx 0x95b15e638cec8ffc160fef2c5c863190c025c897aa5e4bbadcdbf8b57aa20401 gas 89225
+      [reveal phase] block time 1795220700 (2026-11-21T00:25:00.000Z), round 14960172, phase Reveal
+        reveal  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 price 1000000000000000000 tx 0xc98ef91b2db4ccc0e40288b861dfa49eb774257ea12e02776cacb10fef0b20ae gas 193809
+        reveal  0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC price 1000000000000000000 tx 0x33957e321d83f8f6147b0f6e20ab95c131e75fb4805d57979ab0a674493088c3 gas 82557
+        reveal  0x90F79bf6EB2c4f870365E785982E1f101E93b906 price 1000000000000000000 tx 0x00df77cd5a3a18bb42b9a2a2568f474d0df89eac14144c0d348fbdd8f05adab3 gas 82557
+      [round ended] block time 1795220760 (2026-11-21T00:26:00.000Z), round 14960173, phase Commit
+        settleAssertion tx 0x7d55e5c6f38903111824f1cfce80a1a6db77e788b5ac338f7c1cc58cb7511515 gas 204649
+      simulated time advanced: 197 s (0.05472222222222222 h)
+      balances after settle             Probe    950.0 | OOv3    0.0 | Store   50.0  (WETH9)
+      round 14960172: resolved callback assertedTruthfully=true, Store +50.0
+      voter stakes after round          1000000.0 | 1000000.0 | 1000000.0  (VotingV2 holds 3000000.0 UMA)
+      ✔ disputed assertion with a WETH9 bond resolved TRUE by vote (149ms)
+    --- summary ---
+      [gas] commitVote       n=13 min 89225 max 215398
+      [gas] revealVote       n=13 min 82473 max 193809
+      [gas] settleAssertion  n=4 min 128107 max 204649
+      total simulated time advanced on the chain: 970 s = 0.01 days (4 settled votes + 1 failed round)
+      wall-clock time of the whole test: 1431 ms
+
+
+  4 passing (1s)
+
