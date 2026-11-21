@@ -1,0 +1,219 @@
+<!doctype html>
+<!-- Paprika demo web UI: the single page.
+     Same screens, layout and wording as the static mock (impl/mock/ui-mock.html), wired to the local chain by app.js.
+     Every amount and duration is filled in at run time from the contract (ctx.params): none is written here.
+     Every control and status element has a stable data-testid (listed in TESTIDS.md) for the end-to-end test. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PAPRIKA · local Ethereum chain · live demo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+<!-- Lets the library's `import { ethers } from "ethers"` resolve to the local browser build (no CDN). -->
+<script type="importmap">{ "imports": { "ethers": "/vendor/ethers.min.js" } }</script>
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+
+<!-- Shown instead of the app when the deployment or the chain cannot be reached. -->
+<div id="fatal" class="hidden" data-testid="fatal-message"><div class="card">
+  <h2>Paprika cannot reach the local chain</h2>
+  <p data-testid="fatal-reason" class="mono"></p>
+  <p>Start the system (local chain, UMA contracts, Paprika contract and this web server) with:</p>
+  <pre>cd app
+npm start</pre>
+  <p class="d">Then reload this page.</p>
+</div></div>
+
+<!-- Error banner: every failed action shows its reason here until dismissed. -->
+<div id="banner" class="hidden" data-testid="error-banner" role="alert">
+  <span class="msg" data-testid="error-message"></span>
+  <button data-testid="btn-dismiss-error" data-always="1">Dismiss</button>
+</div>
+
+<header><div><div class="logo">PAPRIKA</div><div class="sub">Paprika - local Ethereum chain · live demo</div></div>
+<nav>
+  <a href="#device" data-v="device" data-testid="tab-device">Device</a>
+  <a href="#capture" data-v="capture" data-testid="tab-capture">Capture</a>
+  <a href="#verify" data-v="verify" data-testid="tab-verify">Verify</a>
+  <a href="#accuse" data-v="accuse" data-testid="tab-accuse">Accuse</a>
+  <a href="#deposits" data-v="deposits" data-testid="tab-deposits">Deposits</a>
+  <a href="#revoke" data-v="revoke" data-testid="tab-revoke">Revoke key</a>
+</nav></header>
+
+<div class="chainbar">
+  <div data-testid="chain-status"><span class="dot" data-testid="chain-dot"></span>Paprika - local Ethereum chain <span>· block <b data-testid="chain-block">…</b></span></div>
+  <div>Paprika <span class="mono" data-testid="addr-paprika">…</span></div>
+  <div>UMA Optimistic Oracle V3 <span class="mono" data-testid="addr-oo">…</span></div>
+</div>
+<div class="bar2" style="background:var(--sky)">
+  <span class="lbl">Parameters</span>
+  <span class="pchip"><b>B</b> <span data-testid="param-bond">…</span></span>
+  <span class="pchip"><b>challenge period</b> <span data-testid="param-photo-window">…</span></span>
+  <span class="pchip"><b>reveal period</b> <span data-testid="param-reveal-window">…</span></span>
+  <span class="pchip"><b>UMA fee f</b> <span data-testid="param-fee">…</span></span>
+  <span class="d">set at deployment · read from the contract</span>
+</div>
+<div class="bar2">
+  <span class="lbl">Balances (test token <span data-testid="token-symbol">…</span>)</span>
+  <span class="bal">Photographer <b data-testid="balance-photographer">…</b><span class="delta" data-testid="delta-photographer"></span><span class="d" title="Credit in Paprika, not yet withdrawn">credit <span data-testid="header-credit-photographer">…</span></span></span>
+  <span class="bal">Accuser <b data-testid="balance-accuser">…</b><span class="delta" data-testid="delta-accuser"></span><span class="d" title="Credit in Paprika, not yet withdrawn">credit <span data-testid="header-credit-accuser">…</span></span></span>
+  <span class="bal">UMA Store <b data-testid="balance-store">…</b><span class="delta" data-testid="delta-store"></span></span>
+  <div class="timec"><span class="chip">Demo control · local chain only</span><span>local chain time <b data-testid="local-time">…</b></span>
+    <button data-testid="btn-advance-time">Advance time by one challenge period</button></div>
+</div>
+
+<main>
+
+<!-- ============ DEVICE ============ -->
+<section class="view two" id="view-device" data-testid="view-device"><div class="stack">
+  <div class="card"><h2>Device key</h2>
+   <dl class="kv">
+    <dt>Device</dt><dd>demo-cam <span class="chip">Simulated device</span></dd>
+    <dt>Curve</dt><dd>ECDSA P-256</dd>
+    <dt>Public key</dt><dd class="mono" data-testid="device-pubkey">no key yet</dd>
+    <dt>Key id</dt><dd class="mono" data-testid="device-key-id">no key yet</dd>
+    <dt>Owner account</dt><dd>Photographer <span class="mono" data-testid="device-owner">…</span></dd>
+    <dt>Device status</dt><dd data-testid="device-status">no key yet</dd>
+   </dl>
+   <div class="row"><button data-testid="btn-generate-key">1 · Generate key</button><button class="pri big" data-testid="btn-register">2 · Register (free)</button></div>
+   <p class="d">The key is software and is kept in this browser (localStorage, test key only), so a reload keeps it.</p>
+   <p class="note" style="margin-top:14px"><b>No manufacturer or authority approves this device.</b> Registration costs nothing but the transaction fee; what is at stake is the deposit put on each photo.</p>
+  </div></div>
+ <div class="stack"><div class="card"><h2>Registration</h2><ol class="steps" data-testid="device-steps">
+   <li class="wait" data-step="key"><div class="n">1</div><div><div class="t">Key pair created on the device</div><div class="d">The private key stays on the device; only the public key is sent.</div></div><div class="mono r" data-testid="device-step-key"></div></li>
+   <li class="wait" data-step="pop"><div class="n">2</div><div><div class="t">Proof of possession signed by the device</div><div class="d mono">"PAPRIKA/REGISTER" ‖ chainId ‖ contract ‖ keyId ‖ owner <span data-testid="device-pop-owner"></span></div><div class="d">Proves the registering account holds this key. A copied registration fails.</div></div><div class="d r">P-256</div></li>
+   <li class="wait" data-step="reg"><div class="n">3</div><div><div class="t">register(x, y, pop) · no deposit</div><div class="d">Contract checks the signature and that the key was never seen. Device status: <span class="chip m">Active</span></div></div><div class="r"><span class="tx" data-testid="register-tx"></span><div class="d" data-testid="register-block"></div></div></li>
+  </ol><div class="row"><button data-testid="btn-goto-capture">Take a photo with this device →</button></div></div></div>
+</section>
+
+<!-- ============ CAPTURE ============ -->
+<section class="view two" id="view-capture" data-testid="view-capture"><div class="stack">
+  <div class="card"><h2>Camera</h2>
+   <div class="cam" data-testid="capture-preview"><b data-testid="capture-placeholder">no photo yet</b></div>
+   <div class="d" style="margin-top:8px" data-testid="capture-file-name">Choose a source: camera, file, or a generated sample image.</div>
+   <div class="row">
+    <button data-testid="btn-start-camera">Start camera</button>
+    <button data-testid="btn-take-photo">Take photo</button>
+    <button data-testid="btn-choose-file">Load a file instead</button>
+    <button data-testid="btn-sample-image">Use a sample image</button>
+    <input type="file" accept="image/*" data-testid="input-capture-file">
+   </div>
+   <div class="row"><button class="pri big" data-testid="btn-attest">Sign &amp; submit this photo</button></div>
+   <p class="d" style="margin-bottom:0"><span class="chip">Simulated device</span> Signed with a software P-256 key. Whoever submits the signature locks the deposit; here the Photographer does.</p></div></div>
+ <div class="stack"><div class="card"><h2>What happens</h2><ol class="steps" data-testid="capture-steps">
+   <li class="wait" data-step="anchor"><div class="n">1</div><div><div class="t">Recent block hash read from the chain, before the shot</div><div class="d">Unpredictable before block <span data-testid="capture-anchor-block-text">A</span> existed: the signature was made after it.</div></div><div class="r"><div class="d" data-testid="capture-anchor-block"></div><div class="mono" data-testid="capture-anchor-hash"></div></div></li>
+   <li class="wait" data-step="hash"><div class="n">2</div><div><div class="t">Photo hash</div><div class="d">SHA-256 of the file, computed on the device. The file is not sent.</div></div><div class="mono r" data-testid="capture-hash"></div></li>
+   <li class="wait" data-step="sig"><div class="n">3</div><div><div class="t">Device signature</div><div class="d mono" data-testid="capture-signature">"PAPRIKA/CAPTURE" ‖ chainId ‖ contract ‖ keyId ‖ photo hash ‖ blockhash(A)</div></div><div class="d r">P-256</div></li>
+   <li class="wait" data-step="approve"><div class="n">4</div><div><div class="t">Token approval: deposit B</div><div class="d">approve(Paprika, B) on the test token</div></div><span class="tx" data-testid="capture-approve-tx"></span></li>
+   <li class="wait" data-step="attest"><div class="n">5</div><div><div class="t">attest(hash, A, keyId, sig) · deposit B locked</div><div class="d">Contract checks: device Active, block among the last 256, signature valid.</div></div><div class="r"><span class="tx" data-testid="capture-attest-tx"></span><div class="d" data-testid="capture-attest-block"></div></div></li>
+  </ol></div>
+  <div class="card dim" data-testid="capture-record"><h2>The record</h2>
+   <table><tr><th>Photo hash</th><th>Device</th><th>Block window</th><th>Deposit</th></tr>
+   <tr><td class="mono" data-testid="record-hash">—</td><td class="mono" data-testid="record-device">—</td><td data-testid="record-window">—</td>
+       <td><span data-testid="record-deposit">B</span> locked until <b data-testid="record-locked-until">—</b><div class="d">challenge period + reveal period</div></td></tr></table>
+   <p class="note" style="margin-top:12px"><b>What this record shows:</b> a registered device signed this exact file between block <span data-testid="record-block-a">A</span> and block <span data-testid="record-block-b">B</span>, and a deposit was at stake. It does not show the file is a camera capture.</p>
+   <div class="row"><button data-testid="btn-download-photo">Download this photo</button><button data-testid="btn-goto-verify">Verify this photo →</button></div></div></div>
+</section>
+
+<!-- ============ VERIFY ============ -->
+<section class="view two" id="view-verify" data-testid="view-verify"><div class="stack">
+  <div class="card"><h2>Drop a file to verify</h2>
+   <div class="cam small" data-testid="verify-dropzone"><b data-testid="verify-placeholder">drop an image here</b></div>
+   <div class="d" style="margin-top:8px" data-testid="verify-file-name">No file yet.</div>
+   <div class="mono" data-testid="verify-hash"></div>
+   <div class="row">
+    <button data-testid="btn-verify-choose-file">Choose a file</button>
+    <button data-testid="btn-verify-last">Verify the last attested photo</button>
+    <button data-testid="btn-change-pixel">Change one pixel and verify again</button>
+    <input type="file" accept="image/*" data-testid="input-verify-file">
+   </div>
+   <p class="d" style="margin-bottom:0">Hashed in the browser; the chain is only read. No account, no transaction.</p></div></div>
+ <div class="stack">
+  <div class="verdict idle" data-testid="verify-status" data-state="idle"><div class="seal" data-testid="verify-seal">?</div><div><div class="bigt" data-testid="verify-title">Drop a file to verify it</div><div class="d" data-testid="verify-detail">The page computes the SHA-256 of the file and asks the contract for its record.</div></div></div>
+  <div class="card hidden" data-testid="verify-record"><h2>Record</h2>
+   <dl class="kv"><dt>Photo hash</dt><dd class="mono" data-testid="verify-record-hash"></dd>
+    <dt>Device</dt><dd><span class="mono" data-testid="verify-record-device"></span> · <span data-testid="verify-device-status"></span></dd>
+    <dt>Block window</dt><dd data-testid="verify-window"></dd>
+    <dt>Photo state</dt><dd data-testid="verify-photo-state"></dd>
+    <dt>Deposit</dt><dd data-testid="verify-deposit"></dd>
+    <dt>Records for this file</dt><dd data-testid="verify-records-count"></dd></dl>
+   <p class="note" style="margin-top:12px" data-testid="verify-honest-sentence"><b>What this record shows:</b> a registered device signed this exact file between block <span data-testid="verify-block-a"></span> and block <span data-testid="verify-block-b"></span>, and a deposit was at stake.</p></div>
+  <div class="card hidden" data-testid="verify-other-records"><h2>Other records of this device · still listed</h2>
+   <table data-testid="verify-other-table"><thead><tr><th>Photo hash</th><th>Window</th><th>Photo state</th><th>Deposit</th></tr></thead><tbody></tbody></table>
+   <p class="d" style="margin-bottom:0">A flag stops new attestations. Earlier records and their deposits are untouched.</p></div>
+ </div>
+</section>
+
+<!-- ============ ACCUSE ============ -->
+<section class="view" id="view-accuse" data-testid="view-accuse">
+ <div class="stepper"><div data-testid="accuse-step-1">1 · Commit<span>hash + bond B</span></div><div data-testid="accuse-step-2">2 · Reveal<span>after ≥ 1 block, within the reveal period</span></div><div data-testid="accuse-step-3">3 · UMA vote<span>always disputed</span></div><div data-testid="accuse-step-4">4 · Settle<span>money flows</span></div></div>
+ <div class="two" style="display:grid;gap:24px">
+  <div class="card"><h2>Accusation</h2>
+   <label class="f" for="acc-photo">Photo</label>
+   <div style="display:flex;gap:8px"><select id="acc-photo" style="flex:1;min-width:0" data-testid="select-accuse-photo"></select><button data-testid="btn-refresh-records" title="Reload the records from the chain">↻</button></div>
+   <label class="f" for="acc-ev">Evidence (link or hash of public evidence)</label><input id="acc-ev" data-testid="input-evidence" value="">
+   <label class="f">Secret</label><div class="mono note" style="background:#fff" data-testid="accuse-secret">random, created at commit and kept by the accuser</div>
+   <div class="row"><button class="pri" data-testid="btn-commit">1 · Commit (lock B)</button><button class="pri" data-testid="btn-reveal">2 · Reveal</button><button data-testid="btn-accuse-new">Start a new accusation</button></div>
+   <p class="d" style="margin-bottom:0">Accuser <span class="mono" data-testid="accuser-address"></span>. Only one open accusation per photo.</p></div>
+  <div class="stack">
+   <div class="card hidden" data-testid="accuse-panel-commit"><h2>1 · Commit</h2>
+    <div class="mono note" style="background:#fff">commitment = hash(accuser ‖ photo ‖ device ‖ evidence ‖ secret) = <span data-testid="commit-commitment"></span></div>
+    <p style="margin-bottom:0">Bond <b>B</b> locked. <b>Nobody can tell which photo is accused</b>: the commitment reveals nothing, so the photographer cannot react and a copier cannot take the accusation as its own.</p>
+    <div class="row"><span class="tx" data-testid="commit-tx"></span><span class="d" data-testid="commit-block"></span><span class="chip" data-testid="commit-status">revealable from the next block</span></div></div>
+   <div class="card hidden" data-testid="accuse-panel-reveal"><h2>2 · Reveal → UMA</h2><ol class="steps">
+     <li class="done"><div class="n">a</div><div><div class="t">Reveal: photo, device, evidence, secret</div><div class="d">Contract recomputes the commitment: it matches.</div></div><span class="tx" data-testid="reveal-tx"></span></li>
+     <li class="done"><div class="n">b</div><div><div class="t">Accusation asserted to UMA with the accuser's bond B</div><div class="d mono">"The evidence shows photo <span data-testid="reveal-photo"></span> is not a genuine capture"</div><div class="d mono">assertion id <span data-testid="reveal-assertion-id"></span></div></div><div class="d r">assertTruth</div></li>
+     <li class="done"><div class="n">c</div><div><div class="t">Disputed at once with the photo's deposit B</div><div class="d">So every accusation goes to a vote: no photo is condemned because its owner was not watching.</div></div><div class="d r">disputeAssertion</div></li></ol></div>
+   <div class="card hidden" data-testid="accuse-panel-vote"><h2>3 · UMA vote <span class="chip p">vote simulated with UMA's mock oracle</span></h2>
+    <p class="d" style="margin-top:0">Question: does the evidence prove this photo is not a genuine capture? Under UMA's rules the answer is yes only if publicly verifiable. In production UMA token holders vote; here we enter the outcome.</p>
+    <div class="row"><button class="warn" data-testid="btn-vote-fake">Evidence proves the fake</button><button class="good" data-testid="btn-vote-not-fake">Evidence does not prove it</button></div></div>
+   <div class="card hidden" data-testid="accuse-panel-settle"><h2>4 · Settle <span data-testid="settle-outcome"></span></h2>
+    <table><tr><th>Outcome</th><th>Accuser</th><th>Depositor</th><th>UMA Store</th><th>Photo · device</th></tr>
+    <tr data-testid="settle-row-fake"><td><b>Fake proven</b></td><td class="up">B back + (B − f×B)</td><td class="down">− B</td><td>+ f×B</td><td>marked fake · device flagged</td></tr>
+    <tr data-testid="settle-row-not-proven"><td><b>Not proven</b></td><td class="down">− B</td><td class="up">B kept + (B − f×B)</td><td>+ f×B</td><td>unchanged · still accusable for its remaining time</td></tr></table>
+    <h2 style="margin-top:16px">Measured on the chain · from before the commit to after the vote</h2>
+    <table><tr><th></th><th>Accuser</th><th>Depositor</th><th>UMA Store</th></tr>
+     <tr><td><b>Money moved</b></td><td data-testid="settle-accuser"></td><td data-testid="settle-depositor"></td><td data-testid="settle-store"></td></tr>
+     <tr><td><b>Formula</b></td><td class="d" data-testid="settle-formula-accuser"></td><td class="d" data-testid="settle-formula-depositor"></td><td class="d" data-testid="settle-formula-store"></td></tr>
+     <tr><td><b>With B, f</b></td><td class="d" data-testid="settle-expected-accuser"></td><td class="d" data-testid="settle-expected-depositor"></td><td class="d" data-testid="settle-expected-store"></td></tr></table>
+    <p class="d">Money moved = wallet balance + credit in Paprika (+ the photo's locked deposit, for the depositor). Paprika pays by credits: withdraw them to the wallet below.</p>
+    <div class="row"><span class="tx" data-testid="vote-tx"></span></div>
+    <div class="row">
+     <span>Accuser credit <b data-testid="credit-accuser">…</b></span><button data-testid="btn-withdraw-accuser">Withdraw credit (Accuser)</button>
+     <span>Photographer credit <b data-testid="credit-photographer">…</b></span><button data-testid="btn-withdraw-photographer">Withdraw credit (Photographer)</button>
+    </div>
+    <div class="row"><button data-testid="btn-accuse-verify">Verify the photo →</button></div></div>
+  </div></div>
+</section>
+
+<!-- ============ DEPOSITS ============ -->
+<section class="view" id="view-deposits" data-testid="view-deposits"><div class="card"><h2>Photographer's deposits</h2>
+ <table data-testid="deposits-table"><thead><tr><th>Photo hash</th><th>Device</th><th>Window</th><th>State</th><th>Deposit</th><th>Refundable from</th><th></th></tr></thead><tbody></tbody></table>
+ <p class="d" data-testid="deposits-empty">No deposits yet.</p>
+ <p class="d">A deposit can be refunded only after the challenge period plus the reveal period, so an accusation committed at the last moment can still be revealed. The record stays forever.</p>
+ <div class="row"><span>Photographer credit <b data-testid="deposits-credit">…</b></span><button data-testid="btn-deposits-withdraw">Withdraw credit</button><button data-testid="btn-deposits-refresh">Reload from the chain</button></div></div>
+</section>
+
+<!-- ============ REVOKE ============ -->
+<section class="view two" id="view-revoke" data-testid="view-revoke"><div class="card"><h2>Revoke a device key</h2>
+  <p class="d" style="margin-top:0">For an owner whose key was stolen or copied. Whoever holds the key can flag the device: no UMA, no money.</p>
+  <label class="f">Device</label><div class="mono note" style="background:#fff" data-testid="revoke-device">no device key in this page</div>
+  <label class="f">Message signed by the key (names the caller)</label><div class="mono note" style="background:#fff" data-testid="revoke-message">"PAPRIKA/REVOKE" ‖ chainId ‖ contract ‖ keyId ‖ caller</div>
+  <div class="row"><button class="warn big" data-testid="btn-revoke">Revoke key</button><span class="d" data-testid="revoke-why"></span></div></div>
+ <div class="card dim" data-testid="revoke-result"><h2>Result</h2><ol class="steps">
+   <li class="done"><div class="n">1</div><div><div class="t">Signature checked</div><div class="d">It names the caller, so a copied transaction fails.</div></div><span class="tx" data-testid="revoke-tx"></span></li>
+   <li class="flag"><div class="n">2</div><div><div class="t" data-testid="revoke-status">Device flagged · reason: key revoked</div><div class="d">It cannot attest again.</div></div><div class="d r">no money moves</div></li>
+   <li class="done"><div class="n">3</div><div><div class="t">Existing records and deposits untouched</div><div class="d">Each keeps its deposit and challenge period, and is refunded on schedule.</div></div></li></ol>
+  <div class="row"><button data-testid="btn-revoke-verify">Verify a photo of this device →</button></div></div>
+</section>
+
+<details class="log" data-testid="activity-log"><summary data-testid="activity-log-toggle">Activity log · transactions of this session on the local chain</summary>
+ <div class="card" style="margin-top:8px;padding:10px 14px"><table data-testid="activity-log-table"><thead><tr><th>Block</th><th>Tx</th><th>Call</th><th>From</th></tr></thead><tbody></tbody></table></div></details>
+</main>
+
+<div id="busy" class="hidden" data-testid="busy-indicator"></div>
+
+<footer data-testid="footer"><b>REAL:</b> Paprika contract, UMA Optimistic Oracle V3 contracts, signatures, deposits and payouts, all on a local Ethereum chain. <b>SIMULATED:</b> the device key (software), UMA's token-holder vote (outcome entered by us).</footer>
+</body>
+</html>

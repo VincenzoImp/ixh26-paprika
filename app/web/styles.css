@@ -1,0 +1,77 @@
+/* Paprika demo web UI: styles.
+   Taken from the static mock (impl/mock/ui-mock.html) so the live page keeps the same visual language,
+   plus a few additions for the live app: error banner, full-page message, drop zone, image preview. */
+
+:root{--ink:#14123a;--paper:#f8f6f1;--lilac:#e4dcfb;--lemon:#fff8b8;--mint:#c9f2d6;--rose:#ffd9d2;--sky:#dce6ff;--peach:#ffe6c2;--accent:#3b45b5;--line:#14123a22}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.45 "Helvetica Neue",Helvetica,Arial,sans-serif;padding-bottom:44px}
+header{display:flex;align-items:center;gap:24px;padding:14px 28px;border-bottom:2px solid var(--ink);background:#fff}
+.logo{font-weight:800;font-size:24px;letter-spacing:.5px}.sub{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;opacity:.7}
+nav{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}nav a{padding:7px 12px;border:2px solid var(--ink);border-radius:8px;font-weight:700;font-size:13px;text-decoration:none;color:var(--ink);background:#fff}
+nav a.on{background:var(--ink);color:#fff}
+.chainbar{display:flex;gap:22px;align-items:center;flex-wrap:wrap;background:var(--lemon);border-bottom:2px solid var(--ink);padding:6px 28px;font-size:12px;font-weight:700}
+.chainbar span{font-weight:400}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1f9d55;margin-right:6px}
+.dot.off{background:#b3261e}
+main{padding:22px 28px;max-width:1240px;margin:auto}.view{display:none}.view.on{display:grid;gap:24px}
+.two{grid-template-columns:minmax(320px,1fr) minmax(430px,1.25fr)}.half{grid-template-columns:1fr 1fr}
+.card{background:#fff;border:2px solid var(--ink);border-bottom-width:6px;border-radius:12px;padding:18px}
+h2{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+.cam{aspect-ratio:4/3;border-radius:8px;border:2px solid var(--ink);background:linear-gradient(160deg,#dce6ff 0 45%,#c9f2d6 45% 70%,#e4dcfb 70%);position:relative;display:grid;place-items:center;overflow:hidden}
+.cam b{background:#fff;border:2px solid var(--ink);border-radius:6px;padding:2px 10px;font-size:12px;z-index:1}
+.cam.small{aspect-ratio:16/9}
+.cam video,.cam img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff}
+.cam.drag{outline:4px dashed var(--accent);outline-offset:-8px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+button,select,input,textarea{font:700 14px inherit;font-family:inherit;padding:10px 14px;border-radius:8px;border:2px solid var(--ink);background:#fff;color:var(--ink)}
+button{cursor:pointer}button.pri{background:var(--ink);color:#fff}button.big{font-size:16px;padding:13px 22px}button.warn{background:var(--rose)}button.good{background:var(--mint)}button:disabled{opacity:.4;cursor:default}
+button.sel{outline:3px solid var(--accent);outline-offset:1px}
+input,textarea{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;width:100%}textarea{height:62px;resize:none}
+input[type=file]{display:none}
+label.f{display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px}
+.d{font-size:13px;opacity:.8}.mono{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+.chip{display:inline-block;border:2px solid var(--ink);border-radius:6px;padding:0 7px;font-size:11px;font-weight:800;text-transform:uppercase;background:var(--lemon)}
+.chip.m{background:var(--mint)}.chip.r{background:var(--rose)}.chip.p{background:var(--peach)}.chip.s{background:var(--sky)}
+ol.steps{list-style:none;margin:0;padding:0}ol.steps li{display:grid;grid-template-columns:34px 1fr auto;gap:10px;padding:10px 0;border-top:1.5px solid var(--line);align-items:start}
+ol.steps li:first-child{border-top:0}.n{width:26px;height:26px;border-radius:50%;border:2px solid var(--ink);display:grid;place-items:center;font-size:12px;font-weight:800;background:#fff}
+li.done .n{background:var(--mint)}li.bad .n{background:var(--rose)}li.flag .n{background:var(--peach)}li.wait{opacity:.38}li.run .n{background:var(--lemon)}.t{font-weight:700}
+li .r{text-align:right}
+.tx{font:12px ui-monospace,Menlo,monospace;color:var(--accent);text-decoration:underline;white-space:nowrap}
+.verdict{display:flex;align-items:center;gap:16px;border-radius:12px;border:2px solid var(--ink);border-bottom-width:6px;padding:16px 20px;background:var(--mint)}
+.verdict.bad{background:var(--rose)}.verdict.flag{background:var(--peach)}.verdict.idle{background:#fff}.bigt{font-size:24px;font-weight:800;line-height:1.1}
+.seal{width:52px;height:52px;border-radius:50%;border:2px solid var(--ink);background:#fff;display:grid;place-items:center;font-size:27px;font-weight:800;flex:none}
+table{border-collapse:collapse;width:100%;font-size:13px}th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:6px 8px;border-bottom:2px solid var(--ink)}
+td{padding:7px 8px;border-bottom:1.5px solid var(--line);vertical-align:top}.ok{color:#17703f;font-weight:700}.no{color:#b3261e;font-weight:700}.am{color:#a04a00;font-weight:700}
+td.mono{white-space:nowrap;word-break:normal}
+.note{font-size:12px;background:var(--lilac);border:2px solid var(--ink);border-radius:8px;padding:8px 12px;margin:0}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-size:13px}.kv dt{font-weight:700}.kv dd{margin:0}
+.stack{display:grid;gap:16px;align-content:start}
+footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:2px solid var(--ink);padding:7px 28px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:5}
+footer b{text-transform:uppercase;font-size:11px;letter-spacing:.5px}
+.bar2{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:#fff;border-bottom:2px solid var(--ink);padding:7px 28px;font-size:12px}
+.bar2 .lbl{font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:.5px;opacity:.8}
+.pchip{display:inline-flex;gap:6px;align-items:center;border:2px solid var(--ink);border-radius:6px;padding:1px 8px;background:#fff;font-size:12px}
+.pchip b{font-weight:800}
+.bal{display:inline-flex;gap:6px;align-items:baseline}.bal b{font-size:13px}.bal .delta{font-size:11px;font-weight:800}
+.up{color:#17703f}.down{color:#b3261e}
+.timec{margin-left:auto;display:flex;gap:8px;align-items:center}
+.timec button{font-size:12px;padding:5px 10px}
+.stepper{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:2px solid var(--ink);border-radius:10px;overflow:hidden;background:#fff}
+.stepper div{padding:10px 14px;border-right:2px solid var(--ink);font-weight:700;font-size:14px}.stepper div:last-child{border-right:0}
+.stepper div span{display:block;font-size:11px;font-weight:400;opacity:.75}
+.stepper .done{background:var(--mint)}.stepper .cur{background:var(--lemon)}
+details.log{margin-top:22px}details.log summary{cursor:pointer;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px}
+details.log table td{padding:4px 8px;font-size:12px}
+.hl{outline:3px solid var(--accent);outline-offset:-3px}
+.dim{opacity:.38}
+.hidden{display:none !important}
+
+/* Error banner: fixed under the header area, dismissible. */
+#banner{position:sticky;top:0;z-index:10;display:flex;gap:14px;align-items:center;background:var(--rose);border-bottom:2px solid var(--ink);padding:10px 28px;font-size:14px}
+#banner .msg{flex:1;font-weight:700;word-break:break-word}
+#banner button{padding:4px 12px;font-size:12px}
+/* Busy indicator while a transaction is pending. */
+#busy{position:fixed;right:20px;bottom:52px;z-index:10;background:var(--lemon);border:2px solid var(--ink);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:800}
+
+/* Full-page message when the chain or the deployment is not reachable. */
+#fatal{position:fixed;inset:0;z-index:20;background:var(--paper);display:grid;place-items:center;padding:28px}
+#fatal .card{max-width:640px}
+#fatal pre{background:var(--ink);color:#fff;border-radius:8px;padding:10px 14px;font-size:14px}
