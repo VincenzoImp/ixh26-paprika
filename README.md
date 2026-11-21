@@ -52,3 +52,7 @@ The demo, step by step, and what in it is real or simulated: [docs/demo.md](docs
 | What does Paprika trust, and what can it not do? | [docs/limits.md](docs/limits.md) |
 | How do I run and present the demo? | [docs/demo.md](docs/demo.md) |
 | What exactly does the contract do? | [contract/contracts/Paprika.sol](contract/contracts/Paprika.sol) |
+
+## Team
+
+Team **Sexy Plushies**: Francesco Lucibello, Vincenzo Imperati, Lorenzo Camilli.

@@ -20,6 +20,8 @@ This is the declaration for this repository.
 
 ## Role of the team
 
+The team is Sexy Plushies: Francesco Lucibello, Vincenzo Imperati, Lorenzo Camilli.
+
 - The idea of the protocol is the team's.
 - The constraints are the team's: no manufacturer, decentralised arbitration, Ethereum on a local chain,
   parameters as symbols, plain English.
