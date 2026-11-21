@@ -1,26 +1,35 @@
-# Statement on the use of artificial intelligence
+# Declaration on the use of AI tools
 
-The Track 1 rules (slide 13) allow any AI tool, as long as you declare **which tool was used,
-how and where**. This is the statement for this repository.
+The rules of Track 1 (slide 13) allow any AI tool. They require the team to declare which tool was used, how, and where.
+This is the declaration for this repository.
 
-## Summary
+## Tools
 
-| Area | Tool | How | Where | Role of the people |
-|---|---|---|---|---|
-| Idea of the protocol | None | The first version of Paprika is the team's work | `proposal/PAPRIKA.md` | Idea |
-| Review of and changes to the protocol | Claude Code (model Claude Fable 5.2) with Claude sub-agents (model Claude Opus) | It wrote the first version as a contract and attacked it; it proposed every change in the final version; it had the result reviewed by sub-agents that did not know the conclusions | `docs/`, `evidence/` | Direction and constraints from the team: no dependency on device makers, demo on a local blockchain, documents in plain Italian. Final approval by the team: still to be done |
-| Code | Claude Code with Claude Opus sub-agents | It wrote the contract, the tests and the economic model, and ran them | `contract/`, `evidence/` | No line-by-line review so far |
-| Documentation | Claude Code (Claude Fable 5.2) | It wrote the documents and the front page | `README.md`, `docs/` | Request and directions from the team; proofreading: still to be done |
-| Research | Claude Opus sub-agents | Web research with sources listed; a sample checked again by Claude Code | `docs/background/` | None |
-| Pitch preparation | Claude Opus sub-agents | Draft of the deck with notes, mock of the demo | `slides/`, `impl/mock/` | Not yet reviewed |
+| Tool | Model | Use |
+|---|---|---|
+| Claude Code (Anthropic) | Claude Fable 5.2 | Main agent. It planned the work, wrote code and text, and directed the sub-agents |
+| Claude Code sub-agents | Claude Opus | Separate tasks given by the main agent: code, tests, reviews, documents, slides |
 
-## Log
+## What the tools did, by area
 
-| Date and time (CET) | Tool | What it did | Human input |
-|---|---|---|---|
-| 20 November 2026, 21:18–22:10 | Claude Code (Claude Fable 5.2) and Claude Opus sub-agents | Critical review of the first version; contract written word for word and attacked; research on decentralized arbiters, incentives, fake detection; first strengthened version | Request from Vincenzo Imperati: validate the proposal, find its flaws, propose improvements |
-| 20 November 2026, 22:10–23:05 | The same | Several revisions of the contract, each one attacked and fixed; economic model; independent review with attacks that can be run; simulated juries; mock and draft of the deck | Direction from Vincenzo Imperati: the demo runs on a local Ethereum blockchain |
-| 20 November 2026, 23:05–23:59 | The same | Final version with no device makers; repository cleaned of the intermediate versions; documents rewritten in plain Italian | Direction from the team: Paprika must not depend on device makers; a single final version, explained in a way that is easy to understand and to compare with the first one |
+| Area (slide 13) | How the tools were used | Where |
+|---|---|---|
+| Solution design and code generation | The tools turned the team's protocol idea and constraints into the contract rules. They wrote the contract, its tests, the scripts that deploy UMA's contracts on a local chain, and the demo app. They ran the tests and attacked the contract to find flaws | `contract/`, `app/` |
+| Documentation | The tools wrote the protocol specification, the design rationale, the limits, the demo guide, the README and these declarations | `README.md`, `docs/`, `AI_DISCLOSURE.md`, `THIRD_PARTY.md` |
+| Pitch preparation | The tools drafted the deck, the speaker notes and the answers to expected questions | `slides/` |
 
-The intermediate versions and the full reports of the sub-agents are in the git history, under
-the tag `iterazioni-complete`.
+## Role of the team
+
+- The idea of the protocol is the team's.
+- The constraints are the team's: no manufacturer, decentralised arbitration, Ethereum on a local chain,
+  parameters as symbols, plain English.
+- Every decision on the protocol and on this repository is the team's.
+
+## Human review
+
+| Area | Review by the team |
+|---|---|
+| Contract and tests | To be completed by the team |
+| Demo app | To be completed by the team |
+| Documentation | To be completed by the team |
+| Slides and speech | To be completed by the team |

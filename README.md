@@ -1,77 +1,51 @@
 # Paprika
 
-A protocol to attest (that is, to certify in public) where photos come from, on a blockchain, **with no device makers and no
-central authorities**. A proposal for Track 1 of
-[IXH26 — Italian XRPL Hackathon](https://www.decifris.it/ixh26/), Bari, 20–21 November 2026.
+Paprika is a protocol that records the origin of photos on Ethereum, with no manufacturer and no central authority.
+A registered device key signs the SHA-256 of each photo together with a recent block hash.
+The account that records the photo locks a refundable deposit on it.
+Anyone can accuse a record by locking an equal bond, and UMA's Optimistic Oracle V3 decides by a public vote.
+The loser's stake goes to the winner, minus UMA's fee; if nobody accuses the record in time, the deposit goes back.
 
-> **The track.** *"Design a secure protocol that generalises to any device and guarantees
-> authentic photo origin via decentralised blockchains technology."*
+It answers Track 1 of IXH26 (Bari, 20-21 November 2026): *"Design a secure protocol that generalises to any device
+and guarantees authentic photo origin via decentralised blockchains technology."*
 
-## The idea in three lines
+## What a record proves
 
-1. Whoever wants to attest photos **registers the device**, for free.
-2. Each photo is **signed by the device** and recorded on the blockchain with a **deposit**.
-   The deposit comes back if nobody challenges the photo within a set time.
-3. Anyone can **accuse** a photo by putting up an equal bond. **UMA** decides. If the fake is
-   proven, the accuser takes the deposit and the device is flagged; otherwise the accuser
-   loses the bond.
+A record proves that a registered key signed this exact file between two known blocks, and that a deposit is at stake.
+It does not prove that a camera captured the scene: a key can also sign a generated image ([limits](docs/limits.md)).
 
-Nobody runs the contract, nobody decides who can take part, no record is ever deleted.
-Deposits, bonds and times are not fixed in the code: they are chosen when the contract is
-published.
+## Quick start
 
-## What it guarantees, and what it does not
+Requirements: Node.js 26 or later.
 
-A record proves that a registered device signed **this exact file**, in **this time window**,
-and that whoever attested it put **money at stake**.
+```bash
+# contract tests, against UMA's contracts on an in-process chain
+cd contract && npm install && npx hardhat test && cd ..
 
-It does not prove that the file comes from a real camera. This is the price of not depending
-on device makers, and it is explained in full in [`docs/3-limits-and-dependencies.md`](docs/3-limits-and-dependencies.md).
-
-## Where to start
-
-| I want to… | I read |
-|---|---|
-| Understand how it works, with the diagrams and all the cases | [`docs/1-how-it-works.md`](docs/1-how-it-works.md) |
-| Know what changed compared to the first version, and why | [`docs/2-what-changed.md`](docs/2-what-changed.md) |
-| Know what it does not do, who it depends on, and the comparison with ORIGO on device makers | [`docs/3-limits-and-dependencies.md`](docs/3-limits-and-dependencies.md) |
-| Read the first version again | [`proposal/PAPRIKA.md`](proposal/PAPRIKA.md) |
-
-## What is in the repository
-
-| Folder | Content |
-|---|---|
-| [`docs/`](docs/) | The three documents above, plus the [background](docs/background/) material with the sources |
-| [`proposal/`](proposal/) | The first version of Paprika, as it reached us |
-| [`contract/`](contract/) | The contract (`Paprika.sol`), its tests and the output of the run |
-| [`evidence/`](evidence/) | The first version written word for word and attacked: the proof of what was wrong |
-| [`impl/mock/`](impl/mock/) | The mock of the demo, with the screenshots |
-| [`slides/`](slides/) | The draft of the deck |
-| [`track/`](track/) | The track: PDF, slides, transcript |
-
-## Status
-
-- **Done:** protocol defined; documents; mock of the app and draft of the slides.
-- **In progress:** contract in its final form, and a test with the real UMA contracts on a
-  local machine.
-- **To do for the demo:** see the [issues](https://github.com/VincenzoImp/ixh26-paprika/issues),
-  in order of dependency.
-- **Where it runs:** everything on a local Ethereum blockchain. Simulated: the device key
-  (created by the program) and the UMA vote (we enter the result ourselves).
-
-## Running the contract tests
-
-```
-cd contract
-npm install
-npx hardhat test
+# the demo: local chain, UMA's contracts, Paprika and the web app
+cd app && npm install && npm start
 ```
 
-## Notes
+The demo, step by step, and what in it is real or simulated: [docs/demo.md](docs/demo.md).
 
-- All the intermediate versions of the work stay in the git history, under the tag
-  `iterazioni-complete`.
-- The use of artificial intelligence tools is declared in
-  [`AI_DISCLOSURE.md`](AI_DISCLOSURE.md); third-party material in
-  [`THIRD_PARTY.md`](THIRD_PARTY.md).
-- The team's other proposal for the same track, ORIGO, is in the `ixh26-photo-origin` repository.
+## Repository map
+
+| Path | Content |
+|---|---|
+| [`docs/`](docs/) | Protocol, design rationale, limits, demo |
+| [`contract/`](contract/) | [`Paprika.sol`](contract/contracts/Paprika.sol), its tests, the local deployment of UMA's contracts, the [case table](contract/output/cases.md) |
+| [`app/`](app/) | Device library, chain client, command-line tool and web app for the demo |
+| [`slides/`](slides/) | Pitch deck, speaker notes, answers to expected questions |
+| [`track/`](track/) | The brief of the track, as given to the teams |
+| [`AI_DISCLOSURE.md`](AI_DISCLOSURE.md) | Declaration of the use of AI tools |
+| [`THIRD_PARTY.md`](THIRD_PARTY.md) | Third-party software and material, with licences |
+
+## Where to read what
+
+| Question | Document |
+|---|---|
+| How does the protocol work? Messages, steps, states, cases | [docs/protocol.md](docs/protocol.md) |
+| Why does each rule exist? Which attack does it stop? | [docs/design-rationale.md](docs/design-rationale.md) |
+| What does Paprika trust, and what can it not do? | [docs/limits.md](docs/limits.md) |
+| How do I run and present the demo? | [docs/demo.md](docs/demo.md) |
+| What exactly does the contract do? | [contract/contracts/Paprika.sol](contract/contracts/Paprika.sol) |
