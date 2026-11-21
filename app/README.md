@@ -18,13 +18,14 @@ Or step by step, in separate terminals:
 
 ```bash
 npm run chain        # Hardhat node of ../contract on 127.0.0.1:8545 (hardfork osaka, chainId 31337)
-npm run deploy       # UMA + token + Paprika; writes ../contract/deployments/local.json and web/deployment.json
+npm run deploy       # UMA + WETH9 + Paprika; writes ../contract/deployments/local.json and web/deployment.json
 npm run web          # node server.js on 127.0.0.1:5173
 npm run demo:cli     # node cli.js demo: the whole demo story with checks
 npm run stop         # stops the default instance (8545); `npm run stop -- 8546` stops only the one on 8546
 ```
 
-`npm start` refuses to run when its instance already runs (the chain already has this instance's Paprika, or the
+`npm start` also refuses a chain on its port that is already in use but holds no Paprika of this folder (block
+number above 0): it never adds a second Paprika to someone else's chain. `npm start` refuses to run when its instance already runs (the chain already has this instance's Paprika, or the
 web port is busy). It prints "Paprika is already running at ..." and changes nothing. `npm run deploy` also refuses
 to deploy over a live deployment; `npm run deploy -- --force` replaces it (every open page then resets). If the web
 server exits, `npm start` restarts it and keeps the chain. If the chain exits, everything stops: the chain lives in
@@ -46,6 +47,27 @@ the environment variable `DEPLOYMENT_FILE` (an absolute path). `npm run deploy` 
 
 Host: the web server listens on 127.0.0.1. Set `HOST` (for example `HOST=0.0.0.0`) to open it to other machines.
 The scripts then print a warning: the page relays JSON-RPC to a node whose accounts are unlocked.
+Browsers allow WebCrypto and the camera only on `localhost` or over HTTPS, so the page does not work on a plain network
+address. From another computer, use an SSH tunnel: `ssh -L 5173:127.0.0.1:5173 <this-machine>`, then open
+`http://localhost:5173`.
+
+## Tests
+
+The browser tests use Playwright (a dev dependency). On a new machine, install its browser once:
+
+```bash
+npx playwright install chromium
+```
+
+| Command | What it does |
+|---|---|
+| `npm run e2e` | The whole demo story in the web app, checked against the chain at each step (168 checks) |
+| `npm run e2e:edge` | Edge cases of the web app, the server and the scripts (15 checks) |
+| `npm run screens` | One screenshot per state into `output/screens/` (set `OUT` to write elsewhere) |
+| `npm run demo:cli` | The 13-step demo in the terminal, with checks. Needs a running, deployed chain |
+
+Each browser test starts its own chain and web server on spare ports and stops them at the end.
+`HEADED=1` shows the browser.
 
 ## Files
 
@@ -135,6 +157,10 @@ forfeited (`forfeit`). `vote` takes the only open accusation; with several open 
   the operator settles. The chain clock jumps to each phase. `onPhase({ phase, roundId, txHashes, timestamp })` is
   called for `commit`, `reveal` and `settle`. It returns `{ txHashes, roundId, simulatedSeconds }` (7 transactions,
   2 to 4 phases of chain time). It takes well under a second of real time.
+  It is safe to call twice for the same accusation (two tabs, or a tab and the CLI). If the accusation is already
+  decided, it sends nothing and returns `{ status: "already-settled", fakeProven }`. If another vote is already
+  running in this round, it throws an error with `code` = `VOTE_IN_PROGRESS` and a plain message. A normal vote
+  returns `status: "settled"` and `fakeProven`.
 - `refund` works only after `refundableAt` (= `accusableUntil` + reveal period + 1 s), not after the challenge
   period alone. A rejected accusation extends `accusableUntil` by the time the accusation was open. Too early, it
   throws `too early: refundable at <time> (in N s of chain time)` before sending anything.
@@ -177,3 +203,15 @@ What is specific to this demo:
   CLI and the UI choose how they vote.
 - Time is advanced on the local chain: for the vote phases, and with `advanceTime` for the challenge period.
 - The device key is a software key, not a camera's secure chip.
+
+## Tests
+
+| Command | Where | What it checks |
+|---|---|---|
+| `npx hardhat test` | `../contract` | The contract with the real UMA contracts and WETH9 (9 cases). |
+| `npm run demo:cli` | `app` | The whole demo story through the library, against a running chain (13 steps). |
+| `npm run e2e` | `app` | The web demo story in Chromium. Starts and stops its own instance (8645/5273). |
+| `npm run e2e:edge` | `app` | One check per edge case found in testing. Own instance (9445/5973). |
+| `npm run screens` | `app` | Screenshots of every page state. |
+
+The web suites need Playwright's browser once per machine: `npx playwright install chromium`.

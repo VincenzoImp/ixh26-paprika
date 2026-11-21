@@ -128,7 +128,7 @@ Under [UMIP-170](https://github.com/UMAprotocol/UMIPs/blob/master/UMIPs/umip-170
 claim is "true and publicly verifiable".
 
 **Failure stopped.** The other question, "is this photo genuine?", has no proof. Generated images are
-"indistinguishable from genuine camera captures" (brief, slide 2). No depositor could prove it, so every accusation
+"indistinguishable from genuine camera captures" (the [IXH26](https://www.decifris.it/ixh26/) Track 1 brief, slide 2). No depositor could prove it, so every accusation
 would win. With the burden on the accusation, an accusation without public evidence fails.
 
 **Cost.** A fake that leaves no public evidence is not caught.

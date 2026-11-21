@@ -12,6 +12,7 @@ libraries or design assets), but they must be mentioned in your submission."*
 | ethers | 6.17.0 | MIT | https://github.com/ethers-io/ethers.js | `contract/` tests and scripts; `app/` chain client and web app |
 | solc (Solidity compiler) | 0.8.28 | GPL-3.0 | https://github.com/ethereum/solidity | Compiles `Paprika.sol`. Hardhat downloads it |
 | `@uma/contracts-node` | 0.4.28 | AGPL-3.0-or-later | https://github.com/UMAprotocol/protocol | `contract/lib/deploy-uma-dvm.js`, `contract/lib/vote.js`: UMA's compiled contracts (OptimisticOracleV3, Finder, Store, AddressWhitelist, IdentifierWhitelist, Registry, VotingV2, VotingToken, FixedSlashSlashingLibrary, and UMA's copy of WETH9 as the bond currency), deployed unchanged on the local chain. UMA compiled them with solc 0.8.16. No UMA source is copied into this repository |
+| Playwright | 1.65.1 | Apache-2.0 | https://github.com/microsoft/playwright | `app/e2e/`: browser tests and screenshots (dev dependency; drives Chromium) |
 | Node.js | 26 or later | MIT | https://nodejs.org | Runtime for the tests, the scripts and the app |
 
 The interfaces `IOptimisticOracleV3` and `IOptimisticOracleV3CallbackRecipient` in `Paprika.sol` repeat the function
@@ -23,7 +24,7 @@ Versions are those installed from the lock files. Licences are those declared in
 
 | Material | Owner | Where it is used |
 |---|---|---|
-| IXH26 Track 1 slides | De Componendis Cifris | `track/`: the brief, as a reference |
+| IXH26 Track 1 slides (the brief) | De Componendis Cifris | Cited as the brief, with the event page https://www.decifris.it/ixh26/. Not copied into this repository |
 
 ## Work done before the hackathon
 

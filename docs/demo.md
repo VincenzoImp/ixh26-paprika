@@ -105,7 +105,7 @@ npm run demo:cli     # same as: node cli.js demo
 ```
 
 It runs the 13 steps below, checks each result and exits with code 1 on any mismatch.
-A saved run is in [`app/output/cli-demo.txt`](../app/output/cli-demo.txt).
+On the default port it saves its output to [`app/output/cli-demo.txt`](../app/output/cli-demo.txt).
 
 | Step | What it does |
 |---|---|
@@ -124,7 +124,7 @@ A saved run is in [`app/output/cli-demo.txt`](../app/output/cli-demo.txt).
 | 12 | Unwrap: WETH back to ETH |
 
 `node cli.js help` lists the single-step commands (`register`, `attest <file>`, `verify <file>`, `accuse-commit`,
-`accuse-reveal`, `vote <true|false>`, `refund <file>`, `withdraw <role>`, `unwrap <role>`, `revoke`,
+`accuse-reveal`, `vote <true|false>`, `refund <file>`, `withdraw <role>`, `unwrap <role>`, `revoke`, `forfeit`,
 `advance <seconds>`, `balances`).
 
 ## Checks before any money moves
@@ -136,7 +136,7 @@ The library (used by the web app and the command-line tool) checks the chain bef
 | Attest | An empty photo; a key that is not registered or is flagged; a file that this key already attested | A clear message. No ETH is wrapped |
 | Commit an accusation | Empty evidence; a photo with no record; a refunded photo; a photo already proven fake; a challenge period that is over | A clear message. No bond is locked |
 | Reveal while another accusation is open on the same photo | Not refused: the reveal is sent | The contract opens no accusation and credits the bond back |
-| Advance time (web button, `node cli.js advance`) | While an accusation is open | Vote first. `node cli.js advance <seconds> --force` jumps anyway |
+| Advance time (web button "Demo: skip to end of challenge + reveal period", `node cli.js advance`) | While an accusation is open | Vote first. The web button is disabled with the reason. `node cli.js advance <seconds> --force` jumps anyway |
 
 Advance time is refused during an open accusation because a long clock jump makes UMA roll the vote request through
 many voting rounds. On a public network, too many rolls make UMA delete the request (see [limits.md](limits.md)).
@@ -154,29 +154,47 @@ many voting rounds. On a public network, too many rolls make UMA delete the requ
 
 The web app has three tabs, one per actor: Photographer, Verifier and Accuser.
 The header shows the parameters read from the contract (`B`, `T_photo`, `T_reveal`, `f`) and the WETH balances.
-"What just happened" explains the last action, with its transactions.
+"What just happened" explains the last action. The Timeline lists the transactions made since the page was loaded.
+The labels below are the labels on the page.
 
 | Step | Tab and click | What to show |
 |---|---|---|
-| 1 | Photographer → "Register the device" | The device signs a proof of possession. Registration is free. No manufacturer or authority approves the key |
-| 2 | Photographer → "Camera" → "Take photo" (or "Sample image") → "Sign & attest this photo" | The device reads a recent block hash first, then signs photo hash and block hash. ETH is wrapped into WETH and `B` is locked. The record shows blocks `a` and `r` |
-| 3 | Verifier → "Last attested photo" | State Attested, deposit locked, challenge period open. Read the sentence: "a registered key signed this exact file between block `a` and block `r`, with a deposit at stake" |
+| 1 | Photographer → "Register the device key" | The device signs a proof of possession. Registration is free. No manufacturer or authority approves the key |
+| 2 | Photographer → "Start camera" → "Take a selfie" (or "use a sample image") → "Sign & attest (locks `B`)" | The device reads a recent block hash first, then signs photo hash and block hash. ETH is wrapped into WETH and `B` is locked. The record shows blocks `a` and `r` |
+| 3 | Verifier → "Last attested photo" | "Signed and staked · open to challenge". Read the sentence on the page: "a registered device signed this exact file between block `a` and block `r`, and a deposit was at stake" |
 | 4 | Verifier → "Change one pixel and verify again" | No record: the photo hash differs |
-| 5 | Accuser → enter evidence → "Commit (lock bond B)" | Only a hash goes on the chain, with bond `B`. Nobody can tell which photo is accused |
+| 5 | Accuser → enter the evidence → "Commit (lock bond B)" | Only a hash goes on the chain, with bond `B`. Nobody can tell which photo is accused |
 | 6 | Accuser → "Reveal and send to UMA" | The contract asserts the accusation at UMA's OOv3 and disputes it at once with the deposit. Every accusation goes to a vote |
-| 7 | Accuser → "Voters find it does not" | The three voters commit, then reveal; then the assertion is settled. The app shows each phase. Accuser `−B`. Depositor `+B − f × B`. UMA's Store `+f × B`. The challenge period is extended |
-| 8 | Photographer → "Advance time past the challenge period" → My photos → "Refund" | The local clock moves past `accusableUntil + T_reveal`. The refund succeeds. The record stays, as Refunded |
-| 9 | "What just happened" | Each step is a transaction with a hash on the local chain |
+| 7 | Accuser → "Voters say NOT PROVEN" | The three voters commit, then reveal; then the assertion is settled. The page shows each phase. Accuser `−B`. Photographer `+B − f × B`. UMA fee `+f × B`. The challenge period is extended |
+| 8 | Photographer → "Demo: skip to end of challenge + reveal period" → My photos → "Refund" | The local clock moves past `accusableUntil + T_reveal`. The refund succeeds. The record stays |
+| 9 | Verifier → "Last attested photo" | "Signed · … · deposit returned": nobody proved it fake within the challenge period. This is not proof that it is real |
+| 10 | Timeline | Each step is a transaction with a hash on the local chain |
 
 Optional steps:
 
 | Step | Tab and click | What to show |
 |---|---|---|
-| A | Accuser → accuse another photo → "Voters find the evidence proves the fake" | Accuser `+B − f × B`. Record Fake. Device Flagged (FakeProven). Its other records stay listed, with `recordedBeforeFlag` |
-| B | Photographer → "Revoke this device key" (on a device that is still Active) | Device Flagged (KeyRevoked). No money moves. A new capture from that key fails |
+| A | Photographer: attest another photo. Accuser: "Commit (lock bond B)" → "Reveal and send to UMA" → "Voters say FAKE (evidence proves it)" → Verifier | Accuser `+B − f × B`. Record "Proven fake". The key is flagged. Its other records show "Not judged · its key is flagged" |
+| B | Photographer → "Revoke this device key" (on a key that is still Active; a flagged key cannot be revoked) | Key flagged (revoked). No money moves. A new attest from that key is refused |
 
 Credits reach a wallet only with "Withdraw credit" (Photographer) or "Withdraw (Accuser)".
 
 Say plainly during the demo: the voters are our demo accounts, time is advanced by hand on the local chain, and the
 device key is a software key. The contracts, the signatures, the vote, the deposits and the payouts are real
 transactions on a local chain.
+
+## How it was tested
+
+| Test | What it covers | Result | Command |
+|---|---|---|---|
+| Contract integration tests | Paprika with UMA's oracle, UMA's vote and WETH: every case in [`contract/output/cases.md`](../contract/output/cases.md) | 9 tests pass | `cd contract && npx hardhat test` |
+| End-to-end browser test | The whole demo story in the web app, with header amounts and states compared with the chain at each step | 168 checks pass | `cd app && npm run e2e` |
+| Edge-case browser test | A second accusation on an accused photo, simultaneous votes, a reveal at its deadline, downloads, dropped files, narrow windows, a revoked key after its challenge period, a second `npm start`, the `/rpc` relay, `npm run stop` on another port | 15 checks pass | `cd app && npm run e2e:edge` |
+| Command-line demo | The 13 steps above, with checks | 13 steps pass | `cd app && npm run demo:cli` |
+| Screens | One screenshot per state, in [`app/output/screens/`](../app/output/screens/) | All states as expected | `cd app && npm run screens` |
+
+The browser tests use Playwright. A new machine needs `npx playwright install chromium` once, in `app/`.
+Each browser test starts its own chain and web server on spare ports, and stops them at the end.
+
+Two independent staging runs and one acceptance run from a clean clone of the repository also followed this guide.
+They used the commands above and the click path, by hand and with scripts.

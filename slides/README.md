@@ -9,10 +9,10 @@
 
 ## Constraints
 
-- Facts: `docs/protocol.md`, `docs/design-rationale.md`, `docs/limits.md`, `docs/demo.md`,
-  `app/README.md`. Measured values: `contract/output/cases.md`.
-- Structure follows the slide proposal in `app/output/first-time-review.md` (section 2.3), with
-  one running example: Alice attests, Bob accuses, UMA decides.
+- Facts: [`docs/protocol.md`](../docs/protocol.md), [`docs/design-rationale.md`](../docs/design-rationale.md),
+  [`docs/limits.md`](../docs/limits.md), [`docs/demo.md`](../docs/demo.md), [`app/README.md`](../app/README.md).
+  Measured values: [`contract/output/cases.md`](../contract/output/cases.md).
+- One running example: Alice attests, Bob accuses, UMA decides.
 - Amounts and durations use the symbols `B`, `T_photo`, `T_reveal` and `f`. Demo values appear
   once, on slide 6, with their source (`app/README.md`) in a LaTeX comment.
 - Slide 6 uses crops (verdict card and "What this record shows / Not shown") of
