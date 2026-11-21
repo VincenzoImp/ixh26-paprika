@@ -42,7 +42,10 @@ interface IOptimisticOracleV3CallbackRecipient {
 ///    Fake proven: the accuser gets it all, the device is flagged. Rejected: the deposit is restored, the depositor
 ///    gets the rest, and the window is extended by the time the photo spent under accusation.
 /// 6. Nobody proves it fake: after accusableUntil + REVEAL_WINDOW anyone calls refund(); the depositor gets BOND back.
-/// Parameters (fixed at deployment): oo, currency, BOND, PHOTO_WINDOW, REVEAL_WINDOW, LIVENESS.
+/// 7. The claim sent to UMA is a readable question that a voter can check: it names the chain, this contract, the
+///    photo hash, the key id, the evidence SHA-256 and the evidence URL (evidenceBaseURI + "/" + hash in hex). UMA's
+///    voters answer true only if the evidence, fetched from that URL and matching that hash, publicly proves it.
+/// Parameters (fixed at deployment): oo, currency, BOND, PHOTO_WINDOW, REVEAL_WINDOW, LIVENESS, evidenceBaseURI.
 /// All payouts are credits collected with withdrawCredit(). No owner, no admin, no upgrade, no ETH. Nothing is deleted.
 contract Paprika is IOptimisticOracleV3CallbackRecipient {
     /// Device status: Flagged devices can no longer attest (their existing records are untouched).
@@ -80,6 +83,9 @@ contract Paprika is IOptimisticOracleV3CallbackRecipient {
     uint256 public immutable PHOTO_WINDOW;    // seconds during which a photo can be accused (extended while accused)
     uint256 public immutable REVEAL_WINDOW;   // seconds between commit and reveal
     uint64 public immutable LIVENESS;         // passed to UMA; every accusation is disputed at once
+    /// Where the evidence is published, content-addressed: <evidenceBaseURI>/<evidence SHA-256 in hex>. Set once in
+    /// the constructor; there is no setter.
+    string public evidenceBaseURI;
 
     // ------------------------------------------------------------------ state (all public, nothing is ever deleted)
     mapping(bytes32 => Device) public devices;                       // keyId => device
@@ -109,10 +115,12 @@ contract Paprika is IOptimisticOracleV3CallbackRecipient {
     }
 
     /// Checks: BOND > 0 and at least UMA's minimum bond for this token (else UMA would refuse every accusation);
-    /// non-zero windows and liveness. Reads UMA's default identifier once.
-    constructor(IOptimisticOracleV3 oo_, IERC20 currency_, uint256 bond, uint256 photoWindow, uint256 revealWindow, uint64 liveness) {
+    /// non-zero windows and liveness; a non-empty evidence base URI. Reads UMA's default identifier once.
+    constructor(IOptimisticOracleV3 oo_, IERC20 currency_, uint256 bond, uint256 photoWindow, uint256 revealWindow, uint64 liveness,
+        string memory evidenceBaseURI_) {
         require(bond > 0 && bond >= oo_.getMinimumBond(address(currency_)) && photoWindow > 0 && revealWindow > 0
-            && liveness > 0, "bad params");
+            && liveness > 0 && bytes(evidenceBaseURI_).length > 0, "bad params");
+        evidenceBaseURI = evidenceBaseURI_;
         (oo, currency, identifier, BOND) = (oo_, currency_, oo_.defaultIdentifier(), bond);
         (PHOTO_WINDOW, REVEAL_WINDOW, LIVENESS) = (photoWindow, revealWindow, liveness);
     }
@@ -199,9 +207,7 @@ contract Paprika is IOptimisticOracleV3CallbackRecipient {
         r.state = State.Accused;
         // UMA pulls one bond from the asserter and one from the disputer; Paprika is both
         _call(address(currency), abi.encodeCall(IERC20.approve, (address(oo), 2 * BOND)));
-        bytes memory claim = abi.encodePacked("Paprika accusation: the photo with SHA-256 0x", _hex(photoHash),
-            " attested by the device key with id 0x", _hex(keyId), " is not a genuine capture by that device. Evidence SHA-256: 0x",
-            _hex(evidenceHash), ".");
+        bytes memory claim = _claim(photoHash, keyId, evidenceHash);
         assertionId = oo.assertTruth(claim, address(this), address(this), address(0), LIVENESS, currency, BOND, identifier, bytes32(0));
         accusations[assertionId] = Accusation(photoHash, keyId, msg.sender, uint64(block.timestamp), true);
         emit AccusationOpened(assertionId, photoHash, keyId, msg.sender, evidenceHash);
@@ -317,6 +323,36 @@ contract Paprika is IOptimisticOracleV3CallbackRecipient {
         if (sig.length != 64 || uint256(bytes32(sig[32:64])) > HALF_N) return false;
         (bool ok, bytes memory ret) = P256.staticcall(abi.encodePacked(h, sig, x, y));
         return ok && ret.length == 32 && abi.decode(ret, (uint256)) == 1;
+    }
+
+    /// The claim UMA's voters read: a question they can check by following the evidence URL and comparing its SHA-256.
+    function _claim(bytes32 photoHash, bytes32 keyId, bytes32 evidenceHash) internal view returns (bytes memory) {
+        bytes memory head = abi.encodePacked(
+            "Paprika accusation. Question: is the photo with SHA-256 0x", _hex(photoHash),
+            ", attested with the device key id 0x", _hex(keyId), " on chain id ", _dec(block.chainid),
+            " by the Paprika contract 0x", _hexAddr(address(this)),
+            ", NOT a genuine capture by that device (for example generated, edited, or a copy of an earlier image)? ");
+        bytes memory tail = abi.encodePacked(
+            "Answer true only if the evidence publicly proves it; otherwise answer false. Evidence SHA-256: 0x",
+            _hex(evidenceHash), ". Evidence URL: ", evidenceBaseURI, "/", _hex(evidenceHash),
+            " (the file at that URL must hash to the SHA-256 above).");
+        return abi.encodePacked(head, tail);
+    }
+
+    /// Decimal string of a number.
+    function _dec(uint256 v) internal pure returns (bytes memory s) {
+        if (v == 0) return "0";
+        uint256 n;
+        for (uint256 t = v; t != 0; t /= 10) n++;
+        s = new bytes(n);
+        for (; v != 0; v /= 10) s[--n] = bytes1(uint8(48 + v % 10));
+    }
+
+    /// Lowercase hex of an address (40 characters, no 0x).
+    function _hexAddr(address a) internal pure returns (bytes memory s) {
+        bytes memory full = _hex(bytes32(uint256(uint160(a))));
+        s = new bytes(40);
+        for (uint256 i = 0; i < 40; i++) s[i] = full[24 + i];
     }
 
     function _hex(bytes32 b) internal pure returns (bytes memory s) {

@@ -16,6 +16,7 @@ const { resolveByVote } = require("../lib/vote");
 // PHASE_LENGTH: UMA vote phase (commit, reveal) in seconds; a vote moves the clock 2 to 4 phases. The windows are
 // kept well above one vote so that a commitment made before a vote can still be revealed after it (case 5).
 const PHASE = Number(process.env.PHASE_LENGTH || 60);
+const EVIDENCE_BASE = "http://localhost:5173/evidence";   // where the evidence would be served (fixed at deployment)
 const P = { FINAL_FEE: ethers.parseEther("0.5"), WINDOW: Math.max(7 * 86400, 20 * PHASE), REVEAL: Math.max(3600, 5 * PHASE), LIVENESS: 7200 };
 const N_P256 = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
 const F = (x) => ethers.formatEther(x);
@@ -68,7 +69,7 @@ describe("Paprika with real UMA (OOv3 + VotingV2) and WETH9", function () {
     });
     const BOND = uma.minimumBond;   // the smallest bond UMA accepts for WETH
     const oo = await uma.oo.getAddress(), token = uma.currency;
-    const pap = await (await ethers.getContractFactory("Paprika", s[0])).deploy(oo, await token.getAddress(), BOND, P.WINDOW, P.REVEAL, P.LIVENESS);
+    const pap = await (await ethers.getContractFactory("Paprika", s[0])).deploy(oo, await token.getAddress(), BOND, P.WINDOW, P.REVEAL, P.LIVENESS, EVIDENCE_BASE);
     const addr = await pap.getAddress();
     gasLog["deploy Paprika"] = (await pap.deploymentTransaction().wait()).gasUsed;
     // Every test account wraps ETH into WETH (WETH9.deposit) and approves Paprika.
@@ -153,6 +154,18 @@ const reg = async (who, dev = newDevice()) => { firstGas("register", await send(
     await bal("after attest", P2);
     const k = await commit(hunter, h("i3 fake"), dev.keyId);
     const x = await reveal(k); gasLog["revealClaim (OOv3 assertTruth + disputeAssertion + VotingV2.requestPrice)"] = x.r.gasUsed;
+    // The claim UMA's voters read (OOv3 AssertionMade event): a question with the chain, contract, photo, key, the
+    // evidence hash and the evidence URL. The evidence served at that URL must hash to that SHA-256.
+    const made = x.r.logs.map((l) => { try { return c.uma.oo.interface.parseLog(l); } catch { return null; } }).find((e) => e && e.name === "AssertionMade");
+    const claim = ethers.toUtf8String(made.args.claim);
+    const evHex = k.ev.slice(2);
+    for (const part of [`${EVIDENCE_BASE}/${evHex}`, `Evidence SHA-256: 0x${evHex}`, h("i3 fake").slice(2), dev.keyId.slice(2),
+      c.addr.slice(2).toLowerCase(), `chain id ${c.chainId}`, "Answer true only if the evidence publicly proves it"]) {
+      assert(claim.includes(part), `claim must contain ${part}: ${claim}`);
+    }
+    assert.equal(ethers.sha256(ethers.toUtf8Bytes("evidence")), k.ev, "the evidence bytes hash to the evidence hash in the claim");
+    assert.equal(await c.pap.evidenceBaseURI(), EVIDENCE_BASE);
+    console.log(`      CLAIM ${claim}`);
     await bal("after reveal (accused)", P2);
     assert.equal((await c.pap.verify(h("i3 fake"), dev.keyId)).state, 2n);
     const res = await vote(c, x.id, true);   // UMA's DVM votes TRUE, then oo.settleAssertion

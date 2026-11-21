@@ -22,7 +22,7 @@ accusation.
 |------|--------------|-----------------------------------------|
 | 1 Honest path | A key registers for free. A relayer attests a photo and locks `BOND`. `refund` reverts "too early" until `accusableUntil + REVEAL_WINDOW` has passed, then a stranger triggers it. The record stays, as Refunded. | Relayer: locks `BOND` = 1, net 0. |
 | 2 One pixel changed | `attestersOf(modified hash)` = `[]`, and `verify` finds nothing (state None). | No WETH moves. |
-| 3 True accusation | Commit, then reveal: Paprika calls `assertTruth` and `disputeAssertion` at OOv3 (which holds 2 WETH); OOv3 asks VotingV2 for a price. The voters vote TRUE, `settleAssertion` runs. The photo becomes Fake and the device Flagged (FakeProven). | Accuser credited `2 x BOND - fee` = 1.5 (net `+BOND - fee` = +0.5). Depositor `-BOND` = -1. Store `+fee` = +0.5. |
+| 3 True accusation | The claim UMA receives (OOv3 `AssertionMade`) is a readable question with the chain id, Paprika's address, the photo hash, the key id, the evidence SHA-256 and the evidence URL `<evidenceBaseURI>/<hash>`; the evidence bytes hash to that SHA-256 (checked). Commit, then reveal: Paprika calls `assertTruth` and `disputeAssertion` at OOv3 (which holds 2 WETH); OOv3 asks VotingV2 for a price. The voters vote TRUE, `settleAssertion` runs. The photo becomes Fake and the device Flagged (FakeProven). | Accuser credited `2 x BOND - fee` = 1.5 (net `+BOND - fee` = +0.5). Depositor `-BOND` = -1. Store `+fee` = +0.5. |
 | 4 False accusation | The voters vote FALSE. The deposit is restored, the record returns to Attested, `accusableUntil` is extended by the time spent under accusation (236 s here, one vote). The device is untouched; the refund works afterwards. | Accuser `-BOND` = -1. Depositor `+BOND - fee` = +0.5 (deposit returned). Store `+fee` = +0.5. |
 | 5 Second accusation while one is open | B reveals while A's accusation is open: no new accusation, B's commitment is consumed and its `BOND` is credited back (`BondReturned`). A's accusation is untouched (still open, OOv3 still holds 2 x BOND). Revealing the same commitment again: "no commit". After A is voted FALSE, B commits again and is voted TRUE. | B: net 0 while waiting, then `+BOND - fee` = +0.5. |
 | 6 Self-accusation | The forger's second account accuses the forger's photo and wins. | Net `-fee` = -0.5: the real penalty for a fake. |
@@ -44,18 +44,18 @@ because keys, salts and hashes are random and the zero bytes in calldata change.
 
 | function | gas |
 |---|---|
-| `register` | 101,872 |
-| `attest` (P-256 verify, WETH `transferFrom`, `attestersOf` index) | 167,013 |
-| `commitClaim` | 86,787 |
-| `revealClaim` (OOv3 `assertTruth` + `disputeAssertion` + `VotingV2.requestPrice`) | 703,897 |
+| `register` | 101,891 |
+| `attest` (P-256 verify, WETH `transferFrom`, `attestersOf` index) | 167,019 |
+| `commitClaim` | 86,799 |
+| `revealClaim` (OOv3 `assertTruth` + `disputeAssertion` + `VotingV2.requestPrice`) | 784,011 (the readable claim with the evidence URL costs ~80k more than a hash-only claim) |
 | `VotingV2.commitVote` (max of 3; the first in a round costs most) | 231,883 |
 | `VotingV2.revealVote` (max of 3) | 193,821 |
 | `settleAssertion` -> callback, fake proven | 185,923 |
 | `settleAssertion` -> callback, rejected | 161,269 |
-| `refund` | 55,940 |
-| `revokeKey` | 44,161 |
+| `refund` | 55,937 |
+| `revokeKey` | 44,167 |
 | `withdrawCredit` | 35,437 |
-| deploy `Paprika` | 2,465,066 |
+| deploy `Paprika` | 2,812,138 |
 
 ## Design choices made where the brief was silent
 

@@ -6,13 +6,90 @@ tool and the scripts that start everything. The web UI (`web/`, `server.js`) is 
 Local chain only. As on a real network, every user transaction is signed by the user's own wallet, in the page
 or in the CLI. The node never signs for anyone. Device keys are made at run time.
 
+## API
+
+This is the contract between the library and the web UI. Every name below exists exactly as written.
+
+### Configuration and connection
+
+- `GET /network.json`: the network configuration (`config/network.json`): `{ name, rpcUrl: "/rpc", chainId, local,
+  nativeCurrency, explorer: { kind: "builtin" | "etherscan", txUrl, addressUrl, blockUrl }, deployment, eventChunk }`.
+  The explorer URLs use `{hash}`, `{address}` and `{number}` as placeholders.
+- `GET /deployment.json`: the deployment. It now also has `deploymentBlock`, `evidenceBaseURI` and
+  `accounts: { operator, alice, bob, voters }` (Alice = Hardhat #1, Bob = Hardhat #2).
+- `connect({ deployment, network, rpcUrl?, demoKeys?, demoUrl? })` returns a read-only `ctx`. In the page, pass
+  both JSON files. `rpcUrl` comes from `network.rpcUrl`, resolved against the page. `ctx.network`,
+  `ctx.deploymentBlock`, `ctx.evidenceBaseURI`, and `ctx.accounts = { operator, photographer, accuser, alice, bob,
+  voters }` (`photographer` and `accuser` are `null` until `setSigner`).
+- `queryEvents(ctx, contract, filter, fromBlock?)`: events from `deploymentBlock`, read in chunks of
+  `network.eventChunk` blocks.
+
+### Wallet (MetaMask)
+
+- `injectedWallet(ctx, role, ethereum?)` returns `{ signer, address }`. It asks MetaMask for an account, then
+  switches to the chain, or adds "Paprika local" with RPC `<page origin>/rpc`. A refusal throws
+  `request rejected in the wallet` (`code` 4001).
+- `setSigner(ctx, role, signer)` (async, returns the address). `role` is `"photographer"` or `"accuser"`. Every
+  write uses that role's signer. Without one it throws `no wallet for the <role>: connect one first (setSigner)`.
+- `prepareAccount(ctx, { photos = 3, role? })` wraps only the missing ETH for `photos` deposits or bonds, and
+  approves Paprika for `MaxUint256` if needed. It returns `{ transactions: [{ label, txHash }], wethBalance,
+  allowance }`. After it, `attestPhoto` and `commitAccusation` need one signature. Without it they still work: they
+  wrap and approve first.
+- `secretStore(ctx, storage)` returns `{ fingerprint, put(kind, id, value), get(kind, id), list(kind) }`. Use it for
+  commitment salts and device keys. It never deletes anything, and it keeps one namespace per deployment
+  fingerprint. `archivedWallets(storage)` lists every stored secret of every deployment:
+  `[{ fingerprint, kind, id, value }]`.
+- `deploymentFingerprint(ctx)` returns `"<chainId>:<paprika>:<block-1 hash>"`. It changes on a redeploy or a chain
+  restart.
+
+### Actions (signed by the role's wallet)
+
+- `registerDevice(ctx, role, device)`, `attestPhoto(ctx, role, device, bytes)` (returns `transactions` too),
+  `revokeKey`, `refund`, `withdrawCredit`, `wrap`, `unwrap`, `forfeitCommitment`, `revealAccusation`. Same shapes
+  as before.
+- `publishEvidence(ctx, { bytes, contentType })` returns `{ evidenceHash, url }`. In the page it is
+  `POST /evidence` with the raw bytes. It accepts any type, up to 10 MB.
+- `getEvidence(ctx, evidenceHash)` returns `{ url, contentType, bytes }`. It checks the bytes against the hash.
+- `evidenceUrl(ctx, evidenceHash)` returns the public URL written in the claim.
+- `commitAccusation(ctx, role, { photoHash, keyId, evidenceHash })` returns `{ txHashes, transactions,
+  commitment, salt, evidenceHash, evidenceUrl, warning }`. Passing `evidence: "<text>"` instead publishes the text
+  first.
+
+### Reads
+
+- `verifyPhoto`, `listRecords`, `listAccusations`, `balances`, `credits`, `chainInfo`, `commitmentStatus`:
+  as before.
+- `getRecord(ctx, photoBytesOrHash)` returns `{ photoHash, keys: [{ ...verifyPhoto entry, accusations:
+  [{ assertionId, claimant, evidenceHash, evidenceUrl, openedAt, blockNumber, txHash, open, outcome }], history:
+  [{ label, txHash, block, timestamp }] }] }`.
+- `explorer.latestBlocks(ctx, n)` returns `[{ number, hash, timestamp, txCount, gasUsed, txs }]`.
+- `explorer.block(ctx, numberOrHash)` returns `{ number, hash, parentHash, timestamp, gasUsed, gasLimit, txs }`.
+  Each tx summary is `{ hash, block, timestamp, from, fromName, to, toName, value, method }`.
+- `explorer.tx(ctx, hash)` returns `{ hash, block, timestamp, from, fromName, to, toName, value, status, gasUsed,
+  method, args, events: [{ contractName, address, name, args }] }`. Calls and events of Paprika, UMA OOv3, UMA
+  VotingV2 and WETH are decoded, and the UMA claim shows as text. Amounts are decimal strings.
+- `explorer.address(ctx, address)` returns `{ address, name, isContract, ethBalance, wethBalance, recentTxs }`.
+- `explorer.search(ctx, query)` returns `{ kind: "block" | "tx" | "address" | "photo" | "accusation" | "none", ... }`.
+- `explorer.link(ctx, kind, value)` builds a link from the network templates (`kind` = `tx`, `address` or `block`).
+  `explorer.name(ctx, address)` (also exported as `addressName`) returns a readable name or `null`.
+
+### Local tools (only when `network.local` is true)
+
+- `umaVote(ctx, assertionId, fakeProven, { onPhase })` and `advanceTime(ctx, seconds, { force })`, as before.
+- Server: `GET /demo/session` returns `{ token }`. It answers only same-origin requests. `POST /demo/vote`,
+  `GET /demo/vote/status?assertionId=` and `POST /demo/advance` need the header `X-Paprika-Session: <token>`, and
+  only same-origin requests. They answer 404 when the configuration is not local. The library fetches the token and
+  sends it for you.
+- Removed: the faucet (`/demo/faucet`, `requestTestFunds`, `faucetAmount`). Alice and Bob already hold Hardhat's
+  genesis ETH. `browserWallet` remains only as an internal helper for the CLI and tests.
+
 ## Who signs what
 
 | Who | Key | Signs |
 |---|---|---|
-| Photographer, accuser (the users) | Their own wallet: a key the page keeps in the browser (`localStorage`), or MetaMask. In the CLI: `.state/cli/<id>/photographer.key` and `accuser.key`. | Register, attest, commit, reveal, refund, withdraw, wrap, unwrap, revoke, forfeit. |
+| Photographer, accuser (the users) | MetaMask, with Hardhat's prefunded accounts #1 (Alice) and #2 (Bob) imported. The CLI signs locally with the same two keys. | Register, attest, commit, reveal, refund, withdraw, wrap, unwrap, revoke, forfeit. |
 | Device | A P-256 key made at run time. | The register, capture and revoke messages, which the user's transaction carries. |
-| Operator (Hardhat account 0) | Hardhat's public test mnemonic, used only by `server.js` or the CLI. | Deployment, test ETH (faucet), `settleAssertion` after a vote. |
+| Operator (Hardhat account 0) | Hardhat's public test mnemonic, used only by `server.js` or the CLI. | Deployment, `settleAssertion` after a vote. |
 | UMA voters (Hardhat accounts 3, 4, 5) | Same mnemonic, used only by `server.js` or the CLI. | `commitVote` and `revealVote` in `VotingV2`. |
 
 The operator and the voters are third parties, not the user. The server never sees a user key.
@@ -27,9 +104,10 @@ The operator and the voters are third parties, not the user. The server never se
   `eth_getTransactionReceipt`, `eth_sendRawTransaction`, `eth_getStorageAt`, `eth_syncing`. Everything else gets
   403, in particular `eth_sendTransaction`, `eth_accounts`, `personal_*`, `eth_sign*`, `evm_*`, `hardhat_*`.
   `/rpc` answers CORS requests, so MetaMask can use it as its RPC URL.
-- Demo controls for the local chain only. Each one runs one at a time:
-  - `POST /demo/faucet { address }` sends test ETH from the operator: 5 ETH (or 5 x B if larger). It allows one
-    request per address every 10 s, and refuses an address that already holds twice that.
+- `GET /network.json` (the configuration) and `/evidence` (publish and fetch evidence, content-addressed in
+  `data/evidence/`, git-ignored).
+- Local tools, only when the configuration says `local: true`. They need same-origin requests and the session token.
+  Each one runs one at a time:
   - `POST /demo/vote { assertionId, fakeProven }` starts the UMA vote by the three voters. It answers 409 with
     `code` = `VOTE_IN_PROGRESS` if a vote on that assertion is already running. `GET /demo/vote/status?assertionId=...`
     reports progress: `{ state: "running" | "done" | "error", phases, activity, result, error, code }`. The library
@@ -42,7 +120,9 @@ The operator and the voters are third parties, not the user. The server never se
 1. Open the page through `http://localhost:5173` (from another computer: through the SSH tunnel below).
 2. In MetaMask, add a network. Network name: `Paprika local`. RPC URL: `http://localhost:5173/rpc`. Chain ID: the
    `chainId` of `/deployment.json` (31337). Currency symbol: `ETH`. The page can also add the network for you.
-3. Get test ETH with the page's faucet button. The faucet sends ETH to the MetaMask address.
+3. Import Alice (Hardhat account #1) and Bob (#2) into MetaMask with their private keys. Hardhat prints them when
+   the node starts. They hold test ETH from the chain's genesis. These keys are public: use them on this local chain
+   only.
 4. Every action then opens a MetaMask confirmation. The first deposit or bond also asks for one unlimited WETH
    approval, so later actions need one confirmation less.
 
@@ -86,7 +166,7 @@ the environment variable `DEPLOYMENT_FILE` (an absolute path). `npm run deploy` 
 `.state/`.)
 
 Host: the web server listens on 127.0.0.1. Set `HOST` (for example `HOST=0.0.0.0`) to open it to other machines.
-The scripts then print a warning: anyone who can reach the server can use the demo controls (faucet, vote, clock).
+The scripts then print a warning: anyone who can reach the server can publish evidence and use the local tools.
 Browsers allow WebCrypto and the camera only on `localhost` or over HTTPS, so the page does not work on a plain network
 address. From another computer, use an SSH tunnel: `ssh -L 5173:127.0.0.1:5173 <this-machine>`, then open
 `http://localhost:5173`.
@@ -114,7 +194,8 @@ Each browser test starts its own chain and web server on spare ports and stops t
 | File | What it is |
 |---|---|
 | `lib/device.js` | The device. Makes a P-256 key, exports and imports it (JWK), builds the three signed messages (register, capture, revoke) byte for byte as `Paprika.sol` hashes them, and signs with low-s. It uses only WebCrypto, so it runs in Node and in a browser. |
-| `lib/paprika.js` | The chain client (ethers 6). One function per action: register, attest, verify, accuse (commit, reveal), UMA vote, refund, withdraw, wrap and unwrap WETH, revoke, forfeit, advance time, balances, activity log. Wallets: `setSigner`, `browserWallet`, `injectedWallet`, `requestTestFunds`. |
+| `lib/paprika.js` | The chain client (ethers 6). One function per action: register, attest, verify, accuse (commit, reveal), UMA vote, refund, withdraw, wrap and unwrap WETH, revoke, forfeit, advance time, balances, activity log. Wallet: `injectedWallet`, `setSigner`, `prepareAccount`. Evidence, explorer and record data (see API). |
+| `config/network.json` | The network configuration (see API). |
 | `lib/demo-keys.js` | Node only. The operator and voter wallets from Hardhat's public test mnemonic, for `server.js` and the CLI. |
 | `server.js` | The web server: page, `/rpc` relay, demo controls (see "What the server does"). |
 | `cli.js` | The command-line tool. `node cli.js help` lists the commands. |
@@ -151,10 +232,12 @@ the time it spent under accusation to its window.
 
 | Role | Hardhat account | Address |
 |---|---|---|
-| operator | 0 | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`. Deploys. Gives test ETH (faucet). Calls `settleAssertion` after a vote. |
+| operator | 0 | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`. Deploys. Calls `settleAssertion` after a vote. |
+| Alice | 1 | `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`. A user (photographer in the CLI). |
+| Bob | 2 | `0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC`. A user (accuser in the CLI). |
 | voters | 3, 4, 5 | `0x90F7...b906`, `0x15d3...6A65`, `0x9965...A4dc`. Hold and stake UMA voting tokens. Vote in `VotingV2`. |
 
-The deployment gives the users nothing. A user wallet starts empty and gets test ETH from the faucet.
+The deployment gives the users nothing: their ETH is the chain's genesis allocation.
 `attestPhoto` and `commitAccusation` wrap exactly the missing ETH into WETH before they pay. The photographer and the accuser are not
 Hardhat accounts: they are the users' own wallets.
 
@@ -190,14 +273,7 @@ forfeited (`forfeit`). `vote` takes the only open accusation; with several open 
   read-only: no write works until `setSigner(ctx, role, signer)` gives the role a wallet. Without one, a write
   throws `no wallet for the <role>: connect one first (setSigner)`. `ctx.accounts` = `{ operator, photographer,
   accuser, voters }`. The user roles are `null` until `setSigner`.
-- Wallets. `browserWallet(ctx, role, { storage })` loads or creates the role's key in `storage` (one key per role and
-  deployment fingerprint) and returns `{ signer, address, isNew }`. `injectedWallet(ctx, role, ethereum?)` connects
-  MetaMask: it asks for an account, then switches the wallet to this chain, or adds "Paprika local" with RPC
-  `<page origin>/rpc`. It returns `{ signer, address }`. A refusal in the wallet throws
-  `request rejected in the wallet` (`code` 4001). `requestTestFunds(ctx, address)` returns `{ txHash, amount }`.
-- Demo controls (`requestTestFunds`, `umaVote`, `advanceTime`). In a browser they call the demo server at
-  `location.origin` (or `demoUrl`). In Node, pass `demoKeys: demoKeys(deployment)` from `lib/demo-keys.js` to run
-  them directly.
+- Wallet, evidence, explorer and local tools: see API at the top.
 - `attestPhoto` and `commitAccusation` also return `transactions: [{ label, txHash }]`. Approval is
   `MaxUint256`, once per account.
 - `createDevice`, `importDevice`, `exportDevice`, `sha256` and `device.sign` return promises (WebCrypto is async).
@@ -259,7 +335,9 @@ What is specific to this demo:
 
 - The voters are three demo accounts (3, 4, 5). They hold all the voting tokens, so they decide every vote. The
   demo server (or the CLI) votes for them, as the user asks in the UI.
-- Test ETH comes from a faucet (the operator account).
+- The users are Hardhat's prefunded accounts #1 and #2 (Alice, Bob), imported into MetaMask.
+- Evidence is served by the demo server (`/evidence`). Content-addressing makes it checkable, but a real deployment
+  would publish it on a durable public host (for example IPFS), set at deployment with `EVIDENCE_BASE_URI`.
 - Time is advanced on the local chain: for the vote phases, and with `advanceTime` for the challenge period.
 - The device key is a software key, not a camera's secure chip.
 

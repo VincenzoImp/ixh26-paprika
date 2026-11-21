@@ -2,8 +2,8 @@
 //   UMA's Optimistic Oracle V3 + UMA's DVM (VotingV2, VotingToken, Registry, ...) from @uma/contracts-node
 //   (see lib/deploy-uma-dvm.js), UMA's WETH9 as the bond currency, then Paprika.
 // The voters are Hardhat accounts 3, 4, 5: each gets voting tokens (UMA token) and stakes them in VotingV2.
-// Users (photographer, accuser) are not accounts of this script: they bring their own wallets and get test ETH
-// from the demo faucet. Every transaction here is signed locally with the keys of Hardhat's public test mnemonic
+// Users are Hardhat's prefunded accounts #1 (Alice) and #2 (Bob), imported into MetaMask; this script gives them
+// nothing (their ETH comes from Hardhat's genesis allocation). Every transaction here is signed locally with the keys of Hardhat's public test mnemonic
 // (hardhat.config.js, network localhost): operator = index 0, voters = 3, 4, 5. No unlocked node account is used.
 // Writes deployments/local.json with addresses, parameters, accounts and the ABIs a browser needs.
 //
@@ -18,6 +18,7 @@
 //   REVEAL_WINDOW [900]    seconds allowed between commit and reveal
 //   LIVENESS [7200]        seconds, passed to UMA (each accusation is disputed at once, so it never runs out)
 //   STAKE [1000000]        voting tokens minted to and staked by each voter
+//   EVIDENCE_BASE_URI [http://localhost:5173/evidence]  where accusation evidence is published (fixed in Paprika)
 //   MAX_ROLLS [4294967295] VotingV2.maxRolls (uint32 rounds). An unresolved vote request "rolls" to the next round;
 //                          when its roll count exceeds maxRolls, VotingV2 deletes it and the assertion can never settle
 //                          (both bonds stay in OOv3). The count grows by every round skipped, so jumping the local clock
@@ -42,6 +43,8 @@ async function main() {
   const MAX_ROLLS = BigInt(env("MAX_ROLLS", "4294967295"));
   if (MAX_ROLLS < 1n || MAX_ROLLS > 4294967295n) throw new Error("MAX_ROLLS must be between 1 and 4294967295 (uint32)");
 
+  const startBlock = await ethers.provider.getBlockNumber();   // events of this deployment start after this block
+  const EVIDENCE_BASE_URI = env("EVIDENCE_BASE_URI", "http://localhost:5173/evidence").replace(/\/+$/, "");
   const signers = await ethers.getSigners();
   const [operator] = signers;
   const voters = signers.slice(3, 6);
@@ -51,7 +54,7 @@ async function main() {
   });
   const oo = await uma.oo.getAddress(), weth = await uma.currency.getAddress();
   if (BOND < uma.minimumBond) throw new Error(`BOND ${ethers.formatEther(BOND)} is below UMA's minimum bond ${ethers.formatEther(uma.minimumBond)}`);
-  const pap = await (await ethers.getContractFactory("Paprika")).deploy(oo, weth, BOND, PHOTO_WINDOW, REVEAL_WINDOW, LIVENESS);
+  const pap = await (await ethers.getContractFactory("Paprika")).deploy(oo, weth, BOND, PHOTO_WINDOW, REVEAL_WINDOW, LIVENESS, EVIDENCE_BASE_URI);
   await pap.waitForDeployment();
 
   const rpcUrl = hre.network.config.url || "http://127.0.0.1:8545";
@@ -70,8 +73,11 @@ async function main() {
     weth,
     voters: uma.voterAddrs,
     phaseLength: Number(PHASE_LENGTH),
-    // The operator only (deployer, faucet, settles assertions). Users bring their own wallets: none is listed here.
-    accounts: { operator: operator.address },
+    // Known accounts, for names in the app. alice (#1) and bob (#2) are Hardhat's prefunded genesis accounts that the
+    // demo imports into MetaMask; they get nothing from this script. operator (#0) deployed; voters (#3-#5) vote.
+    accounts: { operator: operator.address, alice: signers[1].address, bob: signers[2].address, voters: uma.voterAddrs },
+    deploymentBlock: startBlock + 1,
+    evidenceBaseURI: EVIDENCE_BASE_URI,
     identifier: uma.identifier,
     parameters: {
       BOND: BOND.toString(), PHOTO_WINDOW: Number(PHOTO_WINDOW), REVEAL_WINDOW: Number(REVEAL_WINDOW), LIVENESS: Number(LIVENESS),

@@ -11,11 +11,16 @@
 //                   wallet (the page's key or MetaMask); the server never holds a user key and never asks the node
 //                   to sign (eth_sendTransaction, eth_accounts, personal_*, eth_sign*, evm_*, hardhat_*: 403).
 //                   CORS is open on /rpc only, so a wallet extension such as MetaMask can use it as its RPC URL.
+//   /network.json -> the network configuration (app/config/network.json, or NETWORK_FILE): name, rpcUrl, chainId,
+//                   local flag, explorer link templates.
+//   POST /evidence, GET /evidence/<sha256> -> accusation evidence, content-addressed in app/data/evidence (any type,
+//                   at most 10 MB; the SHA-256 is the name and the integrity check; served immutable).
 //   /demo/...    -> the demo controls of the LOCAL chain, run here because they belong to third parties, not the
-//                   user: POST /demo/faucet (test ETH from the operator), POST /demo/vote + GET /demo/vote/status
-//                   (the UMA voters vote; polled for progress), POST /demo/advance (the chain clock). They sign with
-//                   the operator and voter keys of Hardhat's public test mnemonic (lib/demo-keys.js), which never
-//                   leave this process, and refuse anything but a local Hardhat chain.
+//                   user: POST /demo/vote + GET /demo/vote/status (the UMA voters vote; polled for progress),
+//                   POST /demo/advance (the chain clock). They sign with the operator and voter keys of Hardhat's
+//                   public test mnemonic (lib/demo-keys.js), which never leave this process. They exist only when
+//                   the network configuration says local: true; they answer only same-origin requests (Origin /
+//                   Sec-Fetch-Site) that carry the session token from GET /demo/session (header X-Paprika-Session).
 // The page talks only to its own origin, so one port serves everything. It never serves files outside the three
 // folders (and never lib/demo-keys.js). Keep the default HOST=127.0.0.1 and use an SSH tunnel from another computer:
 // the demo endpoints give test ETH and move the clock for anyone who can reach them.
@@ -25,13 +30,20 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { advanceTime, connect, requestTestFunds, umaVote, onActivity } from "./lib/paprika.js";
+import crypto from "node:crypto";
+import { advanceTime, connect, umaVote, onActivity } from "./lib/paprika.js";
 import { demoKeys } from "./lib/demo-keys.js";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.WEB_PORT || process.env.PORT || 5173);
 const HOST = process.env.HOST || "127.0.0.1";
 const RPC_PORT = Number(process.env.RPC_PORT || 8545);
+
+// The network configuration (#18): one file, separate from code.
+const NETWORK_FILE = path.resolve(process.env.NETWORK_FILE || path.join(APP_DIR, "config", "network.json"));
+function networkConfig() {
+  return JSON.parse(fs.readFileSync(NETWORK_FILE, "utf8"));
+}
 
 // The deployment the page must use: the one for this chain (B6).
 function deploymentFile() {
@@ -163,7 +175,7 @@ function getDemoCtx() {
   const key = `${file}:${st.mtimeMs}`;
   if (!demoCtx || demoCtxKey !== key) {
     const deployment = JSON.parse(fs.readFileSync(file, "utf8"));
-    demoCtx = connect({ rpcUrl: `http://127.0.0.1:${RPC_PORT}`, deployment, demoKeys: demoKeys(deployment) });
+    demoCtx = connect({ rpcUrl: `http://127.0.0.1:${RPC_PORT}`, deployment, network: { ...networkConfig(), rpcUrl: `http://127.0.0.1:${RPC_PORT}` }, demoKeys: demoKeys(deployment) });
     demoCtxKey = key;
   }
   return demoCtx;
@@ -199,28 +211,32 @@ function statusOf(e) {
   return 409;
 }
 
-const FAUCET_INTERVAL_MS = 10000;
-const faucetLast = new Map();   // address (lowercase) -> time of the last grant (ms)
+// Session token of this server process: a page gets it from GET /demo/session (same-origin only) and sends it back
+// in the X-Paprika-Session header. Another web site cannot read it (no CORS on /demo), so it cannot drive the tools.
+const SESSION_TOKEN = crypto.randomBytes(24).toString("hex");
+
+// True if the request comes from this server's own page (or from a non-browser client such as curl or the tests):
+// a browser always sends Origin on cross-origin requests and Sec-Fetch-Site on all of them.
+function sameOrigin(req) {
+  const site = req.headers["sec-fetch-site"];
+  if (site && site !== "same-origin" && site !== "none") return false;
+  const origin = req.headers.origin;
+  if (origin) {
+    try { if (new URL(origin).host !== req.headers.host) return false; } catch { return false; }
+  }
+  return true;
+}
 const MAX_JUMP = 30 * 86400;    // the demo clock moves at most 30 days per request
 const voteJobs = new Map();     // assertion id (lowercase) -> { state, phases, activity, result, error, code, at }
 
 async function demoRoute(req, res, route) {
   try {
-    if (req.method === "POST" && route === "/demo/faucet") {
-      const { address } = await readJson(req);
-      if (!/^0x[0-9a-fA-F]{40}$/.test(String(address))) return sendJson(res, 400, { error: "address must be 0x + 40 hex characters" });
-      const k = address.toLowerCase();
-      const wait = (faucetLast.get(k) || 0) + FAUCET_INTERVAL_MS - Date.now();
-      if (wait > 0) return sendJson(res, 429, { error: `test ETH was just sent to this address: try again in ${Math.ceil(wait / 1000)} s` });
-      faucetLast.set(k, Date.now());
-      const ctx = getDemoCtx();
-      const activity = [];
-      const off = onActivity(ctx, (a) => activity.push(a));
-      try {
-        const r = await enqueue(() => requestTestFunds(ctx, address));
-        return sendJson(res, 200, { txHash: r.txHash, amount: r.amount, activity });
-      } catch (e) { faucetLast.delete(k); throw e; } finally { off(); }
-    }
+    let local = false;
+    try { local = networkConfig().local === true; } catch { /* no config: tools off */ }
+    if (!local) return sendJson(res, 404, { error: "local tools are off: the network configuration is not local" });
+    if (!sameOrigin(req)) return sendJson(res, 403, { error: "local tools answer only this server's own page" });
+    if (req.method === "GET" && route === "/demo/session") return sendJson(res, 200, { token: SESSION_TOKEN });
+    if (req.headers["x-paprika-session"] !== SESSION_TOKEN) return sendJson(res, 401, { error: "missing or stale session token (GET /demo/session)" });
     if (req.method === "POST" && route === "/demo/vote") {
       const { assertionId, fakeProven } = await readJson(req);
       if (!/^0x[0-9a-fA-F]{64}$/.test(String(assertionId))) return sendJson(res, 400, { error: "assertionId must be 0x + 64 hex characters" });
@@ -264,6 +280,51 @@ async function demoRoute(req, res, route) {
   }
 }
 
+// ------------------------------------------------------------------ evidence (content-addressed)
+
+const EVIDENCE_DIR = path.join(APP_DIR, "data", "evidence");
+const EVIDENCE_MAX = 10 * 1024 * 1024;
+
+// POST /evidence: the raw bytes (any content type, at most 10 MB). Stored as data/evidence/<sha256 hex> plus
+// <hex>.type; returns { evidenceHash, url }. Publishing the same bytes twice is harmless.
+function postEvidence(req, res) {
+  if (!sameOrigin(req)) return sendJson(res, 403, { error: "evidence is accepted only from this server's own page" });
+  const chunks = [];
+  let size = 0, tooBig = false;
+  req.on("data", (c) => { size += c.length; if (size > EVIDENCE_MAX) { tooBig = true; req.destroy(); } else chunks.push(c); });
+  req.on("close", () => { if (tooBig) sendJson(res, 413, { error: "evidence larger than 10 MB" }); });
+  req.on("end", () => {
+    if (tooBig) return;
+    const bytes = Buffer.concat(chunks);
+    if (!bytes.length) return sendJson(res, 400, { error: "the evidence is empty" });
+    const hex = crypto.createHash("sha256").update(bytes).digest("hex");
+    const type = String(req.headers["content-type"] || "application/octet-stream").slice(0, 200);
+    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+    const file = path.join(EVIDENCE_DIR, hex);
+    if (!fs.existsSync(file)) fs.writeFileSync(file, bytes);
+    if (!fs.existsSync(file + ".type")) fs.writeFileSync(file + ".type", type);
+    let base = null;
+    try { base = JSON.parse(fs.readFileSync(deploymentFile(), "utf8")).evidenceBaseURI; } catch { /* no deployment */ }
+    sendJson(res, 200, { evidenceHash: `0x${hex}`, url: base ? `${base}/${hex}` : `/evidence/${hex}` });
+  });
+}
+
+// GET /evidence/<sha256 hex> (with or without 0x): the bytes, with their stored content type, cached forever.
+function getEvidence(req, res, name) {
+  const hex = String(name).toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{64}$/.test(hex)) return sendJson(res, 400, { error: "evidence name must be a SHA-256 in hex" });
+  const file = path.join(EVIDENCE_DIR, hex);
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) return sendJson(res, 404, { error: "no such evidence" });
+    let type = "application/octet-stream";
+    try { type = fs.readFileSync(file + ".type", "utf8"); } catch { /* default */ }
+    res.writeHead(200, { "Content-Type": type, "Content-Length": st.size, "Cache-Control": "public, max-age=31536000, immutable",
+      "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox", "ETag": `"${hex}"` });
+    if (req.method === "HEAD") return res.end();
+    fs.createReadStream(file).pipe(res);
+  });
+}
+
 // Sends a JSON-RPC error answer with an HTTP status (the request never reaches the chain).
 function reply(res, status, id, code, message) {
   if (res.headersSent) return;
@@ -295,6 +356,9 @@ function handle(req, res) {
   }
   if (req.method === "POST" && route === "/rpc") return proxyRpc(req, res);
   if (route.startsWith("/demo/")) return demoRoute(req, res, route);
+  if (route === "/network.json" && (req.method === "GET" || req.method === "HEAD")) return serveFile(NETWORK_FILE, req, res, "/network.json");
+  if (route === "/evidence" && req.method === "POST") return postEvidence(req, res);
+  if (route.startsWith("/evidence/") && (req.method === "GET" || req.method === "HEAD")) return getEvidence(req, res, route.slice(10));
   if (req.method === "POST" && req.url.split("?")[0] === "/vote-lock") return voteLock(req, res);
   if (req.url.split("?")[0] === "/server-info.json") {   // the real ports, for the page's "start the system" hint
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -342,7 +406,7 @@ server.listen(PORT, HOST, () => {
   console.log(`Deployment served at /deployment.json: ${deploymentFile()}`);
   if (!["127.0.0.1", "localhost", "::1"].includes(HOST)) {
     console.warn(`\nWARNING: HOST=${HOST} exposes this server beyond this machine. Anyone who can reach it can use the demo`);
-    console.warn("controls (test ETH from the faucet, the UMA vote, the chain clock). User keys are never on the server.");
+    console.warn("tools (the UMA vote, the chain clock) and publish evidence. User keys are never on the server.");
     console.warn("Browsers also disable WebCrypto and the camera on plain http from another address, so the page will not");
     console.warn(`work there anyway. Prefer the default HOST=127.0.0.1 and, on the other computer: ssh -N -L ${PORT}:127.0.0.1:${PORT} <user>@<this-host>\n`);
   }

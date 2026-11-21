@@ -1,0 +1,15 @@
+{
+  "name": "Paprika local",
+  "rpcUrl": "/rpc",
+  "chainId": 31337,
+  "local": true,
+  "nativeCurrency": { "name": "Ether", "symbol": "ETH", "decimals": 18 },
+  "explorer": {
+    "kind": "builtin",
+    "txUrl": "#/explorer/tx/{hash}",
+    "addressUrl": "#/explorer/address/{address}",
+    "blockUrl": "#/explorer/block/{number}"
+  },
+  "deployment": "/deployment.json",
+  "eventChunk": 5000
+}

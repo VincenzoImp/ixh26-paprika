@@ -1,11 +1,11 @@
 // Paprika client library: every on-chain action of the demo, for the CLI (Node) and the web UI (browser).
 //
 // It talks to a LOCAL Hardhat node over JSON-RPC with ethers 6. As on a real network, every user action is signed
-// CLIENT-SIDE by the user's own wallet: setSigner(ctx, role, signer) with a key kept by the page or the CLI
-// (browserWallet) or an injected wallet such as MetaMask (injectedWallet). No node account is ever unlocked.
+// CLIENT-SIDE by the user's own wallet: setSigner(ctx, role, signer) with MetaMask (injectedWallet) in the page,
+// or a local key in the CLI and the tests. No node account is ever unlocked.
 // Roles: photographer and accuser = the users (their own wallets). Third parties, run by the demo server
-// (browser) or directly from Hardhat's well-known keys (Node, lib/demo-keys.js): the operator (faucet, settles
-// UMA assertions) and the UMA voters (accounts 3, 4, 5, holders of staked UMA voting tokens).
+// (browser) or directly from Hardhat's well-known keys (Node, lib/demo-keys.js): the operator (settles UMA
+// assertions) and the UMA voters (accounts 3, 4, 5, holders of staked UMA voting tokens).
 // Deposits and bonds are in WETH (UMA's WETH9): the roles hold ETH and wrap exactly what they need.
 // The contract addresses, parameters, RPC URL and ABIs come from the deployment JSON written by
 // contract/scripts/deploy-local.js (copied to app/web/deployment.json for the browser).
@@ -31,26 +31,39 @@ const DVM_STATUS = ["NotRequested", "Active", "Resolved", "Future", "ToDelete"];
  * Connects to the node and the deployed contracts. Synchronous (no network call): awaiting it is harmless.
  * The ctx is READ-ONLY until setSigner() gives a role its wallet.
  *   deployment = the parsed JSON written by the deploy script;
- *   demoKeys   = (Node only) { operator, voters } from lib/demo-keys.js: the demo controls (faucet, vote, clock)
+ *   network    = the network configuration (app/config/network.json, served at /network.json): name, rpcUrl
+ *                (relative URLs such as "/rpc" are resolved against the page), chainId, local, explorer link
+ *                templates. Chain-specific values come only from it and from the deployment;
+ *   demoKeys   = (Node only) { operator, voters } from lib/demo-keys.js: the demo controls (vote, clock)
  *                then run directly on the chain;
  *   demoUrl    = base URL of the demo server (default in a browser: location.origin): the demo controls then call
  *                its /demo/* endpoints. Without either, the demo controls throw a clear error.
  */
-export function connect({ rpcUrl, deployment, demoKeys, demoUrl }) {
+export function connect({ rpcUrl, deployment, network, demoKeys, demoUrl }) {
   if (!deployment?.addresses?.paprika) throw new Error("deployment JSON is missing or has no Paprika address");
-  rpcUrl = rpcUrl || deployment.rpcUrl || "http://127.0.0.1:8545";
-  const chainId = Number(deployment.chainId ?? 31337);
+  const here = typeof location !== "undefined" ? location.href : undefined;
+  const netRpc = network?.rpcUrl ? (here ? new URL(network.rpcUrl, here).href : (/^https?:/.test(network.rpcUrl) ? network.rpcUrl : null)) : null;
+  rpcUrl = rpcUrl || netRpc || deployment.rpcUrl;
+  if (!rpcUrl) throw new Error("no RPC URL: give rpcUrl, a network configuration, or a deployment with rpcUrl");
+  const chainId = Number(network?.chainId ?? deployment.chainId);
+  if (network?.chainId && deployment.chainId && Number(network.chainId) !== Number(deployment.chainId)) {
+    throw new Error(`the deployment is for chain ${deployment.chainId}, the network configuration for chain ${network.chainId}`);
+  }
   // staticNetwork: skip chain detection calls; short polling interval: automine answers at once.
   // cacheTimeout -1: by default ethers shares identical requests for 250 ms, so a read right after a transaction
   // or after evm_mine could return the previous block. A demo must always show fresh state.
   const provider = new ethers.JsonRpcProvider(rpcUrl, chainId, { staticNetwork: true, pollingInterval: 100, cacheTimeout: -1 });
 
   // ctx.accounts: the user roles (null until setSigner), the operator and the UMA voters (third parties).
+  const known = deployment.accounts || {};
   const accounts = {
-    operator: ethers.getAddress(deployment.accounts?.operator || HARDHAT_OPERATOR),
+    operator: ethers.getAddress(known.operator || HARDHAT_OPERATOR),
     photographer: null,
     accuser: null,
-    voters: (deployment.voters || []).map((v) => ethers.getAddress(v)),
+    // Named demo accounts (Hardhat's prefunded #1 and #2, imported into MetaMask), for display only.
+    alice: known.alice ? ethers.getAddress(known.alice) : null,
+    bob: known.bob ? ethers.getAddress(known.bob) : null,
+    voters: (known.voters || deployment.voters || []).map((v) => ethers.getAddress(v)),
   };
   // Demo controls: direct (Node, with the demo keys) or through the demo server (browser).
   let demo;
@@ -78,6 +91,13 @@ export function connect({ rpcUrl, deployment, demoKeys, demoUrl }) {
     accounts,
     voters,      // direct mode only: [{ label, address, signer }]
     demo,
+    network: {
+      name: network?.name || "local", rpcUrl, chainId, local: network ? Boolean(network.local) : true,
+      explorer: network?.explorer || { kind: "builtin", txUrl: "#/explorer/tx/{hash}", addressUrl: "#/explorer/address/{address}", blockUrl: "#/explorer/block/{number}" },
+      eventChunk: Number(network?.eventChunk || 5000),
+    },
+    deploymentBlock: Number(deployment.deploymentBlock || 0),   // events are read from here, in chunks
+    evidenceBaseURI: deployment.evidenceBaseURI || null,
     addresses: {
       paprika: a.paprika, oo: a.oo, store: a.store, currency: a.currency, weth: a.weth || deployment.weth || a.currency,
       voting: a.voting || deployment.voting, votingToken: a.votingToken || deployment.votingToken,
@@ -189,41 +209,9 @@ export async function injectedWallet(ctx, role, ethereum = globalThis.ethereum) 
   return { signer, address: ethers.getAddress(address) };
 }
 
-/**
- * Test ETH for an address, from the operator (local chain only). Browser: POST <demo server>/demo/faucet
- * { address }; Node with demo keys: the operator sends it directly. Returns { txHash, amount } (amount: bigint wei).
- * The amount is FAUCET_ETH (5 ETH) or 5 x BOND if larger; refused when the address already holds twice that.
- */
-export async function requestTestFunds(ctx, address) {
-  address = ethers.getAddress(address);
-  if (ctx.demo.mode === "server") {
-    const r = await demoPost(ctx, "/demo/faucet", { address });
-    emitAll(ctx, r.activity);
-    return { txHash: r.txHash, amount: BigInt(r.amount) };
-  }
-  const operator = demoOperator(ctx);
-  await assertLocalChain(ctx);
-  const amount = faucetAmount(ctx);
-  const held = await read(ctx.provider.getBalance(address));
-  if (held >= 2n * amount) throw new Error(`this address already holds ${ethers.formatEther(held)} ETH: enough for the demo`);
-  let tx;
-  try { tx = await operator.sendTransaction({ to: address, value: amount }); } catch (e) { throw fail(e); }
-  const receipt = await tx.wait();
-  emit(ctx, { blockNumber: receipt.blockNumber, txHash: receipt.hash, call: "Faucet: test ETH from the operator", from: operator.address, role: "operator" });
-  return { txHash: receipt.hash, amount };
-}
-
-/** Test-ETH amount of the faucet (bigint wei). */
-export function faucetAmount(ctx) {
-  const five = ethers.parseEther("5");
-  return 5n * ctx.params.bond > five ? 5n * ctx.params.bond : five;
-}
-
-// The demo controls refuse anything but a local Hardhat chain.
-async function assertLocalChain(ctx) {
-  const id = Number(await read(ctx.provider.send("eth_chainId", [])));
-  const client = String(await read(ctx.provider.send("web3_clientVersion", [])));
-  if (id !== 31337 || !/hardhat/i.test(client)) throw new Error(`demo controls refused: not a local Hardhat chain (chain id ${id}, ${client})`);
+// The demo controls work only on a network the configuration marks as local.
+function assertLocalChain(ctx) {
+  if (!ctx.network.local) throw new Error(`demo controls refused: the network "${ctx.network.name}" is not marked local in its configuration`);
 }
 
 function demoOperator(ctx) {
@@ -231,22 +219,50 @@ function demoOperator(ctx) {
   return ctx.demo.operator;
 }
 
-// POST a JSON body to the demo server; throws its error message (with its code) on a non-2xx answer.
-async function demoPost(ctx, pathname, body) {
-  if (ctx.demo.mode !== "server") throw new Error("demo controls are not available here (no demo server and no demo keys)");
-  let res;
-  try {
-    res = await fetch(ctx.demo.baseUrl + pathname, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  } catch (e) { throw new Error(`cannot reach the demo server (${e.message})`); }
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(j.error || `demo server: HTTP ${res.status}`), { code: j.code, status: res.status });
-  return j;
+// The demo server's per-session token (GET /demo/session, same-origin only), sent as X-Paprika-Session.
+async function demoToken(ctx, renew = false) {
+  if (!ctx.demo.token || renew) {
+    const res = await fetch(ctx.demo.baseUrl + "/demo/session", { cache: "no-store" });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || `demo server: HTTP ${res.status}`);
+    ctx.demo.token = j.token;
+  }
+  return ctx.demo.token;
 }
-async function demoGet(ctx, pathname) {
-  const res = await fetch(ctx.demo.baseUrl + pathname, { cache: "no-store" });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(j.error || `demo server: HTTP ${res.status}`), { code: j.code, status: res.status });
-  return j;
+// One request to the demo server with the session token (renewed once on 401); throws its error (with its code).
+async function demoFetch(ctx, method, pathname, body) {
+  if (ctx.demo.mode !== "server") throw new Error("demo controls are not available here (no demo server and no demo keys)");
+  assertLocalChain(ctx);
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(ctx.demo.baseUrl + pathname, {
+        method, cache: "no-store",
+        headers: { "content-type": "application/json", "x-paprika-session": await demoToken(ctx, attempt > 0) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (e) { throw new Error(`cannot reach the demo server (${e.message})`); }
+    if (res.status === 401 && attempt === 0) continue;
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(j.error || `demo server: HTTP ${res.status}`), { code: j.code, status: res.status });
+    return j;
+  }
+}
+const demoPost = (ctx, pathname, body) => demoFetch(ctx, "POST", pathname, body);
+const demoGet = (ctx, pathname) => demoFetch(ctx, "GET", pathname);
+
+/**
+ * Events of a contract matching `filter`, from the deployment block to the latest block, read in chunks of
+ * ctx.network.eventChunk blocks (5,000 by default) so that it also works on nodes that limit eth_getLogs ranges.
+ */
+export async function queryEvents(ctx, contract, filter, fromBlock = ctx.deploymentBlock) {
+  const latest = await read(ctx.provider.getBlockNumber());
+  const out = [];
+  for (let from = Math.max(0, fromBlock); from <= latest; from += ctx.network.eventChunk) {
+    const to = Math.min(latest, from + ctx.network.eventChunk - 1);
+    out.push(...(await read(contract.queryFilter(filter, from, to))));
+  }
+  return out;
 }
 
 // Reports activity items (from this ctx, or relayed by the demo server) to the onActivity listeners.
@@ -266,7 +282,7 @@ function emitAll(ctx, items) {
 function revertReason(e) {
   if (e?.code === "ACTION_REJECTED" || e?.code === 4001 || e?.info?.error?.code === 4001) return "request rejected in the wallet";
   if (e?.code === "INSUFFICIENT_FUNDS" || /insufficient funds/i.test(String(e?.message))) {
-    return "not enough ETH in this wallet to pay for the transaction: get test ETH first (faucet)";
+    return "not enough ETH in this wallet to pay for the transaction";
   }
   if (e?.reason) return e.reason;
   if (e?.revert?.args?.length) return String(e.revert.args[0]);
@@ -443,7 +459,7 @@ export async function verifyPhoto(ctx, photoBytesOrHash) {
 /** All records ever attested, from the Attested events (oldest first), with their current state. Reads only. */
 export async function listRecords(ctx) {
   const { paprika } = ctx.contracts;
-  const events = await read(paprika.queryFilter(paprika.filters.Attested(), 0, "latest"));
+  const events = await queryEvents(ctx, paprika, paprika.filters.Attested());
   return Promise.all(events.map((ev) => recordView(ctx, ev.args.photoHash, ev.args.keyId)));
 }
 
@@ -515,6 +531,154 @@ export async function revokeKey(ctx, role, device) {
   return { txHash: r.hash };
 }
 
+// ------------------------------------------------------------------ evidence (content-addressed)
+
+/** Public URL of a piece of evidence: <evidenceBaseURI>/<sha256 hex, no 0x>, as written in the claim UMA reads. */
+export function evidenceUrl(ctx, evidenceHash) {
+  const hex = String(evidenceHash).toLowerCase().replace(/^0x/, "");
+  return ctx.evidenceBaseURI ? `${ctx.evidenceBaseURI}/${hex}` : null;
+}
+
+// Node only: the folder where the server keeps evidence (app/data/evidence), for direct publishing.
+async function evidenceDir() {
+  const { fileURLToPath } = await import("node:url");
+  return fileURLToPath(new URL("../data/evidence/", import.meta.url));
+}
+
+/**
+ * Publishes evidence (a file or a text) so UMA's voters can fetch it. Browser: POST <server>/evidence with the raw
+ * bytes. Node: written directly where the server serves it (app/data/evidence/<sha256>). Content-addressed: the
+ * SHA-256 of the bytes is the name and the integrity check. Returns { evidenceHash, url }.
+ */
+export async function publishEvidence(ctx, { bytes, contentType = "application/octet-stream" }) {
+  const data = asBytes(bytes);
+  if (!data.length) throw new Error("the evidence is empty");
+  if (data.length > 10 * 1024 * 1024) throw new Error("the evidence is larger than 10 MB");
+  const evidenceHash = await sha256(data);
+  if (ctx.demo.mode === "server") {
+    let res;
+    try {
+      res = await fetch(ctx.demo.baseUrl + "/evidence", { method: "POST", headers: { "content-type": contentType }, body: data });
+    } catch (e) { throw new Error(`cannot reach the evidence server (${e.message})`); }
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || `evidence server: HTTP ${res.status}`);
+    if (j.evidenceHash !== evidenceHash) throw new Error("the server stored different bytes (hash mismatch)");
+  } else {
+    const fs = await import("node:fs");
+    const dir = await evidenceDir();
+    const hex = evidenceHash.slice(2);
+    fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(dir + hex)) fs.writeFileSync(dir + hex, data);
+    fs.writeFileSync(dir + hex + ".type", String(contentType));
+  }
+  return { evidenceHash, url: evidenceUrl(ctx, evidenceHash) };
+}
+
+/**
+ * Fetches published evidence and checks it against its hash. Returns { url, contentType, bytes }.
+ * Browser: GET <server>/evidence/<hash>; Node: read from app/data/evidence. Throws if missing or if the bytes do not
+ * hash to evidenceHash.
+ */
+export async function getEvidence(ctx, evidenceHash) {
+  const hex = String(evidenceHash).toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error("evidence hash must be 64 hex characters");
+  let bytes, contentType;
+  if (ctx.demo.mode === "server") {
+    const res = await fetch(`${ctx.demo.baseUrl}/evidence/${hex}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status === 404 ? "this evidence was never published on this server" : `evidence server: HTTP ${res.status}`);
+    contentType = res.headers.get("content-type") || "application/octet-stream";
+    bytes = new Uint8Array(await res.arrayBuffer());
+  } else {
+    const fs = await import("node:fs");
+    const dir = await evidenceDir();
+    if (!fs.existsSync(dir + hex)) throw new Error("this evidence was never published here");
+    bytes = new Uint8Array(fs.readFileSync(dir + hex));
+    contentType = fs.existsSync(dir + hex + ".type") ? fs.readFileSync(dir + hex + ".type", "utf8") : "application/octet-stream";
+  }
+  if ((await sha256(bytes)) !== `0x${hex}`) throw new Error("the evidence does not match its hash");
+  return { url: evidenceUrl(ctx, `0x${hex}`), contentType, bytes };
+}
+
+// ------------------------------------------------------------------ account preparation
+
+/**
+ * Prepares a user account for `photos` deposits or bonds in one go, so each later attest or commit needs a single
+ * signature: wraps only the missing ETH into WETH (WETH9.deposit) and approves Paprika for MaxUint256 if the
+ * allowance is below one BOND. role defaults to the only role with a wallet (else "photographer").
+ * Returns { transactions: [{ label, txHash }], wethBalance, allowance } (nothing sent if already prepared).
+ */
+export async function prepareAccount(ctx, { photos = 3, role } = {}) {
+  role = role || (USER_ROLES.filter((r) => ctx.signers[r]).length === 1 ? USER_ROLES.find((r) => ctx.signers[r]) : "photographer");
+  const me = addressOf(ctx, role);
+  const { token } = ctx.contracts;
+  const need = ctx.params.bond * BigInt(Math.max(1, Math.floor(Number(photos))));
+  const transactions = [];
+  const held = await read(token.balanceOf(me));
+  if (held < need) {
+    const label = `${ctx.params.tokenSymbol}.deposit (wrap ETH for ${photos})`;
+    const r = await send(ctx, role, token, "deposit", [], label, { value: need - held });
+    transactions.push({ label, txHash: r.hash });
+  }
+  if ((await read(token.allowance(me, ctx.addresses.paprika))) < ctx.params.bond) {
+    const label = `${ctx.params.tokenSymbol}.approve (once, unlimited)`;
+    const r = await send(ctx, role, token, "approve", [ctx.addresses.paprika, ethers.MaxUint256], label);
+    transactions.push({ label, txHash: r.hash });
+  }
+  return { transactions, wethBalance: await read(token.balanceOf(me)), allowance: await read(token.allowance(me, ctx.addresses.paprika)) };
+}
+
+// ------------------------------------------------------------------ secrets kept by the app (never deleted)
+
+/**
+ * A key-value store for the app's secrets (commitment salts, device keys, wallet keys), on top of `storage`
+ * (getItem/setItem, e.g. localStorage). Entries are namespaced by deployment fingerprint and NEVER deleted, so a
+ * redeploy or a chain restart only archives them. Returns { fingerprint, put(kind, id, value), get(kind, id),
+ * list(kind) } (values are JSON).
+ */
+export async function secretStore(ctx, storage) {
+  const fingerprint = await deploymentFingerprint(ctx);
+  const prefix = `paprika:${fingerprint}:`;
+  return {
+    fingerprint,
+    put: async (kind, id, value) => storage.setItem(`${prefix}${kind}:${id}`, JSON.stringify(value)),
+    get: async (kind, id) => { const v = await storage.getItem(`${prefix}${kind}:${id}`); return v ? JSON.parse(v) : null; },
+    list: async (kind) => storageEntries(storage)
+      .filter(([k]) => k.startsWith(`${prefix}${kind}:`))
+      .map(([k, v]) => ({ id: k.slice(prefix.length + kind.length + 1), value: JSON.parse(v) })),
+  };
+}
+
+// [key, value] pairs of a storage: localStorage (length/key), or an object with keys().
+function storageEntries(storage) {
+  const keys = typeof storage.keys === "function" ? [...storage.keys()]
+    : Array.from({ length: storage.length || 0 }, (_, i) => storage.key(i));
+  return keys.filter(Boolean).map((k) => [k, storage.getItem(k)]);
+}
+
+/**
+ * Every secret the app ever stored in `storage`, of every deployment (archived ones included), grouped by
+ * deployment fingerprint: [{ fingerprint, kind, id, value }]. Wallet keys made by browserWallet appear with
+ * kind "wallet" (id = role, value = { address, privateKey }).
+ */
+export function archivedWallets(storage) {
+  const out = [];
+  for (const [k, v] of storageEntries(storage)) {
+    let m = k.match(/^paprika-wallet:(.+):(photographer|accuser)$/);
+    if (m) {
+      const w = new ethers.Wallet(v);
+      out.push({ fingerprint: m[1], kind: "wallet", id: m[2], value: { address: w.address, privateKey: v } });
+      continue;
+    }
+    m = k.match(/^paprika:(.+?:0x[0-9a-f]{40}:[^:]+):([^:]+):(.+)$/i);
+    if (m) {
+      let value = v;
+      try { value = JSON.parse(v); } catch { /* raw string */ }
+      out.push({ fingerprint: m[1], kind: m[2], id: m[3], value });
+    }
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ accusation
 
 /**
@@ -526,11 +690,17 @@ export async function revokeKey(ctx, role, device) {
  * Checks first, before any money moves: evidence is not empty; the record exists, is not refunded, not proven fake,
  * and the challenge period is not over. If another accusation is open on the photo the commit still goes ahead
  * (the contract credits the bond back if it is still open at reveal time) and `warning` explains it.
- * Returns { txHashes, commitment, salt, evidenceHash, warning (string or null) }.
+ * Evidence: pass evidenceHash (from publishEvidence: the file is already published, UMA's voters will fetch it), or
+ * evidence = a text, which is published first (publishEvidence) and then hashed.
+ * Returns { txHashes, transactions, commitment, salt, evidenceHash, evidenceUrl, warning (string or null) }.
  */
-export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }) {
+export async function commitAccusation(ctx, role, { photoHash, keyId, evidence, evidenceHash }) {
   const claimant = addressOf(ctx, role);
-  if (!String(evidence ?? "").trim()) throw new Error("evidence is required (a text or a URL that shows the photo is not genuine)");
+  if (evidenceHash !== undefined && evidenceHash !== null) {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(String(evidenceHash))) throw new Error("evidenceHash must be 0x + 64 hex characters (from publishEvidence)");
+  } else if (!String(evidence ?? "").trim()) {
+    throw new Error("evidence is required: publish a file or a text that shows the photo is not genuine");
+  }
   const rec = await read(ctx.contracts.paprika.verify(photoHash, keyId));
   const state = STATES[Number(rec.state)];
   if (state === "none") throw new Error("this photo has no record for this device key: nothing to accuse");
@@ -543,7 +713,8 @@ export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }
   const warning = state === "accused"
     ? "another accusation is open on this photo: if it is still open when you reveal, no new accusation opens and your bond is credited back"
     : null;
-  const evidenceHash = await sha256(utf8(String(evidence)));
+  if (!evidenceHash) evidenceHash = (await publishEvidence(ctx, { bytes: utf8(String(evidence)), contentType: "text/plain; charset=utf-8" })).evidenceHash;
+  evidenceHash = evidenceHash.toLowerCase();
   const salt = ethers.hexlify(ethers.randomBytes(32));
   // abi.encode (NOT encodePacked): each value padded to 32 bytes, the address first.
   const commitment = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
@@ -554,7 +725,7 @@ export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }
   const r = await send(ctx, role, ctx.contracts.paprika, "commitClaim", [commitment], "Paprika.commitClaim");
   txHashes.push(r.hash);
   transactions.push({ label: "Paprika.commitClaim", txHash: r.hash });
-  return { txHashes, transactions, commitment, salt, evidenceHash, warning };
+  return { txHashes, transactions, commitment, salt, evidenceHash, evidenceUrl: evidenceUrl(ctx, evidenceHash), warning };
 }
 
 /**
@@ -589,8 +760,8 @@ export async function revealAccusation(ctx, role, { photoHash, keyId, evidenceHa
 export async function listAccusations(ctx) {
   const { paprika } = ctx.contracts;
   const [opened, resolved] = await read(Promise.all([
-    paprika.queryFilter(paprika.filters.AccusationOpened(), 0, "latest"),
-    paprika.queryFilter(paprika.filters.AccusationResolved(), 0, "latest"),
+    queryEvents(ctx, paprika, paprika.filters.AccusationOpened()),
+    queryEvents(ctx, paprika, paprika.filters.AccusationResolved()),
   ]));
   const outcome = new Map(resolved.map((ev) => [ev.args.assertionId, ev.args.fakeProven ? "fake-proven" : "rejected"]));
   return Promise.all(opened.map(async (ev) => ({
@@ -668,6 +839,7 @@ const votesRunning = new Map();
 export async function umaVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
   if (ctx.demo.mode === "server") return umaVoteViaServer(ctx, assertionId, fakeProven, { onPhase });
   if (ctx.demo.mode !== "direct") throw new Error("the UMA vote is run by the demo server or with the demo keys: neither is available here");
+  assertLocalChain(ctx);
   const key = String(assertionId).toLowerCase();
   if (votesRunning.has(key)) {
     await votesRunning.get(key).catch(() => {});
@@ -720,7 +892,7 @@ async function runVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
   };
   // Commits already made in `round` for this request (by anyone): voter address (lowercase) -> true.
   const committedIn = async (round) => {
-    const evs = await read(voting.queryFilter(voting.filters.VoteCommitted(null, null, null, identifier), 0, "latest"));
+    const evs = await queryEvents(ctx, voting, voting.filters.VoteCommitted(null, null, null, identifier));
     const out = new Set();
     for (const ev of evs) {
       if (BigInt(ev.args.roundId) === round && BigInt(ev.args.time) === BigInt(time) && ev.args.ancillaryData === ancillaryData) out.add(ev.args.voter.toLowerCase());
@@ -906,6 +1078,7 @@ export async function advanceTime(ctx, seconds, { force = false } = {}) {
     return { timestamp: r.timestamp };
   }
   if (ctx.demo.mode !== "direct") throw new Error("the demo clock is moved by the demo server or with the demo keys: neither is available here");
+  assertLocalChain(ctx);
   if (!force) {
     const open = (await listAccusations(ctx)).filter((a) => a.open);
     if (open.length) {
@@ -920,4 +1093,230 @@ export async function advanceTime(ctx, seconds, { force = false } = {}) {
   }
   const { timestamp } = await chainInfo(ctx);
   return { timestamp };
+}
+
+// ------------------------------------------------------------------ explorer (data for the built-in block explorer)
+
+// Contract interfaces by address (lowercase) and readable names of known addresses.
+function explorerIndex(ctx) {
+  if (ctx._explorer) return ctx._explorer;
+  const d = ctx.deployment, a = ctx.addresses, abis = d.abis;
+  const iface = new Map();
+  const add = (addr, contractName, abi) => { if (addr && abi) iface.set(addr.toLowerCase(), { contractName, iface: new ethers.Interface(abi) }); };
+  add(a.paprika, "Paprika", abis.Paprika);
+  add(a.oo, "UMA OptimisticOracleV3", abis.OptimisticOracleV3);
+  add(a.voting, "UMA VotingV2", abis.VotingV2);
+  add(a.currency, "WETH", abis.WETH9);
+  const names = new Map();
+  const name = (addr, n) => { if (addr) names.set(addr.toLowerCase(), n); };
+  name(a.paprika, "Paprika"); name(a.oo, "UMA Optimistic Oracle V3"); name(a.voting, "UMA VotingV2 (DVM)");
+  name(a.currency, "WETH"); name(a.store, "UMA Store"); name(d.addresses.finder, "UMA Finder");
+  name(d.addresses.registry, "UMA Registry"); name(a.votingToken, "UMA voting token");
+  name("0x000000000000000000000000000000000000dEaD", "Burn address");
+  name(ctx.accounts.operator, "Operator (deployer)");
+  name(ctx.accounts.alice, "Alice"); name(ctx.accounts.bob, "Bob");
+  ctx.accounts.voters.forEach((v, i) => name(v, `UMA voter ${i + 1}`));
+  ctx._explorer = { iface, names };
+  return ctx._explorer;
+}
+
+/** Readable name of an address: a known contract, a voter, Alice/Bob, the connected roles; else null. */
+export function addressName(ctx, address) {
+  if (!address) return null;
+  const k = address.toLowerCase();
+  for (const r of USER_ROLES) if (ctx.accounts[r] && ctx.accounts[r].toLowerCase() === k && !explorerIndex(ctx).names.has(k)) return `You (${r})`;
+  return explorerIndex(ctx).names.get(k) || null;
+}
+
+/** Link to the explorer for a tx hash, an address or a block number, from the network configuration's templates. */
+export function explorerLink(ctx, kind, value) {
+  const t = { tx: ctx.network.explorer.txUrl, address: ctx.network.explorer.addressUrl, block: ctx.network.explorer.blockUrl }[kind];
+  if (!t) return null;
+  return t.replace("{hash}", value).replace("{address}", value).replace("{number}", String(value));
+}
+
+// JSON-friendly value: bigints as decimal strings, nested arrays/structs as arrays/objects.
+function plain(v) {
+  if (typeof v === "bigint") return v.toString();
+  if (v && typeof v === "object" && typeof v.toObject === "function" && v.length !== undefined) {
+    try { const o = v.toObject(); if (Object.keys(o).length && !Object.keys(o).every((k) => /^\d+$/.test(k))) return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, plain(x)])); } catch { /* positional */ }
+    return Array.from(v, plain);
+  }
+  if (Array.isArray(v)) return v.map(plain);
+  return v;
+}
+// Named args of a decoded call or event: { name: value } (bytes shown as hex, claims as text when readable).
+function namedArgs(fragment, args) {
+  const out = {};
+  fragment.inputs.forEach((inp, i) => {
+    let v = plain(args[i]);
+    if (inp.type === "bytes" && typeof v === "string" && /claim|ancillary/i.test(inp.name)) {
+      try { v = ethers.toUtf8String(v); } catch { /* not text */ }
+    }
+    out[inp.name || `arg${i}`] = v;
+  });
+  return out;
+}
+
+function decodeCall(ctx, to, data, value) {
+  const c = to && explorerIndex(ctx).iface.get(to.toLowerCase());
+  if (!data || data === "0x") return { method: value && BigInt(value) > 0n ? "transfer ETH" : null, args: {} };
+  if (!c) return { method: data.slice(0, 10), args: {} };
+  try {
+    const p = c.iface.parseTransaction({ data, value });
+    return { method: `${c.contractName.replace(/^UMA /, "")}.${p.name}`, args: namedArgs(p.fragment, p.args) };
+  } catch { return { method: data.slice(0, 10), args: {} }; }
+}
+function decodeLog(ctx, log) {
+  const c = explorerIndex(ctx).iface.get(log.address.toLowerCase());
+  if (c) {
+    try {
+      const p = c.iface.parseLog({ topics: log.topics, data: log.data });
+      if (p) return { contractName: c.contractName, address: log.address, name: p.name, args: namedArgs(p.fragment, p.args) };
+    } catch { /* unknown event */ }
+  }
+  return { contractName: addressName(ctx, log.address) || log.address, address: log.address, name: "unknown event", args: { topics: log.topics, data: log.data } };
+}
+
+async function rawBlock(ctx, numberOrHash, full) {
+  const isHash = typeof numberOrHash === "string" && /^0x[0-9a-fA-F]{64}$/.test(numberOrHash);
+  const tag = isHash ? numberOrHash : (numberOrHash === "latest" ? "latest" : ethers.toQuantity(BigInt(numberOrHash)));
+  return read(ctx.provider.send(isHash ? "eth_getBlockByHash" : "eth_getBlockByNumber", [tag, full]));
+}
+function txSummary(ctx, t, timestamp) {
+  const call = decodeCall(ctx, t.to, t.input, t.value);
+  return { hash: t.hash, block: Number(t.blockNumber), timestamp, from: ethers.getAddress(t.from), fromName: addressName(ctx, t.from),
+    to: t.to ? ethers.getAddress(t.to) : null, toName: t.to ? addressName(ctx, t.to) : "contract creation", value: BigInt(t.value).toString(), method: call.method };
+}
+
+/** The n latest blocks, newest first: [{ number, hash, timestamp, txCount, gasUsed, txs: [summary] }]. */
+async function latestBlocks(ctx, n = 10) {
+  const latest = Number(await read(ctx.provider.getBlockNumber()));
+  const nums = [];
+  for (let i = latest; i >= 0 && nums.length < n; i--) nums.push(i);
+  const blocks = await Promise.all(nums.map((i) => rawBlock(ctx, i, true)));
+  return blocks.filter(Boolean).map((b) => ({
+    number: Number(b.number), hash: b.hash, timestamp: Number(b.timestamp), txCount: b.transactions.length,
+    gasUsed: BigInt(b.gasUsed).toString(), txs: b.transactions.map((t) => txSummary(ctx, t, Number(b.timestamp))),
+  }));
+}
+
+/** One block by number or hash: { number, hash, parentHash, timestamp, gasUsed, gasLimit, txs: [summary] }, or null. */
+async function block(ctx, numberOrHash) {
+  const b = await rawBlock(ctx, numberOrHash, true);
+  if (!b) return null;
+  return {
+    number: Number(b.number), hash: b.hash, parentHash: b.parentHash, timestamp: Number(b.timestamp),
+    gasUsed: BigInt(b.gasUsed).toString(), gasLimit: BigInt(b.gasLimit).toString(),
+    txs: b.transactions.map((t) => txSummary(ctx, t, Number(b.timestamp))),
+  };
+}
+
+/**
+ * One transaction, decoded with the deployment's ABIs (Paprika, UMA OOv3 and VotingV2, WETH): { hash, block,
+ * timestamp, from, fromName, to, toName, value, status ("success" | "reverted" | "pending"), gasUsed, method,
+ * args (named), events: [{ contractName, address, name, args }] }, or null if unknown.
+ */
+async function tx(ctx, hash) {
+  const t = await read(ctx.provider.send("eth_getTransactionByHash", [hash]));
+  if (!t) return null;
+  const r = await read(ctx.provider.send("eth_getTransactionReceipt", [hash]));
+  const b = t.blockNumber ? await rawBlock(ctx, Number(t.blockNumber), false) : null;
+  const call = decodeCall(ctx, t.to, t.input, t.value);
+  return {
+    hash: t.hash, block: t.blockNumber ? Number(t.blockNumber) : null, timestamp: b ? Number(b.timestamp) : null,
+    from: ethers.getAddress(t.from), fromName: addressName(ctx, t.from),
+    to: t.to ? ethers.getAddress(t.to) : (r?.contractAddress ? ethers.getAddress(r.contractAddress) : null),
+    toName: t.to ? addressName(ctx, t.to) : "contract creation",
+    value: BigInt(t.value).toString(), status: !r ? "pending" : Number(r.status) === 1 ? "success" : "reverted",
+    gasUsed: r ? BigInt(r.gasUsed).toString() : null, method: call.method, args: call.args,
+    events: r ? r.logs.map((l) => decodeLog(ctx, l)) : [],
+  };
+}
+
+/**
+ * One address: { address, name, isContract, ethBalance, wethBalance, recentTxs: [summary] } (bigints as decimal
+ * strings). recentTxs = up to 25 newest transactions from or to it, scanned over the last 2,000 blocks.
+ */
+async function address(ctx, addr) {
+  addr = ethers.getAddress(addr);
+  const [code, eth, weth, latest] = await Promise.all([
+    read(ctx.provider.getCode(addr)), read(ctx.provider.getBalance(addr)), read(ctx.contracts.token.balanceOf(addr)),
+    read(ctx.provider.getBlockNumber()),
+  ]);
+  const recentTxs = [];
+  const k = addr.toLowerCase();
+  for (let hi = Number(latest); hi >= Math.max(0, Number(latest) - 2000) && recentTxs.length < 25; hi -= 100) {
+    const nums = [];
+    for (let i = hi; i > hi - 100 && i >= 0; i--) nums.push(i);
+    const blocks = await Promise.all(nums.map((i) => rawBlock(ctx, i, true)));
+    for (const b of blocks) {
+      if (!b) continue;
+      for (const t of [...b.transactions].reverse()) {
+        if (t.from.toLowerCase() === k || (t.to && t.to.toLowerCase() === k)) recentTxs.push(txSummary(ctx, t, Number(b.timestamp)));
+      }
+    }
+  }
+  return { address: addr, name: addressName(ctx, addr), isContract: code !== "0x", ethBalance: eth.toString(), wethBalance: weth.toString(), recentTxs: recentTxs.slice(0, 25) };
+}
+
+/**
+ * What a search box query means: { kind: "block", number } | { kind: "tx", hash } | { kind: "address", address } |
+ * { kind: "photo", photoHash } | { kind: "accusation", assertionId, photoHash } | { kind: "none", query }.
+ * Accepts a block number, a tx or block hash, an address, a photo hash or a UMA assertion id.
+ */
+async function search(ctx, query) {
+  const q = String(query || "").trim();
+  if (/^\d+$/.test(q)) return { kind: "block", number: Number(q) };
+  if (/^0x[0-9a-fA-F]{40}$/.test(q)) return { kind: "address", address: ethers.getAddress(q) };
+  if (/^(0x)?[0-9a-fA-F]{64}$/.test(q)) {
+    const h = (q.startsWith("0x") ? q : `0x${q}`).toLowerCase();
+    if (await read(ctx.provider.send("eth_getTransactionByHash", [h]))) return { kind: "tx", hash: h };
+    const b = await rawBlock(ctx, h, false);
+    if (b) return { kind: "block", number: Number(b.number) };
+    if ((await read(ctx.contracts.paprika.attestersOf(h))).length) return { kind: "photo", photoHash: h };
+    const acc = await read(ctx.contracts.paprika.accusations(h));
+    if (acc.claimant !== ethers.ZeroAddress) return { kind: "accusation", assertionId: h, photoHash: acc.photoHash };
+  }
+  return { kind: "none", query: q };
+}
+
+/** Data for the built-in explorer: latestBlocks, block, tx, address, search, plus link and name helpers. */
+export const explorer = { latestBlocks, block, tx, address, search, link: explorerLink, name: addressName };
+
+/**
+ * Everything the record page needs for one photo: { photoHash, keys: [{ ...record as in verifyPhoto,
+ * accusations: [{ assertionId, claimant, evidenceHash, evidenceUrl, openedAt, open, outcome, txHash }],
+ * history: [{ label, txHash, block, timestamp }] }] }. Empty keys if the photo has no record.
+ */
+export async function getRecord(ctx, photoBytesOrHash) {
+  const photoHash = await photoHashOf(photoBytesOrHash);
+  const recs = await verifyPhoto(ctx, photoHash);
+  if (!recs.length) return { photoHash, keys: [] };
+  const { paprika } = ctx.contracts;
+  const [attested, refunded, flagged, accusations] = await Promise.all([
+    queryEvents(ctx, paprika, paprika.filters.Attested(photoHash)),
+    queryEvents(ctx, paprika, paprika.filters.Refunded(photoHash)),
+    queryEvents(ctx, paprika, paprika.filters.DeviceFlagged()),
+    listAccusations(ctx),
+  ]);
+  const resolved = await queryEvents(ctx, paprika, paprika.filters.AccusationResolved());
+  const item = async (label, ev) => ({ label, txHash: ev.transactionHash, block: ev.blockNumber, timestamp: await blockTime(ctx, ev.blockNumber) });
+  const keys = [];
+  for (const r of recs) {
+    const mine = accusations.filter((a) => a.photoHash === photoHash && a.keyId === r.keyId)
+      .map((a) => ({ ...a, evidenceUrl: evidenceUrl(ctx, a.evidenceHash) }));
+    const history = [];
+    for (const ev of attested.filter((e) => e.args.keyId === r.keyId)) history.push(await item("Attested: deposit locked", ev));
+    for (const a of mine) {
+      history.push({ label: "Accused: sent to UMA's vote", txHash: a.txHash, block: a.blockNumber, timestamp: a.openedAt });
+      const res = resolved.find((e) => e.args.assertionId === a.assertionId);
+      if (res) history.push(await item(res.args.fakeProven ? "UMA vote: fake proven" : "UMA vote: accusation rejected", res));
+    }
+    for (const ev of refunded.filter((e) => e.args.keyId === r.keyId)) history.push(await item("Refunded: deposit returned", ev));
+    for (const ev of flagged.filter((e) => e.args.keyId === r.keyId)) history.push(await item(`Device flagged (${REASONS[Number(ev.args.reason)]})`, ev));
+    history.sort((x, y) => x.block - y.block);
+    keys.push({ ...r, accusations: mine, history });
+  }
+  return { photoHash, keys };
 }
