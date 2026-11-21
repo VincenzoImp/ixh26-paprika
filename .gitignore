@@ -58,3 +58,4 @@ app/output/e2e/
 
 # Local copy of the brief (not part of the submission)
 track/
+app/output/crawl/

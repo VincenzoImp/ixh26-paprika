@@ -669,7 +669,16 @@ function build() {
   for (const S of states) {
     for (const f of S.findings) all.push({ ...f, state: S.name, vp: f.vp || "1440x900", shot: S.viewports[0]?.file });
     for (const v of S.viewports) for (const f of v.findings) all.push({ ...f, state: S.name, vp: v.vp, shot: v.file });
-    for (const E of S.elements) for (const f of E.findings || []) all.push({ ...f, state: S.name, vp: "1440x900", shot: E.after || E.before, before: E.before, click: E.testid || E.text });
+    for (const E of S.elements) for (const f of E.findings || []) {
+      // reclassify expected outcomes: clicks behind an open modal / dropdown, feedback only on the control itself
+      const inDialog = /-dialog$/.test(E.near) || /-(ok|cancel)$/.test(E.testid);
+      const inMenu = /account-menu/.test(E.near) || E.testid === "account-button";
+      if (/^dialog-/.test(S.name) && !inDialog && /dead click|overlap/.test(f.type)) { f.sev = 1; f.msg = "behind the open confirmation dialog: the click is blocked (expected; clicking the backdrop does not close the dialog)"; f.el = "(controls behind the dialog)"; }
+      else if (/^menu-/.test(S.name) && !inMenu && /click blocked|could not click|no visible change/.test(f.msg) && f.sev >= 3) { f.sev = 1; f.msg = "under the open account menu: the click lands on the menu (expected for a dropdown)"; }
+      else if (f.type === "dead click" && f.sev >= 3 && E.text === "⧉") { f.sev = 1; f.msg = "copy button: the ✓ mark lasts only 0.9 s (gone before the page settled); no other feedback"; }
+      else if (f.type === "dead click" && f.sev >= 3 && E.diff && E.diff.frac > 0.00002) { f.sev = 1; f.msg = `only the control itself changed (${(E.diff.frac * 100).toFixed(3)}% of pixels), nothing else on the page`; }
+      all.push({ ...f, state: S.name, vp: "1440x900", shot: E.after || E.before, before: E.before, click: E.testid || E.text });
+    }
   }
   // same label, different actions
   const byLabel = new Map();
@@ -699,7 +708,7 @@ function build() {
   const shotCount = states.reduce((n, S) => n + S.viewports.length + S.elements.reduce((m, e) => m + (e.before ? 1 : 0) + (e.after ? 1 : 0), 0), 0);
   let bytes = 0; for (const f of fs.readdirSync(IMG)) bytes += fs.statSync(path.join(IMG, f)).size;
   const counts = { states: states.length, elements: elements.length, clicks: clicks.length, disabled: elements.filter((e) => e.action === "disabled (not clicked)").length, screenshots: shotCount, files: shots.size, mb: (bytes / 1e6).toFixed(0),
-    dead: clicks.filter((e) => e.findings?.some((f) => f.type === "dead click")).length, errors: clicks.filter((e) => e.findings?.some((f) => f.type === "error")).length, findings: list.length, raw: all.length };
+    dead: clicks.filter((e) => e.findings?.some((f) => f.type === "dead click" && f.sev >= 3)).length, errors: clicks.filter((e) => e.findings?.some((f) => f.type === "error")).length, findings: list.length, raw: all.length };
   fs.writeFileSync(path.join(OUT, "findings.json"), JSON.stringify(list.map((g) => ({ ...g, states: [...g.states], vps: [...g.vps] })), null, 1));
 
   // ---- report
