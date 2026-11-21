@@ -165,7 +165,7 @@
     {\color{ink!70}$f$: UMA's share of the loser's stake, set by UMA. Paprika takes nothing.}}
   \card{93}{31}{58}{36}{peach}{\ct{Deterrence, honestly}
     \textbf{Self-accusation.} A forger who expects to be caught accuses its own fake from a second account, with the real evidence. It loses $fB$, not $B$.\\[1mm]
-    \textbf{Revealing ahead of Bob.} A forger holding an older commitment can reveal before Bob. Bob gets his bond back, no reward; the fake is still proven.\\[1mm]
+    \textbf{Revealing ahead of Bob.} A forger holding an older commitment can reveal before Bob. Bob gets his bond back and no reward; he can commit again after the vote.\\[1mm]
     Expected punishment: between $p\,fB$ and $p\,B$.}
   \node[anchor=north west,inner sep=0pt,font=\scriptsize,text width=142mm,align=left] at \at{9}{70.5}
     {The reward is the forger's own deposit: no shared pool to drain. A fake worth more than the punishment is not deterred, so $B$ must be sized to what a fake is worth.};
@@ -178,21 +178,24 @@
 \begin{frame}[plain]
 \begin{tikzpicture}[remember picture,overlay]
   \head{Live demo}{Alice attests, Bob accuses, UMA decides}
-  % app/output/screens/04-verifier-attested.png and 14-verifier-proven-fake.png (crops of the verifier panel)
-  \node[anchor=north west,inner sep=0pt] at \at{9}{24} {\includegraphics[width=88mm,trim=48 455 472 210,clip]{../app/output/screens/04-verifier-attested.png}};
-  \node[anchor=north west,inner sep=0pt] at \at{9}{50} {\includegraphics[width=88mm,trim=48 444 472 222,clip]{../app/output/screens/14-verifier-proven-fake.png}};
-  \draw[ink,line width=0.6pt] \at{9}{24} rectangle \at{97}{46.5};
-  \draw[ink,line width=0.6pt] \at{9}{50} rectangle \at{97}{73};
-  \node[anchor=north west,font=\tiny\bfseries,inner sep=0pt] at \at{9}{47.3} {Before: signed, staked, open to challenge};
-  \node[anchor=north west,font=\tiny\bfseries,inner sep=0pt] at \at{9}{73.8} {After UMA's vote: proven fake, record kept};
-  \card{101}{24}{50}{52}{white}{\ct{The click path}
-    \num{1}\; Register a key (free)\\[0.9mm]
-    \num{2}\; Attest; lock $B$\\[0.9mm]
-    \num{3}\; Verify: signed, staked, open\\[0.9mm]
-    \num{4}\; Change one pixel: no record\\[0.9mm]
-    \num{5}\; Bob commits, then reveals\\[0.9mm]
-    \num{6}\; UMA votes: fake proven\\[0.9mm]
-    \num{7}\; Verify again: proven fake, record kept}
+  % Crops of app/output/screens/06-verifier-signed-and-staked.png and 16-verifier-proven-fake.png:
+  % the verdict card and the "What this record shows / Not shown" box (trim in px = bp).
+  \node[anchor=north west,inner sep=0pt,font=\tiny\bfseries] at \at{9}{22.5} {BEFORE: Verifier, last attested photo};
+  \node[anchor=north west,inner sep=0pt] at \at{9}{25} {\includegraphics[width=92mm,trim=48 530 472 245,clip]{../app/output/screens/06-verifier-signed-and-staked.png}};
+  \node[anchor=north west,inner sep=0pt] at \at{40.8}{38.9} {\includegraphics[width=60.2mm,trim=366 432 472 384,clip]{../app/output/screens/06-verifier-signed-and-staked.png}};
+  \node[anchor=north west,inner sep=0pt,font=\tiny\bfseries] at \at{9}{50.5} {AFTER UMA'S VOTE: same Verifier view};
+  \node[anchor=north west,inner sep=0pt] at \at{9}{53} {\includegraphics[width=92mm,trim=48 520 472 257,clip]{../app/output/screens/16-verifier-proven-fake.png}};
+  \node[anchor=north west,inner sep=0pt] at \at{40.8}{66.9} {\includegraphics[width=60.2mm,trim=366 420 472 396,clip]{../app/output/screens/16-verifier-proven-fake.png}};
+  \card{104}{23}{47}{53}{white}{{\small\bfseries The click path}\\[0.8mm]
+    {\tiny
+    \num{1}\; Photographer: \textbf{Register the device} (free)\\[0.9mm]
+    \num{2}\; \textbf{Take a selfie}, then \textbf{Sign \& attest} (locks $B$)\\[0.9mm]
+    \num{3}\; Verifier: \textbf{Last attested photo}: signed and staked\\[0.9mm]
+    \num{4}\; \textbf{Change one pixel and verify again}: no record\\[0.9mm]
+    \num{5}\; Accuser: \textbf{Commit (lock bond B)}\\[0.9mm]
+    \num{6}\; \textbf{Reveal and send to UMA}\\[0.9mm]
+    \num{7}\; \textbf{Voters say FAKE}: commit, reveal, settle\\[0.9mm]
+    \num{8}\; Verifier again: proven fake, record kept}}
   \node[anchor=north west,inner sep=0pt,font=\tiny,text=ink!75,text width=142mm,align=left] at \at{9}{78.3}
     {Local Ethereum chain: Paprika, WETH, and UMA's Optimistic Oracle V3 and voting contracts. Three demo voter accounts; chain clock advanced by a button.
      Demo values: $B$ = 1 WETH, $\Tp$ = 1\,h, $\Tr$ = 15\,min.}; % app/README.md, parameter defaults (BOND 1, PHOTO_WINDOW 3600, REVEAL_WINDOW 900)
@@ -216,6 +219,8 @@
     $\bullet$ exact file only: a recompressed copy has no record\\
     $\bullet$ records of one key are linkable\\
     $\bullet$ each vote takes 48--72\,h on a real network % docs/limits.md, "What UMA can and cannot do" (UMA docs: "within 48-72 hours")
+    \\
+    $\bullet$ a vote that misses quorum too often is deleted by UMA; both stakes stay locked % docs/limits.md, "A vote can fail to resolve"
     }
   \node[anchor=north west,inner sep=0pt,font=\scriptsize,text width=142mm,align=left] at \at{9}{62.5}
     {\textbf{Good for:} low-value fakes that leave public traces: sale listings, recycled photos. \textbf{Not enough alone for} news or legal evidence.\\

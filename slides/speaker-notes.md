@@ -46,13 +46,14 @@ with the photo's own deposit, so every case goes to a vote. Voters say yes only 
 true and publicly verifiable, so the burden of proof is on Bob. If the fake is proven, Bob gains B
 minus f B. If not, Alice gains it. f is UMA's fee, not ours. The honest limit is that a forger who
 expects to be caught can accuse itself first and lose only f B. A forger with an older commitment
-can also reveal ahead of Bob; Bob then gets his bond back and no reward. So B must be sized to what
+can also reveal ahead of Bob; Bob then gets his bond back and no reward, and he can commit again
+after the vote. So B must be sized to what
 a fake is worth.
 
 ## 6. Live demo (90 s)
 
 We follow one file; watch the verdict change. Alice registers a key for free, attests the photo and
-locks one WETH. The verifier shows "signed, staked, open to challenge". One changed pixel gives no
+locks one WETH. She takes a selfie and presses Sign and attest. The verifier shows "signed, staked, open to challenge". One changed pixel gives no
 record. Bob found the same image published before block a. He commits a hash, then reveals.
 Paprika opens the case at UMA and disputes it at once. The three demo voters vote yes. Bob gets his
 bond back plus Alice's deposit minus UMA's fee, and Alice's key is flagged. Verifying the same file

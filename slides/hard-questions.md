@@ -25,9 +25,11 @@ accusers.
 **3. Why would anyone monitor and accuse? The accuser nets B − f·B, and a forger with an older
 commitment can reveal first.**
 That is the weakest incentive in the design, and we say so. If the forger reveals ahead of Bob, Bob
-gets his bond back and no reward. Bob loses nothing, though. The forger still loses f·B and its key
-is flagged, and the fake is still proven. So the forger can cap its own loss, but it cannot save
-the fake. Monitoring pays only where B is large compared with the effort.
+gets his bond back and no reward: any reveal while an accusation is open on the same photo opens
+nothing and returns the bond. If the forger reveals the real evidence, the fake is proven and the
+forger loses f·B; its key is flagged. If the forger reveals junk, the vote rejects it, the forger
+loses f·B, the challenge period is extended, and Bob can commit again. So the forger can cap its
+own loss, but it cannot save the fake from a determined accuser. Monitoring pays only where B is large compared with the effort.
 
 **4. What exactly do voters judge? "Not a genuine capture by that device" means little when the
 device is any key.**
@@ -51,7 +53,10 @@ We did not measure the cost of corrupting UMA's vote; its security is UMA's, not
 from one vote is bounded: one record, one key, at most B, and no record is erased. Griefing is
 priced: N false accusations cost the griefer N·B and pay the depositor N·(B − f·B). They do delay
 the refund by the vote time of each accusation: 3 to 4 days per vote with UMA's mainnet phase
-length, as measured in `contract/output/cases.md`.
+length, as measured in `contract/output/cases.md`. One more risk: if UMA's vote misses quorum
+in too many rounds, UMA deletes the request; the record stays Accused and both stakes stay locked
+in UMA's oracle until UMA governance acts (docs/limits.md). In the demo, time cannot be advanced
+while an accusation is open, so this cannot happen there.
 
 **7. Cameras post-process and platforms recompress. An exact SHA-256 match breaks on the first
 upload. Why not a perceptual hash?**

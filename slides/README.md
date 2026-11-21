@@ -15,8 +15,9 @@
   one running example: Alice attests, Bob accuses, UMA decides.
 - Amounts and durations use the symbols `B`, `T_photo`, `T_reveal` and `f`. Demo values appear
   once, on slide 6, with their source (`app/README.md`) in a LaTeX comment.
-- Slide 6 uses crops of `app/output/screens/04-verifier-attested.png` and
-  `14-verifier-proven-fake.png`.
+- Slide 6 uses crops (verdict card and "What this record shows / Not shown") of
+  `app/output/screens/06-verifier-signed-and-staked.png` and `16-verifier-proven-fake.png`. The click path
+  follows `docs/demo.md` and the button labels in the screenshots.
 - No "first", "novel", "secure" or "guarantees authenticity".
 
 ## Not yet audited
