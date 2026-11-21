@@ -1,342 +1,325 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/// Subset of UMA's OptimisticOracleV3Interface used by Paprika (names and arguments as in UMA).
-/// Deviation: `assertTruth` and `disputeAssertion` are payable because the mock takes the bond in native ETH
-/// (currency = address(0)); the real OOv3 pulls a whitelisted ERC-20 bond with transferFrom.
-interface IOptimisticOracleV3 {
-    function assertTruth(
-        bytes memory claim,
-        address asserter,
-        address callbackRecipient,
-        address escalationManager,
-        uint64 liveness,
-        address currency,
-        uint256 bond,
-        bytes32 identifier,
-        bytes32 domainId
-    ) external payable returns (bytes32);
-    function disputeAssertion(bytes32 assertionId, address disputer) external payable;
-    function settleAssertion(bytes32 assertionId) external;
-    function defaultIdentifier() external view returns (bytes32);
+interface IERC20 {
+    function transfer(address to, uint256 amount) external returns (bool);
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
+    function approve(address spender, uint256 amount) external returns (bool);
 }
 
-/// Callbacks exactly as in UMA's OptimisticOracleV3CallbackRecipientInterface.
+/// The part of UMA's Optimistic Oracle V3 that Paprika uses (signatures as in UMA).
+interface IOptimisticOracleV3 {
+    function assertTruth(bytes memory claim, address asserter, address callbackRecipient, address escalationManager,
+        uint64 liveness, IERC20 currency, uint256 bond, bytes32 identifier, bytes32 domainId) external returns (bytes32 assertionId);
+    function disputeAssertion(bytes32 assertionId, address disputer) external;
+    function settleAssertion(bytes32 assertionId) external;
+    function getMinimumBond(address currency) external view returns (uint256);
+    function defaultIdentifier() external view returns (bytes32);
+    function burnedBondPercentage() external view returns (uint256);
+}
+
+/// UMA's callback interface for assertion recipients.
 interface IOptimisticOracleV3CallbackRecipient {
     function assertionResolvedCallback(bytes32 assertionId, bool assertedTruthfully) external;
     function assertionDisputedCallback(bytes32 assertionId) external;
 }
 
-/// Paprika: a device key (P-256) registers with a stake and attests photo hashes; anyone can challenge it.
-/// - Proof of key misuse: a signature by the key over the prover's address flags the key; the reward waits
-///   REVEAL_WINDOW blocks (escrow).
-/// - Claim: commit, then reveal; the contract asserts the claim at the oracle and disputes it itself with the
-///   device's stake, so every claim goes to the vote. Each open claim reserves one CLAIM_BOND of free stake.
-/// - Stake priority: claim p = commitBlock << 64 | revealSeq; misuse proof p = proofBlock << 64. The upheld claim
-///   or misuse proof with the lowest p receives REWARD_BPS of the free stake (the rest is burned), once no open
-///   claim with a lower p remains and the misuse proof's window (if any) has passed.
-/// - Payouts are credited and collected with claimCredit; no settlement depends on a transfer to an arbitrary address.
-/// No owner, no admin, no upgrade, no treasury.
+/// @title Paprika: photos signed by a device key, backed by a deposit, judged by UMA if accused.
+/// How it works, in order:
+/// 1. A device (phone secure element) has a P-256 key. Anyone registers it for free with register(x, y, popSig);
+///    popSig proves the key is held and names the caller. keyId = sha256(x || y). A key registers once, ever.
+/// 2. The device signs (photo sha256, a recent block hash). Anyone submits it with attest(); the sender pays a
+///    deposit of BOND tokens (approved beforehand) and becomes the depositor. The record says the photo existed
+///    between anchorBlock and recordedBlock. One record per (photo, key); attestersOf(photoHash) lists the keys.
+/// 3. Verification from a file alone: hash it, call attestersOf(hash), then verify(hash, keyId) for each key.
+/// 4. Accusing: until accusableUntil (attest time + PHOTO_WINDOW), anyone commits a hidden accusation with BOND
+///    (commitClaim), then reveals it 1 block to REVEAL_WINDOW later (revealClaim). Paprika asserts "this photo is
+///    not genuine" at UMA's Optimistic Oracle V3 with the accuser's bond and disputes it at once with the photo's
+///    deposit, so UMA's token-holder vote always decides. One accusation per photo at a time.
+/// 5. UMA settles and pays Paprika 2 x BOND - fee (fee = burnedBondPercentage x BOND goes to UMA's Store).
+///    Fake proven: the accuser gets it all, the device is flagged. Rejected: the deposit is restored, the depositor
+///    gets the rest, and the window is extended by the time the photo spent under accusation.
+/// 6. Nobody proves it fake: after accusableUntil + REVEAL_WINDOW anyone calls refund(); the depositor gets BOND back.
+/// Parameters (fixed at deployment): oo, currency, BOND, PHOTO_WINDOW, REVEAL_WINDOW, LIVENESS.
+/// All payouts are credits collected with withdrawCredit(). No owner, no admin, no upgrade, no ETH. Nothing is deleted.
 contract Paprika is IOptimisticOracleV3CallbackRecipient {
-    uint256 public constant MIN_STAKE = 0.25 ether;
-    uint256 public constant REWARD_BPS = 5000;
-    uint256 public constant UNBONDING_PERIOD = 30 days;
-    uint256 public constant CLAIM_BOND = 0.11 ether;
-    uint64 public constant CLAIM_GRACE = 100;                // blocks after the last claim settlement before withdraw
-    uint64 public constant LIVENESS = 2 hours;
-    uint64 public constant REVEAL_WINDOW = 50;               // blocks
-    address public constant BURN = 0x000000000000000000000000000000000000dEaD;
-    address private constant P256 = 0x0000000000000000000000000000000000000100;
-    uint256 private constant NONE = type(uint256).max;
-    uint256 private constant HALF_N = 0x7fffffff800000007fffffffffffffffde737d56d38bcf4279dce5617e3192a8; // floor(n/2), P-256
+    /// Device status: Flagged devices can no longer attest (their existing records are untouched).
+    enum Status { None, Active, Flagged }
+    /// Why a device was flagged: a fake proven by UMA, or a revocation signed with the key.
+    enum Reason { None, FakeProven, KeyRevoked }
+    /// Record life: Attested -> Accused -> (Attested | Fake), or Attested -> Refunded. Fake and Refunded are final.
+    enum State { None, Attested, Accused, Refunded, Fake }
 
-    enum Status { None, Active, Flagged, Retired }
-    enum Reason { None, KeyMisuse, ClaimUpheld }
-    enum Verdict { None, UpheldFake }
-
-    struct Device {
-        address owner; Status status; Reason flagReason; uint32 openClaims; bool stakeSettled;
-        uint64 flaggedAtBlock; uint64 unbondAt; uint64 withdrawnAtBlock; uint64 misuseBlock;  // misuseBlock = first misuse proof
-        uint64 lastClaimSettledBlock;
-        uint256 stake;                 // free stake
-        uint256 reserved;              // dispute bonds of open claims, held by the oracle
-        address best; uint256 bestP;   // current stake beneficiary candidate and its priority
-        bytes32 x; bytes32 y;
-    }
-    struct Record { uint64 anchorBlock; uint64 recordedBlock; Verdict verdict; bool claimOpen; }
-    struct Claim { bytes32 photoHash; bytes32 keyId; address claimant; uint256 p; }
-    struct Commit { uint64 blockNo; bool done; }
-
-    IOptimisticOracleV3 public immutable oracle;
-    mapping(bytes32 => Device) internal devices;   // read via device(keyId) below (struct getter: stack limits)
-    mapping(bytes32 => mapping(bytes32 => Record)) public records;
-    mapping(bytes32 => Claim) public claims;                         // assertionId => claim
-    mapping(bytes32 => bytes32[]) internal openIds;                  // keyId => open assertion ids
-    mapping(address => mapping(bytes32 => Commit)) public commits;   // committer => commitment => commit
-    mapping(address => uint256) public credit;
-    uint256 public commitBondsHeld;
-    uint256 public inbox;
-    uint64 private revealSeq;
-
-    event Registered(bytes32 indexed keyId, address indexed owner, uint256 stake);
-    event Attested(bytes32 indexed photoHash, bytes32 indexed keyId, uint64 anchorBlock, uint256 deposit);
-    event Flagged(bytes32 indexed keyId, Reason reason, bool firstFlag, address indexed by);  // every flag decision
-    event StakeAdded(bytes32 indexed keyId, uint256 amount);
-    event Slashed(bytes32 indexed keyId, address indexed beneficiary, uint256 reward, uint256 burned);
-    event Committed(address indexed committer, bytes32 commitment);
-    event RevealRejected(address indexed claimant, bytes32 indexed photoHash, bytes32 indexed keyId);
-    event CommitForfeited(address indexed committer, bytes32 commitment);
-    event ClaimOpened(bytes32 indexed assertionId, bytes32 indexed photoHash, bytes32 indexed keyId, address claimant, bytes32 evidenceHash);
-    event ClaimResolved(bytes32 indexed assertionId, bool upheld);
-    event UnbondRequested(bytes32 indexed keyId, uint64 unbondAt);
-    event Withdrawn(bytes32 indexed keyId, uint256 amount);
-
-    constructor(IOptimisticOracleV3 _oracle) {
-        oracle = _oracle;
+    /// A registered key. owner = who registered it (information only, grants no right). (x, y) = the public key.
+    struct Device { address owner; Status status; Reason reason; uint64 flaggedAtBlock; bytes32 x; bytes32 y; }
+    /// One attested photo for one key. accusableUntil = last second a commitment may be made against it.
+    struct Record { address depositor; uint64 anchorBlock; uint64 recordedBlock; uint64 accusableUntil; State state; }
+    /// A hidden accusation and its bond; live = bond still held here (not yet revealed or forfeited).
+    struct Commit { address claimant; uint64 committedAt; uint64 committedBlock; bool live; }
+    /// An accusation sent to UMA, keyed by UMA's assertionId; open until UMA settles it.
+    struct Accusation { bytes32 photoHash; bytes32 keyId; address claimant; uint64 openedAt; bool open; }
+    /// What verify() returns. lockedDeposit = BOND while Attested or Accused (held by UMA while Accused), else 0.
+    struct View {
+        State state; uint64 anchorBlock; uint64 recordedBlock; uint64 accusableUntil; uint256 refundableAt;
+        address depositor; uint256 lockedDeposit; Status deviceStatus; uint64 flaggedAtBlock; Reason reason;
+        bool recordedBeforeFlag;
     }
 
-    /// Accepts ETH only from the oracle (dispute payouts); credited per claim in the resolution callback.
-    receive() external payable {
-        require(msg.sender == address(oracle), "only oracle");
-        inbox += msg.value;
+    // ------------------------------------------------------------------ constants and parameters
+    address public constant BURN = 0x000000000000000000000000000000000000dEaD;   // forfeited commit bonds
+    address private constant P256 = address(0x100);                                // P-256 verify precompile
+    /// Half the P-256 group order: signatures must have s <= HALF_N, so each signature has a single valid form.
+    uint256 private constant HALF_N = 0x7fffffff800000007fffffffffffffffde737d56d38bcf4279dce5617e3192a8;
+
+    IOptimisticOracleV3 public immutable oo;   // UMA's Optimistic Oracle V3
+    IERC20 public immutable currency;          // bond token (must be whitelisted at UMA)
+    bytes32 public immutable identifier;       // UMA's defaultIdentifier(), read at deployment
+    uint256 public immutable BOND;            // photo deposit = accusation bond (UMA needs equal bonds)
+    uint256 public immutable PHOTO_WINDOW;    // seconds during which a photo can be accused (extended while accused)
+    uint256 public immutable REVEAL_WINDOW;   // seconds between commit and reveal
+    uint64 public immutable LIVENESS;         // passed to UMA; every accusation is disputed at once
+
+    // ------------------------------------------------------------------ state (all public, nothing is ever deleted)
+    mapping(bytes32 => Device) public devices;                       // keyId => device
+    mapping(bytes32 => mapping(bytes32 => Record)) public records;   // photoHash => keyId => record
+    mapping(bytes32 => Commit) public commits;                       // commitment => commit
+    mapping(bytes32 => Accusation) public accusations;               // UMA assertionId => accusation
+    mapping(address => uint256) public credits;
+    mapping(bytes32 => bytes32[]) internal keysOf;                   // photoHash => keyIds that attested it, in order
+
+    // ------------------------------------------------------------------ events: one per state change
+    event Registered(bytes32 indexed keyId, address indexed owner);
+    event Attested(bytes32 indexed photoHash, bytes32 indexed keyId, address indexed depositor, uint256 anchorBlock);
+    event Refunded(bytes32 indexed photoHash, bytes32 indexed keyId, address indexed depositor);
+    event Committed(bytes32 indexed commitment, address indexed claimant);
+    event AccusationOpened(bytes32 indexed assertionId, bytes32 indexed photoHash, bytes32 indexed keyId, address claimant, bytes32 evidenceHash);
+    event BondReturned(bytes32 indexed commitment, address indexed claimant);   // reveal on a photo already proven fake
+    event CommitForfeited(bytes32 indexed commitment);
+    event AccusationResolved(bytes32 indexed assertionId, bool fakeProven, uint64 accusableUntil);
+    event DeviceFlagged(bytes32 indexed keyId, Reason reason);
+    event Credited(address indexed account, uint256 amount);
+    event CreditWithdrawn(address indexed account, uint256 amount);
+
+    /// UMA's callbacks must come from the oracle itself.
+    modifier onlyOO() {
+        require(msg.sender == address(oo), "only oracle");
+        _;
     }
 
-    // ---------------------------------------------------------------- registration / attestation
-    /// Registers a P-256 key with a stake. popSig = the key's signature over REGISTER, bound to msg.sender.
-    function register(bytes32 x, bytes32 y, bytes calldata popSig) external payable returns (bytes32 keyId) {
-        require(msg.value >= MIN_STAKE, "stake");
+    /// Checks: BOND > 0 and at least UMA's minimum bond for this token (else UMA would refuse every accusation);
+    /// non-zero windows and liveness. Reads UMA's default identifier once.
+    constructor(IOptimisticOracleV3 oo_, IERC20 currency_, uint256 bond, uint256 photoWindow, uint256 revealWindow, uint64 liveness) {
+        require(bond > 0 && bond >= oo_.getMinimumBond(address(currency_)) && photoWindow > 0 && revealWindow > 0
+            && liveness > 0, "bad params");
+        (oo, currency, identifier, BOND) = (oo_, currency_, oo_.defaultIdentifier(), bond);
+        (PHOTO_WINDOW, REVEAL_WINDOW, LIVENESS) = (photoWindow, revealWindow, liveness);
+    }
+
+    /// Anyone, free. Checks: the key was never registered; popSig is the key's signature over
+    /// sha256("PAPRIKA/REGISTER" || chainid || this contract || keyId || msg.sender). Naming msg.sender means a copy of
+    /// this transaction sent from another address fails. Sets the device Active.
+    function register(bytes32 x, bytes32 y, bytes calldata popSig) external returns (bytes32 keyId) {
         keyId = sha256(abi.encodePacked(x, y));
-        require(devices[keyId].status == Status.None, "key used");
-        bytes32 m = sha256(abi.encodePacked("PAPRIKA/REGISTER", block.chainid, address(this), keyId, msg.sender));
-        require(_p256(m, popSig, x, y), "bad pop");
         Device storage d = devices[keyId];
-        d.owner = msg.sender; d.status = Status.Active; d.stake = msg.value; d.bestP = NONE; d.x = x; d.y = y;
-        emit Registered(keyId, msg.sender, msg.value);
+        require(d.status == Status.None, "key used");
+        require(_p256(_namedDigest("PAPRIKA/REGISTER", keyId), popSig, x, y), "bad sig");
+        (d.owner, d.status, d.x, d.y) = (msg.sender, Status.Active, x, y);
+        emit Registered(keyId, msg.sender);
     }
 
-    /// Records a photo hash signed by an active key (anyone may relay); the signed message names a recent block
-    /// hash (anchor). Any ETH sent is added to the device's stake.
-    function attest(bytes32 photoHash, uint256 anchorBlock, bytes32 keyId, bytes calldata sig) external payable {
+    /// Anyone (often a relayer). Checks: the device is Active; anchorBlock is one of the last 256 blocks; no record
+    /// yet for (photo, key); sig is the key's signature over sha256("PAPRIKA/CAPTURE" || chainid || this contract ||
+    /// keyId || photoHash || blockhash(anchorBlock)). Creates the record and pulls BOND from the sender (the depositor).
+    function attest(bytes32 photoHash, uint256 anchorBlock, bytes32 keyId, bytes calldata sig) external {
         Device storage d = devices[keyId];
         require(d.status == Status.Active, "not active");
+        // The signed block hash proves the photo was signed after that block (it could not be predicted earlier);
+        // blockhash is 0 for future blocks and for blocks older than 256, so stale or invented anchors fail.
         bytes32 bh = blockhash(anchorBlock);
         require(bh != 0, "anchor");
         Record storage r = records[photoHash][keyId];
-        require(r.recordedBlock == 0, "exists");
+        require(r.state == State.None, "exists");
         bytes32 m = sha256(abi.encodePacked("PAPRIKA/CAPTURE", block.chainid, address(this), keyId, photoHash, bh));
         require(_p256(m, sig, d.x, d.y), "bad sig");
-        r.anchorBlock = uint64(anchorBlock);
-        r.recordedBlock = uint64(block.number);
-        if (msg.value > 0) { d.stake += msg.value; emit StakeAdded(keyId, msg.value); }
-        emit Attested(photoHash, keyId, uint64(anchorBlock), msg.value);
+        (r.depositor, r.anchorBlock, r.recordedBlock) = (msg.sender, uint64(anchorBlock), uint64(block.number));
+        (r.accusableUntil, r.state) = (uint64(block.timestamp + PHOTO_WINDOW), State.Attested);
+        keysOf[photoHash].push(keyId);
+        emit Attested(photoHash, keyId, msg.sender, anchorBlock);
+        _pull(msg.sender, BOND);
     }
 
-    // ---------------------------------------------------------------- objective challenge, reward escrowed
-    /// Proof of key misuse: the key's signature over EXTRACTED naming msg.sender. Flags the key; the reward waits.
-    function proveKeyMisuse(bytes32 keyId, bytes calldata sig) external {
-        Device storage d = devices[keyId];
-        require(d.status != Status.None, "unknown");
-        require(d.flagReason != Reason.KeyMisuse, "already misuse");
-        bytes32 m = sha256(abi.encodePacked("PAPRIKA/EXTRACTED", block.chainid, address(this), keyId, msg.sender));
-        require(_p256(m, sig, d.x, d.y), "bad sig");
-        _flag(d, keyId, Reason.KeyMisuse);
-        _objectiveChallenger(d, msg.sender);
-    }
-
-    function _objectiveChallenger(Device storage d, address challenger) internal {
-        if (d.misuseBlock == 0) d.misuseBlock = uint64(block.number);   // the escrow window runs from the misuse proof
-        uint256 p = uint256(block.number) << 64;
-        if (p < d.bestP) { d.best = challenger; d.bestP = p; }
-    }
-
-    /// Anyone: pay out the stake once the priority rule allows it (e.g. after a misuse proof's window).
-    function settleStake(bytes32 keyId) external {
-        require(_trySettle(devices[keyId], keyId), "not settleable");
-    }
-
-    // ---------------------------------------------------------------- subjective challenge: commit-reveal
-    /// Step 1 of a claim: commit keccak256(abi.encode(claimant, photoHash, keyId, evidenceHash, salt)) with CLAIM_BOND.
-    function commitClaim(bytes32 commitment) external payable {
-        require(msg.value == CLAIM_BOND, "bond");
-        Commit storage k = commits[msg.sender][commitment];
-        require(k.blockNo == 0, "committed");
-        k.blockNo = uint64(block.number);
-        commitBondsHeld += msg.value;
-        emit Committed(msg.sender, commitment);
-    }
-
-    /// Step 2: reveal within REVEAL_WINDOW blocks; opens the claim at the oracle and disputes it with the device's stake.
-    /// Returns 0 if the reveal is valid but rejected (bond credited back): no free stake for a bond, the record
-    /// already has an open claim or a verdict, or the device's stake was already paid out.
-    function revealClaim(bytes32 photoHash, bytes32 keyId, bytes32 evidenceHash, bytes32 salt) external returns (bytes32 id) {
-        bytes32 cm = keccak256(abi.encode(msg.sender, photoHash, keyId, evidenceHash, salt));
-        Commit storage k = commits[msg.sender][cm];
-        require(k.blockNo != 0 && !k.done, "no commit");
-        require(block.number > k.blockNo, "too early");
-        require(block.number <= uint256(k.blockNo) + REVEAL_WINDOW, "too late");
+    /// Anyone. Checks: the record is Attested (not under accusation) and the last commitment allowed
+    /// (at accusableUntil) can no longer be revealed. Credits BOND to the depositor; the record becomes Refunded.
+    function refund(bytes32 photoHash, bytes32 keyId) external {
         Record storage r = records[photoHash][keyId];
-        require(r.recordedBlock != 0, "no record");
-        k.done = true;
-        commitBondsHeld -= CLAIM_BOND;
-        Device storage d = devices[keyId];
-        if (r.verdict != Verdict.None || r.claimOpen || d.stakeSettled || d.stake < CLAIM_BOND) {
-            credit[msg.sender] += CLAIM_BOND;
-            emit RevealRejected(msg.sender, photoHash, keyId);
+        require(r.state == State.Attested, "not attested");
+        // strictly after the last possible reveal, so a refund can never get in ahead of a valid accusation
+        require(block.timestamp > r.accusableUntil + REVEAL_WINDOW, "too early");
+        r.state = State.Refunded;
+        _credit(r.depositor, BOND);
+        emit Refunded(photoHash, keyId, r.depositor);
+    }
+
+    /// Anyone. Step 1 of an accusation: commitment = keccak256(abi.encode(claimant, photoHash, keyId, evidenceHash, salt)).
+    /// Hiding the target first stops others from copying the accusation from the mempool. Pulls BOND from the sender.
+    /// A commitment value can be used once, ever.
+    function commitClaim(bytes32 commitment) external {
+        Commit storage k = commits[commitment];
+        require(k.claimant == address(0), "commitment used");
+        (k.claimant, k.committedAt, k.committedBlock, k.live) = (msg.sender, uint64(block.timestamp), uint64(block.number), true);
+        emit Committed(commitment, msg.sender);
+        _pull(msg.sender, BOND);
+    }
+
+    /// Step 2: reveal at least one block and at most REVEAL_WINDOW after a commit made while the photo was accusable.
+    /// Attested: asserts the accusation at UMA with the claimant's bond and disputes it with the photo's deposit.
+    /// Fake: no accusation, bond credited back (returns 0). While another accusation is open: reverts.
+    function revealClaim(bytes32 photoHash, bytes32 keyId, bytes32 evidenceHash, bytes32 salt) external returns (bytes32 assertionId) {
+        bytes32 cm = keccak256(abi.encode(msg.sender, photoHash, keyId, evidenceHash, salt));
+        Commit storage k = commits[cm];
+        require(k.claimant == msg.sender && k.live, "no commit");
+        require(block.number > k.committedBlock, "too early");
+        require(block.timestamp <= k.committedAt + REVEAL_WINDOW, "too late");
+        Record storage r = records[photoHash][keyId];
+        require(r.state != State.None, "no record");
+        require(r.state != State.Refunded, "refunded");
+        require(r.state != State.Accused, "accusation open");
+        require(k.committedBlock >= r.recordedBlock && k.committedAt <= r.accusableUntil, "outside window");
+        k.live = false;
+        // already proven fake by someone else: nothing to judge, the bond goes back
+        if (r.state == State.Fake) {
+            _credit(msg.sender, BOND);
+            emit BondReturned(cm, msg.sender);
             return bytes32(0);
         }
-        d.stake -= CLAIM_BOND;
-        d.reserved += CLAIM_BOND;
-        d.openClaims++;
-        r.claimOpen = true;
-        uint256 p = (uint256(k.blockNo) << 64) | uint256(++revealSeq);
-        bytes memory text = abi.encodePacked("PAPRIKA: the photo with sha256 ", photoHash, " attested by key ", keyId,
-            " on ", address(this), " is not a genuine capture of that device; evidence sha256 ", evidenceHash);
-        // the contract is the asserter, so every oracle payout lands here and is credited internally
-        id = oracle.assertTruth{value: CLAIM_BOND}(text, address(this), address(this), address(0), LIVENESS, address(0),
-            CLAIM_BOND, oracle.defaultIdentifier(), bytes32(0));
-        claims[id] = Claim(photoHash, keyId, msg.sender, p);
-        openIds[keyId].push(id);
-        emit ClaimOpened(id, photoHash, keyId, msg.sender, evidenceHash);
-        oracle.disputeAssertion{value: CLAIM_BOND}(id, address(this));
+        r.state = State.Accused;
+        // UMA pulls one bond from the asserter and one from the disputer; Paprika is both
+        _call(address(currency), abi.encodeCall(IERC20.approve, (address(oo), 2 * BOND)));
+        bytes memory claim = abi.encodePacked("Paprika accusation: the photo with SHA-256 0x", _hex(photoHash),
+            " attested by the device key with id 0x", _hex(keyId), " is not a genuine capture by that device. Evidence SHA-256: 0x",
+            _hex(evidenceHash), ".");
+        assertionId = oo.assertTruth(claim, address(this), address(this), address(0), LIVENESS, currency, BOND, identifier, bytes32(0));
+        accusations[assertionId] = Accusation(photoHash, keyId, msg.sender, uint64(block.timestamp), true);
+        emit AccusationOpened(assertionId, photoHash, keyId, msg.sender, evidenceHash);
+        // Dispute at once with the photo's deposit: an undisputed assertion would be accepted by silence after
+        // LIVENESS; disputing it ourselves sends every accusation to UMA's vote.
+        oo.disputeAssertion(assertionId, address(this));
     }
 
-    /// Anyone: burn the bond of a commit that was not revealed within REVEAL_WINDOW blocks.
-    function forfeitCommit(address committer, bytes32 commitment) external {
-        Commit storage k = commits[committer][commitment];
-        require(k.blockNo != 0 && !k.done, "no commit");
-        require(block.number > uint256(k.blockNo) + REVEAL_WINDOW, "window open");
-        k.done = true;
-        commitBondsHeld -= CLAIM_BOND;
-        _send(BURN, CLAIM_BOND);
-        emit CommitForfeited(committer, commitment);
+    /// Anyone. Checks: the commitment is live and its REVEAL_WINDOW is over. Sends its BOND to the burn address.
+    function forfeitCommit(bytes32 commitment) external {
+        Commit storage k = commits[commitment];
+        require(k.live, "no commit");
+        require(block.timestamp > k.committedAt + REVEAL_WINDOW, "reveal open");
+        k.live = false;
+        emit CommitForfeited(commitment);
+        _call(address(currency), abi.encodeCall(IERC20.transfer, (BURN, BOND)));
     }
 
-    /// Oracle: the vote's result. Upheld: claimant credited, record judged, key flagged. Rejected: winnings to the
-    /// device's stake. Must never revert.
-    function assertionResolvedCallback(bytes32 id, bool truthful) external {
-        require(msg.sender == address(oracle), "only oracle");
-        Claim memory c = claims[id];
-        uint256 won = inbox;
-        inbox = 0;
-        if (c.claimant == address(0)) { if (won > 0) _send(BURN, won); return; }
-        delete claims[id];
-        _removeOpen(c.keyId, id);
-        Record storage r = records[c.photoHash][c.keyId];
-        Device storage d = devices[c.keyId];
-        r.claimOpen = false;
-        d.openClaims--;
-        d.reserved -= CLAIM_BOND;
-        d.lastClaimSettledBlock = uint64(block.number);
-        if (truthful) credit[c.claimant] += won;                 // claimant's bond + winnings, collected by pull
-        else if (won > 0) { if (d.stakeSettled) _send(BURN, won); else { d.stake += won; emit StakeAdded(c.keyId, won); } }
-        if (truthful) {
-            r.verdict = Verdict.UpheldFake;
-            _flag(d, c.keyId, Reason.ClaimUpheld);
-            if (c.p < d.bestP) { d.best = c.claimant; d.bestP = c.p; }
+    /// UMA, inside settleAssertion, after paying this contract (asserter and disputer) 2 x BOND - fee.
+    /// Proven: the photo is Fake for good, the claimant gets the payout. Rejected: the deposit is restored, the
+    /// depositor gets the rest, and the accusation window is extended by the time spent under accusation.
+    function assertionResolvedCallback(bytes32 assertionId, bool assertedTruthfully) external onlyOO {
+        Accusation storage a = accusations[assertionId];
+        if (!a.open) return;   // not an accusation of this contract: nothing to do
+        a.open = false;
+        Record storage r = records[a.photoHash][a.keyId];
+        // what UMA just paid us: both bonds minus its fee share (read from UMA, not assumed)
+        uint256 payout = 2 * BOND - BOND * oo.burnedBondPercentage() / 1e18;
+        if (assertedTruthfully) {
+            r.state = State.Fake;
+            Device storage d = devices[a.keyId];
+            if (d.status == Status.Active) _flag(d, a.keyId, Reason.FakeProven);
+            _credit(a.claimant, payout);
+        } else {
+            r.state = State.Attested;
+            // While accused nobody else could accuse it; give that time back so the window cannot be run out by
+            // accusations that fail (for example the forger accusing itself with no evidence).
+            r.accusableUntil += uint64(block.timestamp) - a.openedAt;
+            _credit(r.depositor, payout - BOND);
         }
-        _trySettle(d, c.keyId);
-        emit ClaimResolved(id, truthful);
+        emit AccusationResolved(assertionId, assertedTruthfully, r.accusableUntil);
     }
 
-    /// Oracle: dispute notice (the contract disputes its own assertions; nothing to do).
-    function assertionDisputedCallback(bytes32) external view {
-        require(msg.sender == address(oracle), "only oracle");
-    }
+    /// UMA, inside disputeAssertion. Paprika disputes its own assertions; nothing to do.
+    function assertionDisputedCallback(bytes32) external view onlyOO {}
 
-    // ---------------------------------------------------------------- exit
-    /// Owner: retire an active key; no new records; the stake can be withdrawn after UNBONDING_PERIOD.
-    function requestUnbond(bytes32 keyId) external {
+    /// Anyone holding the key. Checks: the device is Active; sig is the key's signature over
+    /// sha256("PAPRIKA/REVOKE" || chainid || this contract || keyId || msg.sender). Flags the device (KeyRevoked);
+    /// existing records and deposits are untouched; no money moves.
+    function revokeKey(bytes32 keyId, bytes calldata sig) external {
         Device storage d = devices[keyId];
-        require(msg.sender == d.owner, "not owner");
         require(d.status == Status.Active, "not active");
-        d.status = Status.Retired;
-        d.unbondAt = uint64(block.timestamp + UNBONDING_PERIOD);
-        emit UnbondRequested(keyId, d.unbondAt);
+        require(_p256(_namedDigest("PAPRIKA/REVOKE", keyId), sig, d.x, d.y), "bad sig");
+        _flag(d, keyId, Reason.KeyRevoked);
     }
 
-    /// Owner: take the free stake back after unbonding, with no open claim and CLAIM_GRACE blocks after the last one.
-    function withdraw(bytes32 keyId) external {
-        Device storage d = devices[keyId];
-        require(msg.sender == d.owner, "not owner");
-        require(d.status == Status.Retired, "not retired");          // flagged (incl. escrowed misuse) never withdraws
-        require(block.timestamp >= d.unbondAt, "unbonding");
-        require(d.openClaims == 0, "open claims");
-        require(d.lastClaimSettledBlock == 0 || block.number >= uint256(d.lastClaimSettledBlock) + CLAIM_GRACE, "claim grace");
-        uint256 amt = d.stake;
-        require(amt > 0, "nothing");
-        d.stake = 0;
-        d.withdrawnAtBlock = uint64(block.number);
-        _send(msg.sender, amt);
-        emit Withdrawn(keyId, amt);
+    /// Anyone with a credit. Payouts are credits rather than direct transfers so that an account that cannot receive
+    /// tokens only blocks its own withdrawal, never a refund or a settlement.
+    function withdrawCredit() external {
+        uint256 amount = credits[msg.sender];
+        require(amount > 0, "no credit");
+        credits[msg.sender] = 0;
+        emit CreditWithdrawn(msg.sender, amount);
+        _call(address(currency), abi.encodeCall(IERC20.transfer, (msg.sender, amount)));
     }
 
-    /// Collect credited payouts (rewards, oracle winnings, refunded bonds).
-    function claimCredit() external {
-        uint256 amt = credit[msg.sender];
-        require(amt > 0, "nothing");
-        credit[msg.sender] = 0;
-        _send(msg.sender, amt);
-    }
-
-    // ---------------------------------------------------------------- verification
-    struct View {
-        uint64 anchorBlock; uint64 recordedBlock; Verdict verdict;
-        Status status; uint64 flaggedAtBlock; Reason flagReason; uint256 stake; bool recordedBeforeFlag;
-        uint256 stakeAtRisk; uint64 withdrawnAtBlock; bool misusePending; uint32 openClaims;
-        uint256 reservedForClaims;   // locked in the oracle for open claims; NOT winnable by a new challenger
-    }
-    /// What a verifier needs about one record and its key.
+    /// Anyone (view). Everything a verifier needs about one photo and one key. recordedBeforeFlag: the record exists
+    /// and was made before the device was flagged (a record in the flag's own block counts as not before).
     function verify(bytes32 photoHash, bytes32 keyId) external view returns (View memory v) {
-        Record memory r = records[photoHash][keyId];
+        Record storage r = records[photoHash][keyId];
         Device storage d = devices[keyId];
-        v = View(r.anchorBlock, r.recordedBlock, r.verdict, d.status, d.flaggedAtBlock, d.flagReason, d.stake,
-            r.recordedBlock != 0 && (d.status != Status.Flagged || r.recordedBlock < d.flaggedAtBlock),
-            d.stakeSettled ? 0 : d.stake, d.withdrawnAtBlock,                  // stakeAtRisk = free stake only
-            d.misuseBlock != 0 && !d.stakeSettled, d.openClaims, d.reserved);
+        (v.state, v.anchorBlock, v.recordedBlock, v.accusableUntil) = (r.state, r.anchorBlock, r.recordedBlock, r.accusableUntil);
+        v.refundableAt = r.state == State.None ? 0 : uint256(r.accusableUntil) + REVEAL_WINDOW + 1;
+        v.depositor = r.depositor;
+        v.lockedDeposit = r.state == State.Attested || r.state == State.Accused ? BOND : 0;   // while Accused: held by UMA
+        (v.deviceStatus, v.flaggedAtBlock, v.reason) = (d.status, d.flaggedAtBlock, d.reason);
+        v.recordedBeforeFlag = r.state != State.None && (d.status != Status.Flagged || r.recordedBlock < d.flaggedAtBlock);
     }
 
-    function device(bytes32 keyId) external view returns (Device memory) { return devices[keyId]; }
+    /// The keys that attested this photo hash, oldest first; then call verify(photoHash, keyId) for each.
+    function attestersOf(bytes32 photoHash) external view returns (bytes32[] memory) {
+        return keysOf[photoHash];
+    }
 
-    function openClaimIds(bytes32 keyId) external view returns (bytes32[] memory) { return openIds[keyId]; }
-
-    // ---------------------------------------------------------------- internals
+    // ------------------------------------------------------------------ internals
     function _flag(Device storage d, bytes32 keyId, Reason reason) internal {
-        emit Flagged(keyId, reason, d.status != Status.Flagged, msg.sender);
-        if (d.status != Status.Flagged) d.flaggedAtBlock = uint64(block.number);
-        d.status = Status.Flagged;
-        if (d.flagReason == Reason.None || reason == Reason.KeyMisuse) d.flagReason = reason;   // first reason, KeyMisuse overrides
+        (d.status, d.reason, d.flaggedAtBlock) = (Status.Flagged, reason, uint64(block.number));
+        emit DeviceFlagged(keyId, reason);
     }
 
-    function _trySettle(Device storage d, bytes32 keyId) internal returns (bool) {
-        if (d.stakeSettled || d.best == address(0)) return false;
-        if (d.misuseBlock != 0 && block.number <= uint256(d.misuseBlock) + REVEAL_WINDOW) return false;
-        bytes32[] storage ids = openIds[keyId];
-        for (uint256 i = 0; i < ids.length; i++) if (claims[ids[i]].p < d.bestP) return false;  // bounded by stake/bond
-        d.stakeSettled = true;
-        uint256 s = d.stake;
-        d.stake = 0;
-        uint256 reward = s * REWARD_BPS / 10_000;
-        credit[d.best] += reward;
-        if (s - reward > 0) _send(BURN, s - reward);
-        emit Slashed(keyId, d.best, reward, s - reward);
-        return true;
+    function _credit(address to, uint256 amount) internal {
+        if (amount == 0) return;
+        credits[to] += amount;
+        emit Credited(to, amount);
     }
 
-    function _removeOpen(bytes32 keyId, bytes32 id) internal {
-        bytes32[] storage ids = openIds[keyId];
-        for (uint256 i = 0; i < ids.length; i++) if (ids[i] == id) { ids[i] = ids[ids.length - 1]; ids.pop(); return; }
+    function _pull(address from, uint256 amount) internal {
+        _call(address(currency), abi.encodeCall(IERC20.transferFrom, (from, address(this), amount)));
     }
 
-    function _send(address to, uint256 amt) internal {
-        (bool ok, ) = to.call{value: amt}("");
-        require(ok, "send");
+    /// ERC-20 call that accepts tokens returning true or nothing.
+    function _call(address token, bytes memory data) internal {
+        (bool ok, bytes memory ret) = token.call(data);
+        require(ok && (ret.length == 0 || abi.decode(ret, (bool))) && token.code.length > 0, "token call failed");
     }
 
-    /// The digest h is always computed by the caller inside this contract from fields; never caller-supplied.
+    function _namedDigest(string memory label, bytes32 keyId) internal view returns (bytes32) {
+        return sha256(abi.encodePacked(label, block.chainid, address(this), keyId, msg.sender));
+    }
+
+    /// Low-s only. If the precompile is missing the call returns no data and every signature is rejected.
     function _p256(bytes32 h, bytes calldata sig, bytes32 x, bytes32 y) internal view returns (bool) {
-        if (sig.length != 64) return false;
-        if (uint256(bytes32(sig[32:64])) > HALF_N) return false;                       // low-s only
+        if (sig.length != 64 || uint256(bytes32(sig[32:64])) > HALF_N) return false;
         (bool ok, bytes memory ret) = P256.staticcall(abi.encodePacked(h, sig, x, y));
         return ok && ret.length == 32 && abi.decode(ret, (uint256)) == 1;
+    }
+
+    function _hex(bytes32 b) internal pure returns (bytes memory s) {
+        s = new bytes(64);
+        for (uint256 i = 0; i < 64; i++) {
+            uint8 n = uint8(b[i / 2]) >> (i % 2 == 0 ? 4 : 0) & 0x0f;
+            s[i] = bytes1(n < 10 ? n + 48 : n + 87);
+        }
     }
 }

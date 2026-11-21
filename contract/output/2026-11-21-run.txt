@@ -1,0 +1,128 @@
+npm notice run npx
+npm notice run 'hardhat' test
+Compiled 2 Solidity files successfully (evm target: cancun).
+
+
+  Paprika with the real UMA Optimistic Oracle V3
+      real UMA stack: OOv3 0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82, Store 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512, identifier ASSERT_TRUTH, minimum bond 100.0 = BOND, burnedBondPercentage 0.5, fee 50.0
+      CASE honest path (real UMA): register free, relayer attests and locks BOND, refund after PHOTO_WINDOW + REVEAL_WINDOW; record stays (Refunded, recordedBlock 36) | relayer locked BOND = 100.0 and got it back, net 0
+    ✔ 1 honest path with refund
+      invariant ok: Paprika holds 0.0 = deposits 0.0 + commit bonds 0.0 + credits 0.0; oracle 0.0 for 0 open
+      CASE one pixel changed (real UMA): attestersOf(modified hash) = [], verify finds no record | state None, recordedBlock 0
+    ✔ 2 one pixel changed
+      invariant ok: Paprika holds 100.0 = deposits 100.0 + commit bonds 0.0 + credits 0.0; oracle 0.0 for 0 open
+      BAL start                    depositor 2000.0 | accuser 2000.0 | Paprika 100.0 | oracle 0.0 | Store 0.0
+      BAL after attest             depositor 1900.0 | accuser 2000.0 | Paprika 200.0 | oracle 0.0 | Store 0.0
+      BAL after reveal (accused)   depositor 1900.0 | accuser 1900.0 | Paprika 100.0 | oracle 200.0 | Store 0.0
+      BAL after settle (TRUE)      depositor 1900.0 | accuser 1900.0 (+credit 150.0) | Paprika 250.0 | oracle 0.0 | Store 50.0
+      CASE true accusation (real UMA): photo Fake, device Flagged (FakeProven) at block 48 | accuser credited 2 x BOND - fee = 150.0 (net +BOND - fee = 50.0); depositor -BOND = -100.0; Store +fee = 50.0
+    ✔ 3 true accusation: commit, reveal (assert + dispute at the real oracle), vote TRUE, settle
+      invariant ok: Paprika holds 250.0 = deposits 100.0 + commit bonds 0.0 + credits 150.0; oracle 0.0 for 0 open
+      BAL after reveal (accused)   depositor 1900.0 | accuser 1900.0 | Paprika 250.0 | oracle 200.0 | Store 50.0
+      BAL after settle (FALSE)     depositor 1900.0 (+credit 50.0) | accuser 1900.0 | Paprika 400.0 | oracle 0.0 | Store 100.0
+      CASE false accusation (real UMA): record back to Attested, device untouched, window extended by the 172802 s under accusation; refund afterwards | accuser -BOND = -100.0; depositor +BOND - fee = 50.0 (deposit returned); Store +fee = 50.0
+    ✔ 4 false accusation: vote FALSE, deposit restored, window extended
+      invariant ok: Paprika holds 400.0 = deposits 100.0 + commit bonds 0.0 + credits 300.0; oracle 0.0 for 0 open
+      CASE second accusation while one is open (real UMA): B's reveal: "accusation open"; after A is voted false, B reveals the same commitment and is voted true | photo Fake
+    ✔ 5 second accusation while one is open
+      invariant ok: Paprika holds 600.0 = deposits 100.0 + commit bonds 0.0 + credits 500.0; oracle 0.0 for 0 open
+      CASE self-accusation (real UMA): the forger's second account accuses and wins | net -fee = -50.0
+    ✔ 6 self-accusation loses the oracle fee
+      invariant ok: Paprika holds 750.0 = deposits 100.0 + commit bonds 0.0 + credits 650.0; oracle 0.0 for 0 open
+      CASE key revocation (real UMA): revocation copied by another address: "bad sig"; holder revokes; revoked device attests: "not active"; its record stays Attested and is refunded | no tokens move at revocation
+    ✔ 7 key revocation
+      invariant ok: Paprika holds 850.0 = deposits 100.0 + commit bonds 0.0 + credits 750.0; oracle 0.0 for 0 open
+      CASE signatures and replay (real UMA): replay: "exists"; otherKey: "bad sig"; otherChain: "bad sig"; highS: "bad sig"; futureAnchor: "anchor"; popAsCapture: "bad sig"; keyUsed: "key used"; callbackNotOracle: "only oracle" | no tokens move
+    ✔ 8 signature and replay checks
+      invariant ok: Paprika holds 950.0 = deposits 200.0 + commit bonds 0.0 + credits 750.0; oracle 0.0 for 0 open
+
+      GAS with the real UMA OOv3 (gasUsed)
+        revealClaim (real OOv3: assertTruth + disputeAssertion)    673488
+        oo.settleAssertion -> Paprika callback (TRUE)              165524
+        oo.settleAssertion -> Paprika callback (FALSE)             140870
+
+  Paprika
+      CASE honest path: owner registers for free; a relayer submits the device-signed photo and pays the deposit BOND; after PHOTO_WINDOW + REVEAL_WINDOW a stranger triggers the refund (one second earlier: "too early"); the record stays | owner 0 tokens (101860 gas); relayer locked BOND = 100.0 for PHOTO_WINDOW + REVEAL_WINDOW + 1 s = 608401 s, net 0.0; verify before: state Attested, anchorBlock 126, recordedBlock 127, accusableUntil = attest time + PHOTO_WINDOW, refundableAt = accusableUntil + REVEAL_WINDOW + 1, depositor relayer, lockedDeposit 100.0, device Active, recordedBeforeFlag true; after: state Refunded, lockedDeposit 0.0, recordedBlock 127 unchanged
+    ✔ 1 honest path: register, relayed attest, verify, wait, refund, verify again
+      invariant ok: Paprika holds 0.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 0.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE one pixel changed: attestersOf(sha256 of the modified file) is empty and verify(that hash, same key) finds nothing | state None, recordedBlock 0, lockedDeposit 0.0, recordedBeforeFlag false (device Active describes the key, not the photo)
+    ✔ 2 one pixel changed: no record
+      invariant ok: Paprika holds 100.0 = deposits 100.0 + unrevealed commit bonds 0.0 + credits 0.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE refund timing: refund one second before refundableAt: "too early"; while accused: "not attested"; after a rejected accusation open for 172803 s the window is extended by exactly that time, so the old refundableAt gives "too early"; a stranger triggers the refund, the depositor is credited | extension = time under accusation = 172803 s; stranger gets 0
+      CASE repeated self-accusation (delay attempt): 3 rounds of a rejected self-accusation: each round extends accusableUntil by its own duration, so hunters keep the full PHOTO_WINDOW of unaccused time and the window never runs out | forger + second account net -ROUNDS x fee = -150.0 (fee = 50.0 per round); accusableUntil moved by 518406 s = total time accused
+    ✔ 3 refund timing: too early, while accused, window extended after a rejected accusation, repeated self-accusation
+      invariant ok: Paprika holds 400.0 = deposits 100.0 + unrevealed commit bonds 0.0 + credits 300.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE true accusation: hunter commits + reveals with BOND; Paprika asserts the claim at UMA and disputes it at once with the photo's deposit, so UMA votes; the vote says true: photo Fake (final), device Flagged (FakeProven) at block 266; the device's next attest: "not active"; its OTHER record stays Attested (recordedBeforeFlag true) and is refunded normally. Claim text sent to UMA: "Paprika accusation: the photo with SHA-256 0xb5d54c39e66671c9731b9f471e585d8262cd4f54963f0c93082d8dcf334d4c78 attested by the device key with id 0x79c98f947fbe4aba645c0893709e641df243b1efc71d21f3b85c64fd3ffb80e6 is not a genuine capture by that device. Evidence SHA-256: 0xee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e." | hunter credited 2 x BOND - fee = 150.0, net +BOND - fee = 50.0; forger -BOND = -100.0; UMA Store +fee = 50.0
+    ✔ 4 a true accusation: commit, reveal, UMA vote true, settle
+      invariant ok: Paprika holds 250.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 250.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE false accusation: UMA votes false: the deposit is restored in Paprika, the record is Attested again with its window extended by the 172800 s of the vote, the device stays Active; refund works afterwards | accuser -BOND = -100.0; depositor +BOND - fee = 50.0 (deposit back in full); UMA Store +fee = 50.0
+    ✔ 5 a false accusation: UMA vote false
+      invariant ok: Paprika holds 150.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 150.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE the vote errs: a false accusation voted true: the honest photo reads Fake for good and the honest device is Flagged (FakeProven); a true accusation voted false: the fake stays Attested and gets its window extended | honest depositor -BOND = -100.0 and loses its key; false accuser +BOND - fee = 50.0; rejected true accuser -BOND = -100.0; forger +BOND - fee = 50.0 (its deposit stays at risk). Paprika cannot tell; the outcome is only as good as UMA's vote
+    ✔ 6 the vote errs
+      invariant ok: Paprika holds 300.0 = deposits 100.0 + unrevealed commit bonds 0.0 + credits 200.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE self-accusation: the forger's second account accuses and wins; no treasury to drain | forger -BOND = -100.0, second account +BOND - fee = 50.0; net -fee = -50.0: the real penalty for a fake is UMA's fee share, fee = burnedBondPercentage x BOND, not BOND
+    ✔ 7 self-accusation by the depositor's second account
+      invariant ok: Paprika holds 150.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 150.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE flagged party returns with a new key: the flagged key cannot register again ("key used"); a fresh key registers for FREE and attests at once. LIMIT: a flag costs nothing; nothing links the new key to the old one; the only deterrent is the per-photo deposit | new key: 0 tokens + 101872 gas; its next photo locks BOND = 100.0 as for anyone (state Attested)
+    ✔ 8 a flagged party comes back with a new key
+      invariant ok: Paprika holds 250.0 = deposits 100.0 + unrevealed commit bonds 0.0 + credits 150.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE mempool copies: (a) copied attest: the copy (higher gas price) lands first; the record carries the HONEST key and the copier is the depositor; the honest tx reverts "exists"; (b) copied register reverts (proof of possession names msg.sender); (c) a copied commitment landing first makes the honest commit revert "commitment used"; nobody can reveal it ("no commit" / "no commit"); the hunter commits again with a new salt and the copy is forfeited | (a) honest sender 0.0 tokens (gas only); copier -BOND = -100.0, locked under the honest key (refunded later unless the photo is proven fake); (b) copier gas only; (c) copier -BOND = -100.0 (to the burn address), hunter gas only and one block
+      CASE reveal seen in the mempool: the forger's account commits in the hunter's reveal block and tries to reveal in the same block: reverts ("too early": a reveal needs a commitment from an earlier block); the hunter's accusation opens and is voted true; the forger's later reveal on the Fake photo just gets its bond back | hunter +BOND - fee = 50.0; forger's account 0.0; forger -BOND
+    ✔ 9 front-running: attest, register, commitment, a hunter's reveal
+      invariant ok: Paprika holds 350.0 = deposits 100.0 + unrevealed commit bonds 0.0 + credits 250.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE insurance (STATED RESIDUAL): the forger's account committed first; when the hunter's reveal appears it reveals with a higher gas price and its accusation opens; the hunter's reveal reverts "accusation open". (A) vote true within REVEAL_WINDOW (test only): hunter reveals again: bond returned; (B) vote true after 172800 s: hunter commitment expired during the vote and was forfeited; (C) junk self-accusation rejected after 172800 s: hunter commitment expired during the vote and was forfeited, photo stays Attested with a longer window | forger + account: A -fee = -50.0, B -fee = -50.0, C -fee = -50.0 (plus its deposit BOND still locked and refundable); hunter: A 0.0, B -BOND = -100.0, C -BOND = -100.0. FLAW: whenever UMA's vote outlasts REVEAL_WINDOW, a blocked hunter loses BOND. Unused insurance costs BOND = 100.0 per REVEAL_WINDOW (forfeited), or fee = 50.0 per round if revealed as a junk self-accusation
+    ✔ 10 insurance: the forger holds its own earlier commitment and reveals first
+      invariant ok: Paprika holds 650.0 = deposits 200.0 + unrevealed commit bonds 0.0 + credits 450.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE second accusation while one is open: B's reveal while A's accusation is open: "accusation open"; B's commitment stays valid until it expires; A is voted false, then B reveals the same commitment (still within REVEAL_WINDOW) and is voted true | A -BOND = -100.0; B +BOND - fee = 50.0. Only one accusation per photo at a time
+    ✔ 11 a second accusation while one is open
+      invariant ok: Paprika holds 200.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 200.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE invalid accusations: never attested: "no record"; refunded photo: "refunded"; committed after the window: "outside window"; on a photo already Fake: no accusation, bond credited back (net 0); revealed in the commit block: tx status 0 ("too early"); by another account: "no commit"; wrong salt: "no commit"; forfeit before the deadline: "reveal open"; after REVEAL_WINDOW: "too late"; forfeit twice: "no commit" | each unusable commitment is forfeited: accuser -BOND each, burn address +4 x BOND = 400.0; depositor 0
+    ✔ 12 invalid accusations: no record, refunded, fake, out of window, early / late / other account / wrong salt, forfeit
+      invariant ok: Paprika holds 550.0 = deposits 200.0 + unrevealed commit bonds 0.0 + credits 350.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE griefing: 5 false accusations, each voted false after 172800 s; each one extends the window by its duration | griefer -N x BOND = -500.0; depositor +N x (BOND - fee) = 250.0; UMA Store +N x fee = 250.0; refund delayed by the total time under accusation = 864010 s (10.00 days)
+    ✔ 13 griefing: N false accusations in a row against an honest photo
+      invariant ok: Paprika holds 350.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 350.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE key revocation: an account holding the key (not the registering owner) revokes with a signature naming itself; the same tx copied from another address and mined first reverts (status 0); the revoked device's attest: "not active"; revoke twice: "not active" | device Flagged (KeyRevoked); its record stays Attested with lockedDeposit 100.0 and is refunded normally (+BOND = 100.0); no tokens move at revocation
+    ✔ 14 key revocation
+      invariant ok: Paprika holds 100.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 100.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE signatures: replay: "exists"; otherKey: "bad sig"; otherChain: "bad sig"; otherContract: "bad sig"; highS: "bad sig"; highPop: "bad sig"; highRev: "bad sig"; future: "anchor"; stale: "anchor"; capAsPop: "bad sig"; revAsPop: "bad sig"; popAsCap: "bad sig"; revAsCap: "bad sig"; popAsRev: "bad sig"; capAsRev: "bad sig"; noAllowance: "token call failed" | signed messages: REGISTER 120 bytes, CAPTURE 163, REVOKE 118 (distinct labels and lengths); no tokens move on any rejection
+    ✔ 15 signatures: replay, other key, other contract/chain, anchors, high-s, cross-type reuse (38ms)
+      invariant ok: Paprika holds 200.0 = deposits 200.0 + unrevealed commit bonds 0.0 + credits 0.0; oracle holds 2 x BOND x 0 open; supply conserved
+      invariant ok: Paprika holds 0.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 0.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE no admin: external functions (exact list): BOND (view), BURN (view), LIVENESS (view), PHOTO_WINDOW (view), REVEAL_WINDOW (view), accusations (view), assertionDisputedCallback (view), assertionResolvedCallback, attest, attestersOf (view), commitClaim, commits (view), credits (view), currency (view), devices (view), forfeitCommit, identifier (view), oo (view), records (view), refund, register, revealClaim, revokeKey, verify (view), withdrawCredit; nothing is payable and plain ETH reverts (no receive function); the UMA callbacks only from the oracle: "only oracle" / "only oracle"; a third party's assertion naming Paprika as callback recipient is ignored | no owner, no upgrade, no treasury
+    ✔ 16 no admin: exact function list, callbacks only from the oracle, no ETH
+      invariant ok: Paprika holds 0.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 0.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE depositor that cannot receive tokens: the token refuses transfers to it (blacklist); a rejected accusation, the refund and a proven accusation on its other photo all settle; only its own withdrawCredit fails ("token call failed") | it is credited BOND + (BOND - fee) = 150.0, which stays in Paprika (counted in the invariant); the hunter collects 2 x BOND - fee = 150.0
+    ✔ 17 a depositor that cannot receive tokens blocks nobody
+      invariant ok: Paprika holds 150.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 150.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE constructor and parameters: BOND below the oracle's minimum bond, BOND 0, PHOTO_WINDOW 0, REVEAL_WINDOW 0 or LIVENESS 0: each reverts "bad params"; a second deployment uses its own values | second deployment (BOND x3, PHOTO_WINDOW /7, REVEAL_WINDOW /6): attest locks 300.0; refundableAt = attest time + 87001 s; winner net +BOND - fee = 150.0; depositor of the fake -BOND = -300.0
+    ✔ 18 constructor checks and a second deployment with other parameters (41ms)
+      invariant ok: Paprika holds 0.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 0.0; oracle holds 2 x BOND x 0 open; supply conserved
+      invariant ok: Paprika holds 750.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 750.0; oracle holds 2 x BOND x 0 open; supply conserved
+      CASE verification from a file alone: a verifier hashes the file, calls attestersOf(hash), then verify(hash, keyId) for each key; two devices attested the same file: both key ids are returned in order; an unknown hash returns [] | 2 keys; A's record proven Fake (lockedDeposit 0.0), B's record independent: Attested, its own depositor, deposit BOND = 100.0 and window (1001 s later), refunded on its own schedule
+    ✔ 19 verification from a file alone: attestersOf(photoHash)
+      invariant ok: Paprika holds 250.0 = deposits 0.0 + unrevealed commit bonds 0.0 + credits 250.0; oracle holds 2 x BOND x 0 open; supply conserved
+
+
+      GAS Paprika with MockOptimisticOracleV3 (gasUsed, optimizer 200 runs, hardfork osaka; oracle rows include the mock's own work)
+        register                                                       101860
+        attest                                                         169388
+        verify (view, eth_estimateGas)                                 31756
+        refund                                                         55940
+        withdrawCredit                                                 37244
+        commitClaim                                                    89174
+        revealClaim (assertTruth + disputeAssertion)                   390047
+        oo.settleAssertion -> assertionResolvedCallback (proven)       130276
+        oo.settleAssertion -> assertionResolvedCallback (rejected)     142628
+        forfeitCommit                                                  49172
+        revokeKey                                                      44161
+        attestersOf (view, eth_estimateGas, 2 keys)                    28836
+
+      SIZE (non-empty, non-comment lines of Solidity; deployed bytecode bytes)
+        Paprika                   219 lines   11157 bytes
+        MockOptimisticOracleV3     46 lines    3476 bytes
+        TestToken                  34 lines    1798 bytes
+
+  27 passing (1s)
+

@@ -1,635 +1,577 @@
-// Paprika: scenario and attack suite on a local chain with the MockArbiter oracle.
-// Each test prints ATTACK lines (`ATTACK <attack>: <outcome> | <details>`) and CASE lines
-// (`CASE <short name>: <what happened> | <numbers in ETH>`).
-// After every test: contract balance = stakes + credits + unrevealed commit bonds; oracle bonds = 2 x reserved.
+// Paprika scenario suite: one test per use case or attack, on the local in-process Hardhat chain, against
+// MockOptimisticOracleV3 (same interface and payouts as UMA's Optimistic Oracle V3; its `resolve` plays UMA's vote)
+// and TestToken (the bond currency). The suite against the real UMA contracts is test/uma.integration.test.js.
+//
+// How to read the output: every test prints `CASE <name>: <what happened> | <numbers>`. Amounts are in tokens and
+// are computed from the parameters in P below and from the oracle's fee share (fee = burnedBondPercentage x BOND);
+// each number is printed as its formula followed by the measured value. "net" = change of (token balance +
+// uncollected credit) of that account during the test.
+// After every test the suite checks: Paprika's token balance == deposits of Attested records + unrevealed commit
+// bonds + uncollected credits; the oracle holds 2 x BOND per open accusation; no token is created or lost.
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { ethers, network, artifacts } = require("hardhat");
 
-const E = (x) => ethers.parseEther(String(x));
+// ---------------------------------------------------------------- test parameters (the only place amounts are typed)
+const P = { BOND: ethers.parseEther("100"), MIN_BOND: ethers.parseEther("50"), WINDOW: 7 * 86400, REVEAL: 3600, LIVENESS: 7200, VOTE: 2 * 86400 };
+const STORE = "0x0000000000000000000000000000000000005707";   // stands in for UMA's Store (receives the oracle fee)
+const BURN = "0x000000000000000000000000000000000000dEaD";
+const N_P256 = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
 const F = (x) => ethers.formatEther(x);
 const h = (s) => ethers.sha256(ethers.toUtf8Bytes(s));
-const ST = { None: 0n, Active: 1n, Flagged: 2n, Retired: 3n };
-const RS = { None: 0n, KeyMisuse: 1n, DisputeUpheld: 2n };
-const RSN = ["None", "KeyMisuse", "DisputeUpheld"];
-const N_P256 = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+const ST = ["None", "Attested", "Accused", "Refunded", "Fake"];
+const DS = ["None", "Active", "Flagged"];
+const RS = ["None", "FakeProven", "KeyRevoked"];
 const gasLog = {};
-const line = (name, verdict, nums) => console.log(`      ATTACK ${name}: ${verdict} | ${nums}`);
+const G = (k, r) => { gasLog[k] ??= r.gasUsed; };
 const CASE = (name, what, nums) => console.log(`      CASE ${name}: ${what} | ${nums}`);
-const BURN = "0x000000000000000000000000000000000000dEaD", STORE = "0x0000000000000000000000000000000000057073";
-const VF = (v) => `anchorBlock ${v.anchorBlock}, recordedBlock ${v.recordedBlock}, verdict ${["None", "UpheldFake"][Number(v.verdict)]}, status ${["None", "Active", "Flagged", "Retired"][Number(v.status)]}, flaggedAtBlock ${v.flaggedAtBlock}, flagReason ${["None", "KeyMisuse", "ClaimUpheld"][Number(v.flagReason)]}, stake ${F(v.stake)}, recordedBeforeFlag ${v.recordedBeforeFlag}, stakeAtRisk ${F(v.stakeAtRisk)}, withdrawnAtBlock ${v.withdrawnAtBlock}, misusePending ${v.misusePending}, openClaims ${v.openClaims}, reservedForClaims ${F(v.reservedForClaims)}`;
-const G = (k, g) => { gasLog[k] ??= g; };
 
-async function reverts(pr, reason) {
-  try { await (await pr).wait(); } catch (e) {
-    assert(String(e.message).includes(reason), `expected "${reason}", got: ${String(e.message).slice(0, 200)}`); return reason;
+// ---------------------------------------------------------------- chain helpers
+const mine = (n = 1) => network.provider.send("hardhat_mine", ["0x" + n.toString(16)]);
+const automine = (on) => network.provider.send("evm_setAutomine", [on]);
+const setNext = (ts) => network.provider.send("evm_setNextBlockTimestamp", [Number(ts)]);
+const warpTo = async (ts) => { await setNext(ts); await mine(); };
+const later = async (sec) => { await network.provider.send("evm_increaseTime", [sec]); await mine(); };
+const LIM = { gasLimit: 2_000_000 };   // explicit limit: the tx is mined at the timestamp set with setNext
+const send = async (p) => (await p).wait();
+async function rv(p, reason) {
+  try { await send(p); } catch (e) {
+    assert(String(e.message).includes(reason), `expected "${reason}", got: ${String(e.message).slice(0, 300)}`);
+    return reason;
   }
   throw new Error("expected revert: " + reason);
 }
-async function rc(txp) { const r = await (await txp).wait(); return { r, gas: r.gasUsed, cost: r.gasUsed * r.gasPrice }; }
-const balOf = (a) => ethers.provider.getBalance(typeof a === "string" ? a : a.address);
-const mine = (n) => network.provider.send("hardhat_mine", ["0x" + n.toString(16)]);
-const warp = async (sec) => { await network.provider.send("evm_increaseTime", [sec]); await mine(1); };
-const automine = (on) => network.provider.send("evm_setAutomine", [on]);
 
+// ---------------------------------------------------------------- keys and signed messages
 function newDevice() {
   const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
   const jwk = publicKey.export({ format: "jwk" });
   const x = "0x" + Buffer.from(jwk.x, "base64url").toString("hex"), y = "0x" + Buffer.from(jwk.y, "base64url").toString("hex");
-  const raw = (preimage) => "0x" + crypto.sign("sha256", ethers.getBytes(preimage), { key: privateKey, dsaEncoding: "ieee-p1363" }).toString("hex");
-  const sign = (preimage) => lowS(raw(preimage));
+  const sign = (pre) => lowS("0x" + crypto.sign("sha256", ethers.getBytes(pre), { key: privateKey, dsaEncoding: "ieee-p1363" }).toString("hex"));
   return { x, y, keyId: ethers.sha256(ethers.concat([x, y])), sign };
 }
-// spec/PROTOCOL.md section 4: every message carries the label, chain, contract and keyId
-const msgRegK = (c, keyId, owner) => ethers.solidityPacked(["string", "uint256", "address", "bytes32", "address"], ["PAPRIKA/REGISTER", c.chainId, c.addr, keyId, owner]);
-const msgCapK = (c, keyId, photo, bh) => ethers.solidityPacked(["string", "uint256", "address", "bytes32", "bytes32", "bytes32"], ["PAPRIKA/CAPTURE", c.chainId, c.addr, keyId, photo, bh]);
-const msgExtK = (c, keyId, sender) => ethers.solidityPacked(["string", "uint256", "address", "bytes32", "address"], ["PAPRIKA/EXTRACTED", c.chainId, c.addr, keyId, sender]);
-const flipS = (sig) => { const r = sig.slice(0, 66), s = BigInt("0x" + sig.slice(66)); return r + (N_P256 - s).toString(16).padStart(64, "0"); };
+const flipS = (sig) => sig.slice(0, 66) + (N_P256 - BigInt("0x" + sig.slice(66))).toString(16).padStart(64, "0");
 const lowS = (sig) => (BigInt("0x" + sig.slice(66)) > N_P256 / 2n ? flipS(sig) : sig);
 const highS = (sig) => (BigInt("0x" + sig.slice(66)) > N_P256 / 2n ? sig : flipS(sig));
-const commitment = (claimant, photo, keyId, ev, salt) => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["address", "bytes32", "bytes32", "bytes32", "bytes32"], [claimant, photo, keyId, ev, salt]));
+const named = (label) => (c, keyId, who) => ethers.solidityPacked(["string", "uint256", "address", "bytes32", "address"], [label, c.chainId, c.addr, keyId, who]);
+const msgReg = named("PAPRIKA/REGISTER"), msgRev = named("PAPRIKA/REVOKE");
+const msgCap = (c, keyId, photo, bh) => ethers.solidityPacked(["string", "uint256", "address", "bytes32", "bytes32", "bytes32"], ["PAPRIKA/CAPTURE", c.chainId, c.addr, keyId, photo, bh]);
+const commitmentOf = (who, photo, keyId, ev, salt) => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["address", "bytes32", "bytes32", "bytes32", "bytes32"], [who, photo, keyId, ev, salt]));
 
-async function deploy() {
+// ---------------------------------------------------------------- protocol helpers
+async function deploy(p = P) {
   const s = await ethers.getSigners();
-  const oracle = await (await ethers.getContractFactory("MockArbiter", s[0])).deploy();
-  const pap = await (await ethers.getContractFactory("Paprika", s[0])).deploy(await oracle.getAddress());
-  const c = { s, oracle, pap, addr: await pap.getAddress(), chainId: (await ethers.provider.getNetwork()).chainId, keys: [] };
-  c.STAKE = await pap.MIN_STAKE(); c.BOND = await pap.CLAIM_BOND(); c.UNBOND = Number(await pap.UNBONDING_PERIOD()); c.W = Number(await pap.REVEAL_WINDOW()); c.GRACE = Number(await pap.CLAIM_GRACE());
-  return c;
+  const token = await (await ethers.getContractFactory("TestToken", s[0])).deploy();
+  const oo = await (await ethers.getContractFactory("MockOptimisticOracleV3", s[0])).deploy(STORE, p.MIN_BOND);
+  const pap = await (await ethers.getContractFactory("Paprika", s[0])).deploy(await oo.getAddress(), await token.getAddress(), p.BOND, p.WINDOW, p.REVEAL, p.LIVENESS);
+  const addr = await pap.getAddress();
+  for (const a of s.slice(1, 16)) { await token.mint(a.address, 20n * p.BOND); await token.connect(a).approve(addr, ethers.MaxUint256); }
+  const fee = (p.BOND * (await oo.burnedBondPercentage())) / 10n ** 18n;
+  return { s, p, token, oo, pap, addr, fee, payout: 2n * p.BOND - fee, chainId: (await ethers.provider.getNetwork()).chainId, fromBlock: await ethers.provider.getBlockNumber() };
 }
-async function register(c, owner, dev = newDevice(), stake = c.STAKE) {
-  const x = await rc(c.pap.connect(owner).register(dev.x, dev.y, dev.sign(msgRegK(c, dev.keyId, owner.address)), { value: stake }));
-  c.keys.push(dev.keyId);
-  return { dev, ...x };
+async function register(c, who, dev = newDevice()) {
+  const r = await send(c.pap.connect(who).register(dev.x, dev.y, dev.sign(msgReg(c, dev.keyId, who.address))));
+  return { dev, r };
 }
-async function anchorNow() { const b = await ethers.provider.getBlock("latest"); return { n: b.number, hash: b.hash }; }
-async function attest(c, relayer, dev, photo) {
-  const a = await anchorNow();
-  const sig = dev.sign(msgCapK(c, dev.keyId, photo, a.hash));
-  return { ...(await rc(c.pap.connect(relayer).attest(photo, a.n, dev.keyId, sig))), anchor: a, sig };
+async function attest(c, who, dev, photo) {
+  const b = await ethers.provider.getBlock("latest");
+  const sig = dev.sign(msgCap(c, dev.keyId, photo, b.hash));
+  const r = await send(c.pap.connect(who).attest(photo, b.number, dev.keyId, sig));
+  const v = await c.pap.verify(photo, dev.keyId);
+  return { r, sig, anchor: b.number, v, refundableAt: Number(v.refundableAt), until: Number(v.accusableUntil) };
 }
 async function commit(c, who, photo, keyId, ev = h("evidence")) {
   const salt = ethers.hexlify(ethers.randomBytes(32));
-  const cm = commitment(who.address, photo, keyId, ev, salt);
-  const x = await rc(c.pap.connect(who).commitClaim(cm, { value: c.BOND })); G("commitClaim", x.gas);
-  return { who, photo, keyId, ev, salt, cm, block: x.r.blockNumber };
+  const cm = commitmentOf(who.address, photo, keyId, ev, salt);
+  const r = await send(c.pap.connect(who).commitClaim(cm));
+  return { who, photo, keyId, ev, salt, cm, r, at: (await ethers.provider.getBlock(r.blockNumber)).timestamp };
 }
-async function reveal(c, k) {
-  const x = await rc(c.pap.connect(k.who).revealClaim(k.photo, k.keyId, k.ev, k.salt));
-  const ev = x.r.logs.map((l) => { try { return c.pap.interface.parseLog(l); } catch { return null; } }).filter(Boolean);
-  const op = ev.find((p) => p.name === "ClaimOpened");
-  return { id: op ? op.args.assertionId : null, rejected: !!ev.find((p) => p.name === "RevealRejected"), ...x };
+const openedId = (c, r) => { for (const l of r.logs) { try { const e = c.pap.interface.parseLog(l); if (e && e.name === "AccusationOpened") return e.args.assertionId; } catch {} } return null; };
+async function reveal(c, k, o = {}) { const r = await send(c.pap.connect(k.who).revealClaim(k.photo, k.keyId, k.ev, k.salt, o)); return { r, id: openedId(c, r) }; }
+async function accuse(c, who, photo, keyId, ev) { const k = await commit(c, who, photo, keyId, ev); const x = await reveal(c, k); return { ...k, ...x }; }
+async function vote(c, id, truthful, who) {   // UMA's vote (simulated), then anyone settles the assertion at the oracle
+  await send(c.oo.connect(c.s[19]).resolve(id, truthful));
+  return send(c.oo.connect(who || c.s[19]).settleAssertion(id));
 }
-async function claim(c, who, photo, keyId, ev) { const k = await commit(c, who, photo, keyId, ev); return reveal(c, k); }
-const dvm = (c, id, t) => rc(c.oracle.connect(c.s[0]).resolveDispute(id, t));
-const settle = (c, id, who) => rc(c.oracle.connect(who || c.s[19]).settleAssertion(id));
-async function uphold(c, id, who) { await dvm(c, id, true); return settle(c, id, who); }
-async function reject(c, id, who) { await dvm(c, id, false); return settle(c, id, who); }
-async function cash(c, who) { const cr = await c.pap.credit(who.address); if (cr > 0n) G("claimCredit", (await rc(c.pap.connect(who).claimCredit())).gas); return cr; }
-const dev_ = (c, keyId) => c.pap.device(keyId);
+const tok = (c, a) => c.token.balanceOf(typeof a === "string" ? a : a.address);
+/// net(a) = change of token balance + uncollected credit since the snapshot
+async function snap(c, accounts) {
+  const val = async (a) => (await tok(c, a)) + (await c.pap.credits(a.address));
+  const m = {}; for (const a of accounts) m[a.address] = await val(a);
+  return async (a) => (await val(a)) - m[a.address];
+}
+async function cash(c, who) { const cr = await c.pap.credits(who.address); if (cr > 0n) G("withdrawCredit", await send(c.pap.connect(who).withdrawCredit())); return cr; }
+
+/// The token invariants, read from storage for every item the contract's events ever named.
 async function invariant(c) {
-  let stakes = 0n, reserved = 0n, open = 0n;
-  for (const k of c.keys) { const d = await dev_(c, k); stakes += d.stake; reserved += d.reserved; open += d.openClaims; }
-  let credits = 0n; for (const a of [...c.s.map((x) => x.address), ...(c.extraCredit || [])]) credits += await c.pap.credit(a);
-  const cb = await c.pap.commitBondsHeld(), inbox = await c.pap.inbox();
-  const bal = await balOf(c.addr), ob = await c.oracle.openBonds(), obal = await balOf(await c.oracle.getAddress());
-  assert.equal(inbox, 0n, "INVARIANT inbox");
-  assert.equal(bal, stakes + credits + cb, `INVARIANT balance ${bal} != stakes ${stakes} + credits ${credits} + commit bonds ${cb}`);
-  assert.equal(obal, ob, "INVARIANT oracle balance");
-  assert.equal(ob, 2n * reserved, "INVARIANT oracle bonds != 2 x reserved");
-  assert.equal(reserved, open * c.BOND, "INVARIANT reserved != open x bond");
-  return { bal, stakes, credits, cb, ob };
+  const logs = await c.pap.queryFilter("*", c.fromBlock);
+  const recs = new Map(), cms = new Set(), ids = new Set(), who = new Set();
+  for (const l of logs) {
+    const a = l.args;
+    if (l.eventName === "Attested") recs.set(a.photoHash + a.keyId, [a.photoHash, a.keyId]);
+    if (l.eventName === "Committed") cms.add(a.commitment);
+    if (l.eventName === "AccusationOpened") ids.add(a.assertionId);
+    if (l.eventName === "Credited") who.add(a.account);
+  }
+  let deposits = 0n, bonds = 0n, credits = 0n, open = 0n;
+  for (const [ph, k] of recs.values()) if ((await c.pap.records(ph, k)).state === 1n) deposits += c.p.BOND;
+  for (const cm of cms) if ((await c.pap.commits(cm)).live) bonds += c.p.BOND;
+  for (const id of ids) if ((await c.pap.accusations(id)).open) open++;
+  for (const a of who) credits += await c.pap.credits(a);
+  const bal = await tok(c, c.addr);
+  assert.equal(bal, deposits + bonds + credits, `INVARIANT ${bal} != deposits ${deposits} + commit bonds ${bonds} + credits ${credits}`);
+  assert.equal(await tok(c, await c.oo.getAddress()), 2n * c.p.BOND * open, "INVARIANT oracle holds 2 x BOND per open accusation");
+  let sum = 0n; for (const a of [c.addr, await c.oo.getAddress(), STORE, BURN, ...c.s.map((x) => x.address)]) sum += await tok(c, a);
+  assert.equal(sum, await c.token.totalSupply(), "INVARIANT tokens conserved");
+  return { bal, deposits, bonds, credits, open };
 }
 
 describe("Paprika", function () {
   let c, s;
-  beforeEach(async () => { c = await deploy(); s = c.s; });
-  afterEach(async () => { const i = await invariant(c); console.log(`      invariant ok: contract ${F(i.bal)} = stakes ${F(i.stakes)} + unpaid rewards ${F(i.credits)} + unrevealed commit bonds ${F(i.cb)}; oracle open bonds ${F(i.ob)} = 2 x reserved`); });
-
-  it("0 honest path: register, attest, verify, claims both ways, misuse proof, unbond, withdraw", async () => {
-    const owner = s[1], relayer = s[2], claimant = s[3], challenger = s[5];
-    const d1 = await register(c, owner); G("register", d1.gas);
-    const a1 = await attest(c, relayer, d1.dev, h("p1")); G("attest", a1.gas);
-    const vh = await c.pap.verify(h("p1"), d1.dev.keyId); G("verify (view; eth_estimateGas)", await c.pap.verify.estimateGas(h("p1"), d1.dev.keyId));
-    const vx = await c.pap.verify(h("p1, one pixel changed"), d1.dev.keyId);
-    const c0 = await balOf(claimant);
-    const k = await commit(c, claimant, h("p1"), d1.dev.keyId);
-    const rv = await reveal(c, k); G("revealClaim (assert + auto-dispute)", rv.gas);
-    let v = await c.pap.verify(h("p1"), d1.dev.keyId);
-    assert.equal(v.stake, c.STAKE - c.BOND); assert.equal(v.stakeAtRisk, c.STAKE - c.BOND); assert.equal(v.reservedForClaims, c.BOND); assert.equal(v.openClaims, 1n);
-    await dvm(c, rv.id, true); G("settle upheld (flag + slash)", (await settle(c, rv.id)).gas);
-    v = await c.pap.verify(h("p1"), d1.dev.keyId);
-    assert.equal(v.verdict, 1n); assert.equal(v.status, ST.Flagged); assert.equal(v.stakeAtRisk, 0n);
-    await cash(c, claimant);
-    const cnet = (await balOf(claimant)) - c0;
-    const d2 = await register(c, owner); await attest(c, relayer, d2.dev, h("p2"));
-    const rv2 = await claim(c, claimant, h("p2"), d2.dev.keyId); await dvm(c, rv2.id, false); G("settle rejected", (await settle(c, rv2.id)).gas);
-    assert.equal((await dev_(c, d2.dev.keyId)).stake, c.STAKE + c.BOND / 2n);
-    const d4 = await register(c, owner);
-    const pm = await rc(c.pap.connect(challenger).proveKeyMisuse(d4.dev.keyId, d4.dev.sign(msgExtK(c, d4.dev.keyId, challenger.address)))); G("proveKeyMisuse (flag, escrow)", pm.gas);
-    assert.equal(await c.pap.credit(challenger.address), 0n);
-    await reverts(c.pap.settleStake(d4.dev.keyId), "not settleable");
-    await mine(c.W);
-    G("settleStake (after window)", (await rc(c.pap.settleStake(d4.dev.keyId))).gas);
-    assert.equal(await c.pap.credit(challenger.address), c.STAKE / 2n); await cash(c, challenger);
-    const d5 = await register(c, owner); await attest(c, relayer, d5.dev, h("p5"));
-    G("requestUnbond", (await rc(c.pap.connect(owner).requestUnbond(d5.dev.keyId))).gas);
-    await warp(c.UNBOND);
-    const wd = await rc(c.pap.connect(owner).withdraw(d5.dev.keyId)); G("withdraw", wd.gas);
-    v = await c.pap.verify(h("p5"), d5.dev.keyId); assert.equal(v.withdrawnAtBlock, BigInt(wd.r.blockNumber));
-    CASE("honest path", "owner registers (stake + proof of possession), a relayer submits the device-signed attestation, anyone calls verify", `owner pays stake ${F(c.STAKE)} + gas ${F(d1.cost)}; relayer pays gas ${F(a1.cost)}; verify returns: ${VF(vh)}`);
-    CASE("one pixel changed", "verify(sha256 of the modified file, same key): no record for that hash", `recordedBlock ${vx.recordedBlock}, anchorBlock ${vx.anchorBlock}, recordedBeforeFlag ${vx.recordedBeforeFlag} (status ${["None", "Active", "Flagged", "Retired"][Number(vx.status)]} and stake ${F(vx.stake)} are the key's, not the photo's)`);
-    CASE("misuse proof escrow (honest path)", `misuse proof flags the key at once; settleStake reverts until ${c.W} blocks have passed, then pays`, `prover credited ${F(c.STAKE / 2n)}, burned ${F(c.STAKE / 2n)}`);
-    console.log(`      POSITIVE PATH OK | upheld claim (commit+reveal): claimant net ${F(cnet)} ETH | rejected claim: device stake ${F(c.STAKE)} -> ${F(c.STAKE + c.BOND / 2n)} | misuse reward collectable only after ${c.W} blocks | withdraw ok, withdrawnAtBlock ${v.withdrawnAtBlock}`);
-  });
-
-  it("1 ban evasion", async () => {
-    const k1 = await register(c, s[6]);
-    await c.pap.connect(s[7]).proveKeyMisuse(k1.dev.keyId, k1.dev.sign(msgExtK(c, k1.dev.keyId, s[7].address)));
-    const r1 = await reverts(c.pap.connect(s[6]).register(k1.dev.x, k1.dev.y, k1.dev.sign(msgRegK(c, k1.dev.keyId, s[6].address)), { value: c.STAKE }), "key used");
-    const k2 = await register(c, s[6]);
-    line("ban-evasion", "PRICED", `old key: "${r1}"; new key: ${F(c.STAKE)} ETH stake + ${k2.gas} gas`);
-    CASE("flagged party returns with a new key", `the flagged key cannot register again ("${r1}"); a fresh key registers like any newcomer`, `cost ${F(c.STAKE)} stake + ${F(k2.cost)} gas (${k2.gas} gas) per new key`);
-  });
-
-  it("2 synthetic content and its punishment", async () => {
-    const forger = s[9], claimant = s[11];
-    const k = await register(c, forger); await attest(c, forger, k.dev, h("ai-1"));
-    line("synthetic-content", "SUCCEEDS", "software key registers and attests random bytes");
-    const c0 = await balOf(claimant), bu0 = await balOf(BURN), so0 = await balOf(STORE);
-    const rv = await claim(c, claimant, h("ai-1"), k.dev.keyId); await uphold(c, rv.id); await cash(c, claimant);
-    line("synthetic-content punished (upheld claim)", "PRICED", `forger loses ${F(c.STAKE)} ETH; claimant nets ${F((await balOf(claimant)) - c0)} ETH`);
-    const v2 = await c.pap.verify(h("ai-1"), k.dev.keyId);
-    CASE("software key attests synthetic bytes", "allowed: a registered software key signs any bytes and the attestation is recorded", "no cost beyond stake + gas");
-    CASE("claim with public evidence, upheld", `claimant commits+reveals (bond ${F(c.BOND)}); the contract disputes with ${F(c.BOND)} of the device stake; the vote upholds: record ${["None", "UpheldFake"][Number(v2.verdict)]}, key ${["None", "Active", "Flagged", "Retired"][Number(v2.status)]} (${["None", "KeyMisuse", "ClaimUpheld"][Number(v2.flagReason)]}), free stake paid out`, `claimant net +${F((await balOf(claimant)) - c0)} (after gas); owner -${F(c.STAKE)}; burned ${F((await balOf(BURN)) - bu0)} at 0xdEaD + ${F((await balOf(STORE)) - so0)} oracle fee to the Store`);
-  });
-
-  it("3 front-running: attest copy, same hash, register copy, commit copy (misuse-proof copy: test 19)", async () => {
-    const honest = s[12], relayer = s[13], thief = s[14], ch = s[15];
-    const dH = await register(c, honest), dT = await register(c, thief);
-    await automine(false);
-    const a = await anchorNow();
-    const t1 = await c.pap.connect(relayer).attest(h("scoop"), a.n, dH.dev.keyId, dH.dev.sign(msgCapK(c, dH.dev.keyId, h("scoop"), a.hash)), { gasPrice: 2e9, gasLimit: 500000 });
-    const t2 = await thief.sendTransaction({ to: c.addr, data: (await ethers.provider.getTransaction(t1.hash)).data, gasPrice: 3e9, gasLimit: 500000 });
-    await c.pap.connect(thief).attest(h("scoop"), a.n, dT.dev.keyId, dT.dev.sign(msgCapK(c, dT.dev.keyId, h("scoop"), a.hash)), { gasPrice: 3e9, gasLimit: 500000 });
-    await mine(1); await automine(true);
-    const vh = await c.pap.verify(h("scoop"), dH.dev.keyId), vt = await c.pap.verify(h("scoop"), dT.dev.keyId);
-    assert(vh.recordedBlock > 0n && vt.recordedBlock > 0n);
-    line("front-running (copy attest calldata)", "FAILS", `copied tx records the honest key (status ${(await ethers.provider.getTransactionReceipt(t2.hash)).status}), honest tx reverts "exists"`);
-    line("front-running (same hash, thief's own device)", "FAILS (nothing to steal)", `two independent records, windows [${vh.anchorBlock},${vh.recordedBlock}] and [${vt.anchorBlock},${vt.recordedBlock}]; no priority field`);
-    const dN = newDevice();
-    await automine(false);
-    const t5 = await c.pap.connect(honest).register(dN.x, dN.y, dN.sign(msgRegK(c, dN.keyId, honest.address)), { value: c.STAKE, gasPrice: 2e9, gasLimit: 500000 });
-    const t6 = await thief.sendTransaction({ to: c.addr, data: (await ethers.provider.getTransaction(t5.hash)).data, value: c.STAKE, gasPrice: 3e9, gasLimit: 500000 });
-    await mine(1); await automine(true); c.keys.push(dN.keyId);
-    assert.equal((await ethers.provider.getTransactionReceipt(t6.hash)).status, 0);
-    line("front-running (register)", "FAILS", "copied register reverts (PoP bound to msg.sender)");
-    // commit copy: thief copies a pending commitment; it can never reveal it (commitment names the claimant)
-    const k = { who: ch, photo: h("scoop"), keyId: dH.dev.keyId, ev: h("e"), salt: ethers.hexlify(ethers.randomBytes(32)) };
-    k.cm = commitment(ch.address, k.photo, k.keyId, k.ev, k.salt);
-    await automine(false);
-    await c.pap.connect(ch).commitClaim(k.cm, { value: c.BOND, gasPrice: 2e9, gasLimit: 300000 });
-    await c.pap.connect(thief).commitClaim(k.cm, { value: c.BOND, gasPrice: 3e9, gasLimit: 300000 });
-    await mine(1); await automine(true);
-    const rT = await reverts(c.pap.connect(thief).revealClaim(k.photo, k.keyId, k.ev, k.salt), "no commit");
-    const rv = await reveal(c, k);
-    assert(rv.id);
-    await mine(c.W + 1);
-    const bu3 = await balOf(BURN);
-    await c.pap.forfeitCommit(thief.address, k.cm);
-    const burned3 = (await balOf(BURN)) - bu3;
-    line("front-running (copy a pending commitment)", "FAILS", `thief's copy cannot be revealed by the thief ("${rT}"), the honest reveal opens the claim; the thief's bond is forfeited (burned)`);
-    CASE("mempool copies (attestation, registration, commitment)", `copied attestation records the honest key (the honest tx then reverts "exists"); copied registration reverts (proof of possession names msg.sender); copied commitment cannot be revealed by the copier ("${rT}"); misuse-proof copy: test 19`, `honest parties lose nothing; the copier loses its commit bond ${F(burned3)} (burned) + gas`);
-    await reject(c, rv.id);
-  });
-
-  it("4 self-report loop; effective penalty (1 - alpha) x S", async () => {
-    const a = s[17], sybil = s[18];
-    await register(c, s[1], newDevice(), E("1"));
-    const t0 = await balOf(c.addr), a0 = (await balOf(a)) + (await balOf(sybil));
-    const N = 5;
-    for (let i = 0; i < N; i++) {
-      const k = await register(c, a);
-      await c.pap.connect(sybil).proveKeyMisuse(k.dev.keyId, k.dev.sign(msgExtK(c, k.dev.keyId, sybil.address)));
-      await mine(c.W); await c.pap.settleStake(k.dev.keyId); await cash(c, sybil);
+  const extra = [];
+  beforeEach(async () => { c = await deploy(); s = c.s; extra.length = 0; });
+  afterEach(async () => {
+    for (const x of [c, ...extra]) {
+      const i = await invariant(x);
+      console.log(`      invariant ok: Paprika holds ${F(i.bal)} = deposits ${F(i.deposits)} + unrevealed commit bonds ${F(i.bonds)} + credits ${F(i.credits)}; oracle holds 2 x BOND x ${i.open} open; supply conserved`);
     }
-    const netM = (await balOf(a)) + (await balOf(sybil)) - a0;
-    const b0 = (await balOf(a)) + (await balOf(sybil));
-    for (let i = 0; i < N; i++) {
-      const k = await register(c, a); await attest(c, a, k.dev, h("junk" + i));
-      const rv = await claim(c, sybil, h("junk" + i), k.dev.keyId); await uphold(c, rv.id, sybil); await cash(c, sybil);
+  });
+
+  it("1 honest path: register, relayed attest, verify, wait, refund, verify again", async () => {
+    const owner = s[1], relayer = s[2], anyone = s[7];
+    const w = await snap(c, [owner, relayer]);
+    const d = await register(c, owner); G("register", d.r);
+    const a = await attest(c, relayer, d.dev, h("p1")); G("attest", a.r);
+    gasLog["verify (view, eth_estimateGas)"] = await c.pap.verify.estimateGas(h("p1"), d.dev.keyId);
+    const v1 = a.v;
+    assert.equal(v1.state, 1n); assert.equal(v1.depositor, relayer.address); assert.equal(v1.lockedDeposit, P.BOND);
+    assert.equal(v1.refundableAt, v1.accusableUntil + BigInt(P.REVEAL + 1)); assert.equal(v1.recordedBeforeFlag, true);
+    await setNext(a.refundableAt - 1);
+    const r1 = await rv(c.pap.connect(anyone).refund(h("p1"), d.dev.keyId, LIM), "too early");
+    G("refund", await send(c.pap.connect(anyone).refund(h("p1"), d.dev.keyId)));
+    await cash(c, relayer);
+    const v2 = await c.pap.verify(h("p1"), d.dev.keyId);
+    assert.equal(v2.state, 3n); assert.equal(v2.lockedDeposit, 0n); assert.equal(v2.recordedBlock, v1.recordedBlock);
+    assert.equal(await w(owner), 0n); assert.equal(await w(relayer), 0n);
+    CASE("honest path", `owner registers for free; a relayer submits the device-signed photo and pays the deposit BOND; after PHOTO_WINDOW + REVEAL_WINDOW a stranger triggers the refund (one second earlier: "${r1}"); the record stays`, `owner 0 tokens (${d.r.gasUsed} gas); relayer locked BOND = ${F(P.BOND)} for PHOTO_WINDOW + REVEAL_WINDOW + 1 s = ${P.WINDOW + P.REVEAL + 1} s, net ${F(await w(relayer))}; verify before: state ${ST[v1.state]}, anchorBlock ${v1.anchorBlock}, recordedBlock ${v1.recordedBlock}, accusableUntil = attest time + PHOTO_WINDOW, refundableAt = accusableUntil + REVEAL_WINDOW + 1, depositor relayer, lockedDeposit ${F(v1.lockedDeposit)}, device ${DS[v1.deviceStatus]}, recordedBeforeFlag ${v1.recordedBeforeFlag}; after: state ${ST[v2.state]}, lockedDeposit ${F(v2.lockedDeposit)}, recordedBlock ${v2.recordedBlock} unchanged`);
+  });
+
+  it("2 one pixel changed: no record", async () => {
+    const d = await register(c, s[1]); await attest(c, s[1], d.dev, h("p1"));
+    const v = await c.pap.verify(h("p1 with one pixel changed"), d.dev.keyId);
+    assert.equal(v.state, 0n); assert.equal(v.recordedBlock, 0n); assert.equal(v.recordedBeforeFlag, false);
+    assert.equal((await c.pap.attestersOf(h("p1 with one pixel changed"))).length, 0);
+    CASE("one pixel changed", "attestersOf(sha256 of the modified file) is empty and verify(that hash, same key) finds nothing", `state ${ST[v.state]}, recordedBlock ${v.recordedBlock}, lockedDeposit ${F(v.lockedDeposit)}, recordedBeforeFlag ${v.recordedBeforeFlag} (device ${DS[v.deviceStatus]} describes the key, not the photo)`);
+  });
+
+  it("3 refund timing: too early, while accused, window extended after a rejected accusation, repeated self-accusation", async () => {
+    const owner = s[1], griefer = s[4], forger = s[5], sybil = s[6], anyone = s[7];
+    const d = await register(c, owner); const a = await attest(c, owner, d.dev, h("p3"));
+    const k = await accuse(c, griefer, h("p3"), d.dev.keyId);
+    const r1 = await rv(c.pap.connect(anyone).refund(h("p3"), d.dev.keyId), "not attested");
+    await later(P.VOTE);
+    const res = await vote(c, k.id, false);
+    const tRes = (await ethers.provider.getBlock(res.blockNumber)).timestamp, opened = Number((await c.pap.accusations(k.id)).openedAt);
+    const v = await c.pap.verify(h("p3"), d.dev.keyId);
+    assert.equal(Number(v.accusableUntil), a.until + (tRes - opened));
+    await setNext(a.refundableAt);
+    const r2 = await rv(c.pap.connect(anyone).refund(h("p3"), d.dev.keyId, LIM), "too early");
+    await warpTo(Number(v.refundableAt)); await send(c.pap.connect(anyone).refund(h("p3"), d.dev.keyId));
+    assert.equal(await c.pap.credits(anyone.address), 0n);
+    // a forger accusing its own photo with no evidence, round after round
+    const f = await register(c, forger); const fa = await attest(c, forger, f.dev, h("p3 fake"));
+    const w = await snap(c, [forger, sybil]); const ROUNDS = 3; let accused = 0;
+    for (let i = 0; i < ROUNDS; i++) {
+      const x = await accuse(c, sybil, h("p3 fake"), f.dev.keyId, h("no evidence " + i));
+      await later(P.VOTE); const rr = await vote(c, x.id, false);
+      accused += (await ethers.provider.getBlock(rr.blockNumber)).timestamp - Number((await c.pap.accusations(x.id)).openedAt);
     }
-    const netC = (await balOf(a)) + (await balOf(sybil)) - b0;
-    assert.equal(await balOf(c.addr), t0);
-    line("self-report-profit", "FAILS", `${N} misuse self-reports: ${F(netM)} ETH; ${N} upheld self-claims: ${F(netC)} ETH; contract balance ${F(t0)} -> ${F(await balOf(c.addr))}`);
-    line("self-slash before any commit: effective penalty", "RESIDUAL (by design)", `per key ${F(-netM / BigInt(N))} ETH = (1 - 0.5) x ${F(c.STAKE)} + gas. Effective penalty = (1 - alpha) x S, not S`);
-    CASE("owner accuses itself", `${N} keys flagged by its own sybil via misuse proof, ${N} keys via an upheld self-claim; the contract balance is unchanged (no treasury to drain)`, `owner+sybil net per key: misuse path ${F(netM / BigInt(N))}, claim path ${F(netC / BigInt(N))} (incl. gas); total ${F(netM)} and ${F(netC)}`);
+    const fv = await c.pap.verify(h("p3 fake"), f.dev.keyId);
+    const net = (await w(forger)) + (await w(sybil));
+    assert.equal(net, -BigInt(ROUNDS) * c.fee); assert.equal(Number(fv.accusableUntil), fa.until + accused);
+    CASE("refund timing", `refund one second before refundableAt: "too early"; while accused: "${r1}"; after a rejected accusation open for ${tRes - opened} s the window is extended by exactly that time, so the old refundableAt gives "${r2}"; a stranger triggers the refund, the depositor is credited`, `extension = time under accusation = ${tRes - opened} s; stranger gets 0`);
+    CASE("repeated self-accusation (delay attempt)", `${ROUNDS} rounds of a rejected self-accusation: each round extends accusableUntil by its own duration, so hunters keep the full PHOTO_WINDOW of unaccused time and the window never runs out`, `forger + second account net -ROUNDS x fee = ${F(net)} (fee = ${F(c.fee)} per round); accusableUntil moved by ${accused} s = total time accused`);
   });
 
-  it("4b double rewards; first upheld by COMMIT order takes the stake", async () => {
-    const owner = s[1], early = s[2], late = s[3], other = s[4];
-    const k = await register(c, owner, newDevice(), E("0.5")); await attest(c, owner, k.dev, h("x")); await attest(c, owner, k.dev, h("y"));
-    const kE = await commit(c, early, h("x"), k.dev.keyId);
-    const kL = await commit(c, late, h("y"), k.dev.keyId);
-    const rL = await reveal(c, kL);                        // the later commit is revealed first
-    const rE = await reveal(c, kE);
-    const r2 = await claim(c, other, h("x"), k.dev.keyId);  // same record already has an open claim
-    assert(r2.rejected);
-    await uphold(c, rL.id);                                // later-committed claim upheld first: payout waits
-    const midLate = await c.pap.credit(late.address);
-    await uphold(c, rE.id);
-    const cE = await c.pap.credit(early.address), cL = await c.pap.credit(late.address);
-    assert.equal(midLate, c.BOND * 3n / 2n); assert(cE > c.BOND * 3n / 2n); assert.equal(cL, c.BOND * 3n / 2n);   // oracle payouts are credited to the claimant
-    const r3 = await claim(c, other, h("y"), k.dev.keyId);
-    line("double-dip / order of upheld claims", "FAILS", `two claims upheld; the later-committed one settled first and waited (credit ${F(midLate)}), the earlier-committed one took the reward share ${F(cE)} ETH; the later one got only its oracle payout (bond + half the device bond), no stake share; 2nd claim on a record with an open claim: rejected, bond credited back; claim after the slash: ${r3.rejected ? "rejected (refund)" : "?"}; other refund ${F(await c.pap.credit(other.address))}`);
-    CASE("two upheld claims on one key", "the claim committed first takes the stake share even if settled second; the other gets only its oracle payout; a 2nd claim on a record with an open claim is refunded", `earlier-committed claimant credited ${F(cE)}, later ${F(cL)}, refunds ${F(await c.pap.credit(other.address))} (bonds ${F(c.BOND)} each)`);
-    for (const w of [early, late, other]) await cash(c, w);
+  it("4 a true accusation: commit, reveal, UMA vote true, settle", async () => {
+    const forger = s[5], hunter = s[3];
+    const w = await snap(c, [forger, hunter]), store0 = await tok(c, STORE);
+    const d = await register(c, forger);
+    await attest(c, forger, d.dev, h("fake")); const other = await attest(c, forger, d.dev, h("other photo"));
+    const k = await commit(c, hunter, h("fake"), d.dev.keyId); G("commitClaim", k.r);
+    const x = await reveal(c, k); G("revealClaim (assertTruth + disputeAssertion)", x.r);
+    const claimLog = (await c.oo.queryFilter(c.oo.filters.AssertionMade(x.id)))[0];
+    const claimText = ethers.toUtf8String(claimLog.args.claim);
+    assert(claimText.includes(h("fake").slice(2)) && claimText.includes(d.dev.keyId.slice(2)));
+    const vA = await c.pap.verify(h("fake"), d.dev.keyId);
+    assert.equal(vA.state, 2n); assert.equal(vA.lockedDeposit, P.BOND);
+    await send(c.oo.resolve(x.id, true));
+    G("oo.settleAssertion -> assertionResolvedCallback (proven)", await send(c.oo.connect(s[19]).settleAssertion(x.id)));
+    const vF = await c.pap.verify(h("fake"), d.dev.keyId);
+    assert.equal(vF.state, 4n); assert.equal(vF.deviceStatus, 2n); assert.equal(vF.reason, 1n); assert.equal(vF.lockedDeposit, 0n);
+    const an = await ethers.provider.getBlock("latest");
+    const r2 = await rv(c.pap.connect(forger).attest(h("new"), an.number, d.dev.keyId, d.dev.sign(msgCap(c, d.dev.keyId, h("new"), an.hash))), "not active");
+    const vO = await c.pap.verify(h("other photo"), d.dev.keyId);
+    assert.equal(vO.state, 1n); assert.equal(vO.recordedBeforeFlag, true);
+    await warpTo(other.refundableAt); await send(c.pap.refund(h("other photo"), d.dev.keyId));
+    assert.equal(await w(hunter), c.payout - P.BOND); assert.equal(await w(forger), -P.BOND); assert.equal((await tok(c, STORE)) - store0, c.fee);
+    CASE("true accusation", `hunter commits + reveals with BOND; Paprika asserts the claim at UMA and disputes it at once with the photo's deposit, so UMA votes; the vote says true: photo ${ST[vF.state]} (final), device ${DS[vF.deviceStatus]} (${RS[vF.reason]}) at block ${vF.flaggedAtBlock}; the device's next attest: "${r2}"; its OTHER record stays ${ST[vO.state]} (recordedBeforeFlag ${vO.recordedBeforeFlag}) and is refunded normally. Claim text sent to UMA: "${claimText}"`, `hunter credited 2 x BOND - fee = ${F(c.payout)}, net +BOND - fee = ${F(await w(hunter))}; forger -BOND = ${F(await w(forger))}; UMA Store +fee = ${F(c.fee)}`);
   });
 
-  it("5 griefing an honest device (unwatched)", async () => {
-    const honest = s[5], griefer = s[6];
-    const k = await register(c, honest); await attest(c, honest, k.dev, h("real0"));
-    const g0 = await balOf(griefer), h0 = await balOf(honest), sk0 = (await dev_(c, k.dev.keyId)).stake, so5 = await balOf(STORE);
-    const rv = await claim(c, griefer, h("real0"), k.dev.keyId); await reject(c, rv.id);
-    const gNet = (await balOf(griefer)) - g0, hNet = (await balOf(honest)) - h0 + ((await dev_(c, k.dev.keyId)).stake - sk0);
-    CASE("false claim against an honest device, rejected", "the owner does nothing; the contract contests with its stake; the vote rejects; the device stays Active", `claimant ${F(gNet)} (bond + gas); owner +${F(hNet)} added to its stake; ${F((await balOf(STORE)) - so5)} oracle fee to the Store`);
-    line("griefing unwatched", "FAILS", `owner did nothing; forced vote rejects; griefer ${F(gNet)} ETH, owner +${F(hNet)} ETH (stake); griefing factor ${(Number(-hNet) / Number(-gNet)).toFixed(3)}. Needs an honest vote`);
+  it("5 a false accusation: UMA vote false", async () => {
+    const owner = s[1], griefer = s[4];
+    const w = await snap(c, [owner, griefer]), store0 = await tok(c, STORE);
+    const d = await register(c, owner); await attest(c, owner, d.dev, h("real"));
+    const k = await accuse(c, griefer, h("real"), d.dev.keyId);
+    await later(P.VOTE); await send(c.oo.resolve(k.id, false));
+    G("oo.settleAssertion -> assertionResolvedCallback (rejected)", await send(c.oo.connect(s[19]).settleAssertion(k.id)));
+    const v = await c.pap.verify(h("real"), d.dev.keyId);
+    assert.equal(v.state, 1n); assert.equal(v.deviceStatus, 1n); assert.equal(v.lockedDeposit, P.BOND);
+    await warpTo(Number(v.refundableAt)); await send(c.pap.refund(h("real"), d.dev.keyId));
+    assert.equal(await w(griefer), -P.BOND); assert.equal(await w(owner), c.payout - P.BOND); assert.equal((await tok(c, STORE)) - store0, c.fee);
+    CASE("false accusation", `UMA votes false: the deposit is restored in Paprika, the record is ${ST[v.state]} again with its window extended by the ${P.VOTE} s of the vote, the device stays ${DS[v.deviceStatus]}; refund works afterwards`, `accuser -BOND = ${F(await w(griefer))}; depositor +BOND - fee = ${F(await w(owner))} (deposit back in full); UMA Store +fee = ${F(c.fee)}`);
   });
 
-  it("6 retroactive effect: 100 earlier records", async () => {
-    const owner = s[7];
-    const k = await register(c, owner); for (let i = 0; i < 100; i++) await attest(c, owner, k.dev, h("old" + i));
-    await attest(c, owner, k.dev, h("fake"));
-    const rv = await claim(c, s[8], h("fake"), k.dev.keyId); await uphold(c, rv.id); await cash(c, s[8]);
-    let n = 0; for (let i = 0; i < 100; i++) { const v = await c.pap.verify(h("old" + i), k.dev.keyId); if (v.recordedBlock > 0n && v.recordedBeforeFlag && v.verdict === 0n) n++; }
-    assert.equal(n, 100);
-    CASE("100 earlier records after a flag", "100 records, then one judged fake: the key is flagged; every earlier record is still returned", `${n}/100 with recordedBlock > 0, recordedBeforeFlag true, verdict None`);
-    line("retroactive-censorship", "FAILS", `${n}/100 earlier records kept with recordedBeforeFlag=true; judged photo marked UpheldFake`);
+  it("6 the vote errs", async () => {
+    const owner = s[1], liar = s[4], forger = s[5], hunter = s[3];
+    const w = await snap(c, [owner, liar, forger, hunter]);
+    const d = await register(c, owner); await attest(c, owner, d.dev, h("genuine"));
+    const k = await accuse(c, liar, h("genuine"), d.dev.keyId); await vote(c, k.id, true);   // wrong verdict
+    const v = await c.pap.verify(h("genuine"), d.dev.keyId);
+    assert.equal(await w(owner), -P.BOND); assert.equal(await w(liar), c.payout - P.BOND);
+    const f = await register(c, forger); await attest(c, forger, f.dev, h("deepfake"));
+    const k2 = await accuse(c, hunter, h("deepfake"), f.dev.keyId); await vote(c, k2.id, false);   // wrong verdict
+    assert.equal(await w(hunter), -P.BOND); assert.equal(await w(forger), c.payout - 2n * P.BOND);   // its deposit is restored, still locked
+    CASE("the vote errs", `a false accusation voted true: the honest photo reads ${ST[v.state]} for good and the honest device is ${DS[v.deviceStatus]} (${RS[v.reason]}); a true accusation voted false: the fake stays Attested and gets its window extended`, `honest depositor -BOND = ${F(-P.BOND)} and loses its key; false accuser +BOND - fee = ${F(c.payout - P.BOND)}; rejected true accuser -BOND = ${F(-P.BOND)}; forger +BOND - fee = ${F(c.payout - P.BOND)} (its deposit stays at risk). Paprika cannot tell; the outcome is only as good as UMA's vote`);
   });
 
-  it("7 replay / domain / anchors", async () => {
-    const k = await register(c, s[9]), k2 = await register(c, s[9]);
-    const a = await attest(c, s[10], k.dev, h("p"));
-    const R = [await reverts(c.pap.attest(h("p"), a.anchor.n, k.dev.keyId, a.sig), "exists")];
-    const an = await anchorNow();
-    R.push(await reverts(c.pap.attest(h("q"), an.n, k.dev.keyId, k2.dev.sign(msgCapK(c, k2.dev.keyId, h("q"), an.hash))), "bad sig"));
-    R.push(await reverts(c.pap.attest(h("q"), an.n, k.dev.keyId, k.dev.sign(msgCapK({ ...c, chainId: 1n }, k.dev.keyId, h("q"), an.hash))), "bad sig"));
-    await mine(300);
-    R.push(await reverts(c.pap.attest(h("q"), an.n, k.dev.keyId, k.dev.sign(msgCapK(c, k.dev.keyId, h("q"), an.hash))), "anchor"));
-    const now = await anchorNow();
-    R.push(await reverts(c.pap.attest(h("q"), now.n + 5, k.dev.keyId, k.dev.sign(msgCapK(c, k.dev.keyId, h("q"), ethers.ZeroHash))), "anchor"));
-    line("replay/domain/anchor", "FAILS", R.map((r) => `"${r}"`).join(", "));
-    CASE("replay, other key, other chain, stale or future anchor", "all rejected", R.map((r) => `"${r}"`).join(", ") + "; no ETH moves");
+  it("7 self-accusation by the depositor's second account", async () => {
+    const forger = s[5], sybil = s[6];
+    const w = await snap(c, [forger, sybil]);
+    const d = await register(c, forger); await attest(c, forger, d.dev, h("self"));
+    const k = await accuse(c, sybil, h("self"), d.dev.keyId); await vote(c, k.id, true);
+    const net = (await w(forger)) + (await w(sybil));
+    assert.equal(net, -c.fee);
+    CASE("self-accusation", "the forger's second account accuses and wins; no treasury to drain", `forger -BOND = ${F(await w(forger))}, second account +BOND - fee = ${F(await w(sybil))}; net -fee = ${F(net)}: the real penalty for a fake is UMA's fee share, fee = burnedBondPercentage x BOND, not BOND`);
   });
 
-  it("8 no admin", async () => {
-    const fns = c.pap.interface.fragments.filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability)).map((f) => f.name).sort();
-    assert.equal(fns.filter((n) => (/owner|admin|upgrade|sweep|rescue|pause|transfer/i.test(n) || /^set[A-Z]/.test(n))).length, 0);
-    const r1 = await reverts(s[11].sendTransaction({ to: c.addr, value: E("1") }), "only oracle");
-    CASE("admin or treasury", "no admin, owner, upgrade or sweep function; plain ETH from anyone but the oracle is refused", `state-changing functions: ${fns.join(", ")}; ETH: "${r1}"`);
-    line("admin / treasury drain", "FAILS", `functions: ${fns.join(", ")}; ETH from non-oracle: "${r1}"`);
+  it("8 a flagged party comes back with a new key", async () => {
+    const forger = s[5];
+    const d = await register(c, forger); await attest(c, forger, d.dev, h("f8"));
+    const k = await accuse(c, s[3], h("f8"), d.dev.keyId); await vote(c, k.id, true);
+    const r1 = await rv(c.pap.connect(forger).register(d.dev.x, d.dev.y, d.dev.sign(msgReg(c, d.dev.keyId, forger.address))), "key used");
+    const w = await snap(c, [forger]);
+    const n = await register(c, forger);
+    const a = await attest(c, forger, n.dev, h("f8 again"));
+    assert.equal(await w(forger), -P.BOND);
+    CASE("flagged party returns with a new key", `the flagged key cannot register again ("${r1}"); a fresh key registers for FREE and attests at once. LIMIT: a flag costs nothing; nothing links the new key to the old one; the only deterrent is the per-photo deposit`, `new key: 0 tokens + ${n.r.gasUsed} gas; its next photo locks BOND = ${F(P.BOND)} as for anyone (state ${ST[a.v.state]})`);
   });
 
-  it("9 key squatting; claim on an unattested photo", async () => {
-    const vd = newDevice(), sq = newDevice();
-    const r1 = await reverts(c.pap.connect(s[14]).register(vd.x, vd.y, sq.sign(msgRegK(c, sq.keyId, s[14].address)), { value: c.STAKE }), "bad pop");
-    await register(c, s[13], vd);
-    const k = await commit(c, s[14], h("never"), vd.keyId);
-    const r2 = await reverts(c.pap.connect(s[14]).revealClaim(k.photo, k.keyId, k.ev, k.salt), "no record");
-    const bu9 = await balOf(BURN);
-    await mine(c.W); await c.pap.forfeitCommit(s[14].address, k.cm);
-    CASE("claim against a photo the device never attested", `reveal reverts "${r2}" (nothing to contest); the commit expires and anyone forfeits it`, `claimant loses its bond ${F((await balOf(BURN)) - bu9)} (burned) + gas; owner 0`);
-    CASE("key squatting", `registering someone else's public key without its signature: "${r1}"`, "no ETH moves");
-    line("key-squatting / unattested claim", "FAILS", `"${r1}"; reveal "${r2}" (the commit is then forfeited)`);
-  });
-
-  it("10 withdrawal races; 10c optimistic finality", async () => {
-    const owner = s[16], claimant = s[17], forger = s[18];
-    const k = await register(c, owner); await attest(c, owner, k.dev, h("w1"));
-    const rv = await claim(c, claimant, h("w1"), k.dev.keyId);
-    await c.pap.connect(owner).requestUnbond(k.dev.keyId); await warp(c.UNBOND);
-    const ra = await reverts(c.pap.connect(owner).withdraw(k.dev.keyId), "open claims");
-    await reject(c, rv.id);
-    const rg = await reverts(c.pap.connect(owner).withdraw(k.dev.keyId), "claim grace");
-    await mine(c.GRACE); await c.pap.connect(owner).withdraw(k.dev.keyId);
-    const k2 = await register(c, owner); await attest(c, owner, k2.dev, h("w2"));
-    await c.pap.connect(owner).requestUnbond(k2.dev.keyId);
-    await c.pap.connect(s[15]).proveKeyMisuse(k2.dev.keyId, k2.dev.sign(msgExtK(c, k2.dev.keyId, s[15].address)));
-    await warp(c.UNBOND);
-    const rb = await reverts(c.pap.connect(owner).withdraw(k2.dev.keyId), "not retired");
-    await mine(c.W); await c.pap.settleStake(k2.dev.keyId); await cash(c, s[15]);
-    line("withdraw races", "FAILS", `open claim: "${ra}"; right after the claim settled: "${rg}" for ${c.GRACE} blocks; escrowed misuse (flagged during unbonding): "${rb}"`);
-    const kf = await register(c, forger); await attest(c, forger, kf.dev, h("fake-w"));
-    const v0 = await c.pap.verify(h("fake-w"), kf.dev.keyId);
-    await c.pap.connect(forger).requestUnbond(kf.dev.keyId); await warp(c.UNBOND);
-    const f0 = await balOf(forger); const w = await rc(c.pap.connect(forger).withdraw(kf.dev.keyId));
-    const v1 = await c.pap.verify(h("fake-w"), kf.dev.keyId);
-    const late = await claim(c, claimant, h("fake-w"), kf.dev.keyId);
-    CASE("withdraw races", `withdraw with an open claim: "${ra}"; right after the claim settles: "${rg}" for ${c.GRACE} blocks; key flagged during unbonding: "${rb}"`, "the stake stays until the rules allow it");
-    CASE("owner withdraws after unbonding, nobody claimed", `requestUnbond, ${c.UNBOND / 86400} days, withdraw; a later claim is refunded (nothing left to contest)`, `owner got back ${F((await balOf(forger)) - f0 + w.cost)} (net of gas ${F((await balOf(forger)) - f0)}); late claimant refunded ${F(await c.pap.credit(claimant.address))}; verify after: ${VF(v1)}`);
-    line("exit after the challenge window (10c)", "BY DESIGN (optimistic finality)", `stakeAtRisk ${F(v0.stakeAtRisk)} -> ${F(v1.stakeAtRisk)}, withdrawnAtBlock 0 -> ${v1.withdrawnAtBlock}; forger got ${F((await balOf(forger)) - f0 + w.cost)} ETH back; late claim ${late.rejected ? "rejected, bond refunded" : "?"}`);
-    await cash(c, claimant);
-  });
-
-  it("11 signature malleability", async () => {
-    const k = await register(c, s[19]); const a = await attest(c, s[19], k.dev, h("m"));
-    const r1 = await reverts(c.pap.connect(s[6]).attest(h("m"), a.anchor.n, k.dev.keyId, highS(a.sig)), "exists");
-    const r2 = await reverts(c.pap.connect(s[6]).proveKeyMisuse(k.dev.keyId, highS(k.dev.sign(msgExtK(c, k.dev.keyId, s[5].address)))), "bad sig");
-    line("signature-malleability", "FAILS (harmless)", `"${r1}", "${r2}"`);
-    CASE("high-s twin signatures", "rejected (low-s rule)", `attest twin: "${r1}"; misuse twin: "${r2}"; no ETH moves`);
-  });
-
-  it("12 reward sniping: open claim, hidden commit, self-slash before any commit", async () => {
-    const forger = s[7], sybil = s[8], hunter = s[9];
-    // 12a: claim already open
-    const k = await register(c, forger); await attest(c, forger, k.dev, h("df"));
-    const rv = await claim(c, hunter, h("df"), k.dev.keyId);
-    await c.pap.connect(sybil).proveKeyMisuse(k.dev.keyId, k.dev.sign(msgExtK(c, k.dev.keyId, sybil.address)));
-    await mine(c.W); await reverts(c.pap.settleStake(k.dev.keyId), "not settleable");
-    await uphold(c, rv.id);
-    const a1 = [await c.pap.credit(hunter.address), await c.pap.credit(sybil.address)];
-    assert(a1[0] > 0n && a1[1] === 0n);
-    CASE("misuse proof while an earlier claim is open", "the claim was committed first: it has priority on the stake", `claimant credited ${F(a1[0])}, prover ${F(a1[1])}`);
-    line("sniping an open claim", "FAILS", `hunter reward ${F(a1[0])}, misuse prover ${F(a1[1])}`);
-    await cash(c, hunter);
-    // 12a': open claim rejected -> prover paid
-    const k2 = await register(c, forger); await attest(c, forger, k2.dev, h("ok"));
-    const rv2 = await claim(c, hunter, h("ok"), k2.dev.keyId);
-    await c.pap.connect(sybil).proveKeyMisuse(k2.dev.keyId, k2.dev.sign(msgExtK(c, k2.dev.keyId, sybil.address)));
-    await mine(c.W); await reject(c, rv2.id);
-    const pr12 = await cash(c, sybil);
-    line("misuse proof after a rejected open claim", "PAID TO PROVER", `prover ${F(pr12)} ETH`);
-    CASE("misuse proof after a rejected earlier claim", "the claim loses, so the prover is next in line", `prover ${F(pr12)} (half of the stake incl. the ${F(c.BOND / 2n)} won from the rejected claimant)`);
-    // 12b: the hunter COMMITS (target hidden); the forger self-slashes after seeing the commit; the reveal has priority
-    const k3 = await register(c, forger); await attest(c, forger, k3.dev, h("df3"));
-    const h0 = await balOf(hunter), f0 = (await balOf(forger)) + (await balOf(sybil));
+  it("9 front-running: attest, register, commitment, a hunter's reveal", async () => {
+    const owner = s[1], relayer = s[2], thief = s[8], hunter = s[3], forger = s[5], sybil = s[6];
+    const d = await register(c, owner);
+    const w = await snap(c, [relayer, thief]);
+    const st = async (t) => (await ethers.provider.getTransactionReceipt(t.hash)).status;
+    // (a) copied attest calldata
     await automine(false);
-    const salt = ethers.hexlify(ethers.randomBytes(32));
-    const cm = commitment(hunter.address, h("df3"), k3.dev.keyId, h("e"), salt);
-    await c.pap.connect(hunter).commitClaim(cm, { value: c.BOND, gasPrice: 2e9, gasLimit: 300000 });
-    // the forger sees only an opaque commitment in the mempool; it self-slashes anyway, with a higher gas price
-    const tm = await c.pap.connect(sybil).proveKeyMisuse(k3.dev.keyId, k3.dev.sign(msgExtK(c, k3.dev.keyId, sybil.address)), { gasPrice: 3e9, gasLimit: 300000 });
-    await mine(1); await automine(true);
-    const sameBlock = (await ethers.provider.getTransactionReceipt(tm.hash)).blockNumber;
-    const rvA = await reveal(c, { who: hunter, photo: h("df3"), keyId: k3.dev.keyId, ev: h("e"), salt });
-    await mine(c.W); await uphold(c, rvA.id); await cash(c, hunter);
-    const sc = await c.pap.credit(sybil.address);
-    line("self-slash in the SAME block as an opaque commit (12b)", sc > 0n ? "= 12c RESIDUAL (ties go to the prover)" : "FAILS", `commit and misuse proof both in block ${sameBlock}; the claim has priority only if its commit block is EARLIER: prover ${F(sc)} ETH, hunter net ${F((await balOf(hunter)) - h0)} ETH (oracle split only), forger+sybil recovered ${F((await balOf(forger)) + (await balOf(sybil)) - f0 + sc)} of ${F(c.STAKE)}. The forger cannot tell which device the commit targets; reacting to every commit is just the 12c strategy`);
-    CASE("owner self-slashes in the same block as an opaque commit", "ties go to the misuse proof (same as self-slashing before any commit)", `owner+sybil recovered ${F((await balOf(forger)) + (await balOf(sybil)) - f0 + sc)} of ${F(c.STAKE)}; hunter net ${F((await balOf(hunter)) - h0)}`);
-    await cash(c, sybil);
-    // 12b': self-slash one block AFTER the commit -> the revealed claim takes priority
-    const k4 = await register(c, forger); await attest(c, forger, k4.dev, h("df4"));
-    const h4 = await balOf(hunter), f4 = (await balOf(forger)) + (await balOf(sybil));
-    const kc = await commit(c, hunter, h("df4"), k4.dev.keyId);
-    await c.pap.connect(sybil).proveKeyMisuse(k4.dev.keyId, k4.dev.sign(msgExtK(c, k4.dev.keyId, sybil.address)));
-    const rv4 = await reveal(c, kc);
-    await mine(c.W); await reverts(c.pap.settleStake(k4.dev.keyId), "not settleable");
-    await uphold(c, rv4.id);
-    const hc = await c.pap.credit(hunter.address), sc4 = await c.pap.credit(sybil.address);
-    await cash(c, hunter);
-    assert(hc > 0n && sc4 === 0n);
-    CASE("owner self-slashes after a claim was committed", "the claim (earlier commit block) keeps priority; the self-slash buys nothing", `hunter credited ${F(hc)}, net ${F((await balOf(hunter)) - h4)}; prover ${F(sc4)}; the ${F(c.STAKE)} stake is lost in full; owner+sybil spend a further ${F(-((await balOf(forger)) + (await balOf(sybil)) - f4))} (gas)`);
-    line("sniping via self-slash after the commit (12b')", "FAILS", `revealed claim (commit block earlier than proof) takes priority: hunter reward ${F(hc)}, net ${F((await balOf(hunter)) - h4)}; prover ${F(sc4)}; forger+sybil net ${F((await balOf(forger)) + (await balOf(sybil)) - f4)} (full stake lost)`);
-    // 12c: self-slash BEFORE any commit -> (1 - alpha) x S
-    const k5 = await register(c, forger); await attest(c, forger, k5.dev, h("df5"));
-    const f5 = (await balOf(forger)) + (await balOf(sybil)), h5 = await balOf(hunter), bu5 = await balOf(BURN), so12 = await balOf(STORE);
-    await c.pap.connect(sybil).proveKeyMisuse(k5.dev.keyId, k5.dev.sign(msgExtK(c, k5.dev.keyId, sybil.address)));
-    const rv5 = await claim(c, hunter, h("df5"), k5.dev.keyId);   // committed after the proof: no priority
-    await mine(c.W); await c.pap.settleStake(k5.dev.keyId); await cash(c, sybil);
-    await uphold(c, rv5.id); await cash(c, hunter);
-    line("self-slash before any commit (12c)", "RESIDUAL (by design)", `prover (forger's sybil) gets ${F(c.STAKE - c.BOND)} x 0.5 of the free stake; forger+sybil recovered ${F((await balOf(forger)) + (await balOf(sybil)) - f5)} of its ${F(c.STAKE)} stake (with no later claim it would recover (alpha) x S = ${F(c.STAKE / 2n)}, i.e. lose (1 - alpha) x S); a late hunter's claim still reserved a bond from the stake and nets ${F((await balOf(hunter)) - h5)} ETH from the oracle split, no stake share`);
-    CASE("owner self-slashes before anyone accuses it", "its sybil proves misuse first; a hunter who commits later only wins the oracle split", `owner+sybil recovered ${F((await balOf(forger)) + (await balOf(sybil)) - f5)} of the ${F(c.STAKE)} stake (net ${F((await balOf(forger)) + (await balOf(sybil)) - f5 - c.STAKE)}, gas incl.; ${F(c.STAKE / 2n)} recovered if nobody claims); later hunter net ${F((await balOf(hunter)) - h5)}; burned ${F((await balOf(BURN)) - bu5)} at 0xdEaD + ${F((await balOf(STORE)) - so12)} oracle fee`);
-  });
-
-  it("13 stolen honest key; several claims per device", async () => {
-    const victim = s[10], thief = s[11], griefer = s[12];
-    const k = await register(c, victim); await attest(c, victim, k.dev, h("v0"));
-    await c.pap.connect(thief).proveKeyMisuse(k.dev.keyId, k.dev.sign(msgExtK(c, k.dev.keyId, thief.address)));
-    const bu13 = await balOf(BURN), cr13 = await c.pap.credit(thief.address);
-    const r13 = await reverts(c.pap.settleStake.staticCall(k.dev.keyId), "not settleable");   // eth_call: no block mined
-    await mine(c.W); await c.pap.settleStake(k.dev.keyId);
-    const v13 = await c.pap.verify(h("v0"), k.dev.keyId), th13 = await cash(c, thief);
-    line("stolen honest key -> misuse flag", "SUCCEEDS (accepted, custody risk)", `thief earns ${F(th13)} ETH after the escrow window`);
-    CASE("proof of key misuse / stolen key of an honest owner", `whoever holds the key flags it at once; the reward is escrowed (${r13 === "not settleable" ? `settleStake "${r13}"` : "?"} for ${c.W} blocks) and then paid; the earlier record stays, marked recorded before the flag`, `prover/thief +${F(th13)} (credit before the window ${F(cr13)}); owner -${F(c.STAKE)}; burned ${F((await balOf(BURN)) - bu13)}; earlier record: ${VF(v13)}`);
-    const k2 = await register(c, victim); for (let i = 0; i < 3; i++) await attest(c, victim, k2.dev, h("u" + i));
-    await c.pap.connect(victim).requestUnbond(k2.dev.keyId);
-    const r = []; for (let i = 0; i < 3; i++) r.push(await claim(c, griefer, h("u" + i), k2.dev.keyId));
-    await warp(c.UNBOND);
-    const rw = await reverts(c.pap.connect(victim).withdraw(k2.dev.keyId), "open claims");
-    for (const x of r) if (x.id) await reject(c, x.id);
-    await mine(c.GRACE); await c.pap.connect(victim).withdraw(k2.dev.keyId); await cash(c, griefer);
-    CASE("many claims against one device", `each open claim reserves ${F(c.BOND)} of free stake: ${r.filter((x) => x.id).length} fit in ${F(c.STAKE)}, the 3rd is refunded; withdraw waits for the votes ("${rw}")`, `claimant loses ${F(c.BOND)} per rejected claim (half to the device stake, half oracle fee)`);
-    line("spam claims vs withdrawal", "PRICED", `${r.filter((x) => x.id).length} claims opened (stake ${F(c.STAKE)} / bond ${F(c.BOND)}), 3rd ${r[2].rejected ? "rejected, refunded" : "opened"}; withdraw "${rw}" until voted; griefer loses ${F(c.BOND)} per rejected claim`);
-  });
-
-  it("14 claim-slot squatting: partial and full", async () => {
-    const forger = s[13], sybil = s[14], hunter = s[15];
-    // partial: one weak claim does not block the hunter
-    const k = await register(c, forger); await attest(c, forger, k.dev, h("harmless")); await attest(c, forger, k.dev, h("deepfake")); await attest(c, forger, k.dev, h("harmless2"));
-    const w1 = await claim(c, sybil, h("harmless"), k.dev.keyId);
-    const hv = await claim(c, hunter, h("deepfake"), k.dev.keyId);
-    assert(hv.id);
-    line("claim-slot squatting, one weak claim", "FAILS", "hunter's claim opens next to the forger's (stake 0.25 = 2 bond slots of 0.11)");
-    await reject(c, w1.id); await uphold(c, hv.id); await cash(c, hunter);
-    // full: the forger fills every reservable slot right after retiring
-    const k2 = await register(c, forger); await attest(c, forger, k2.dev, h("a")); await attest(c, forger, k2.dev, h("b")); await attest(c, forger, k2.dev, h("df"));
-    const f0 = (await balOf(forger)) + (await balOf(sybil)), h0 = await balOf(hunter);
-    await c.pap.connect(forger).requestUnbond(k2.dev.keyId);
-    const sq = [await claim(c, sybil, h("a"), k2.dev.keyId), await claim(c, sybil, h("b"), k2.dev.keyId)];
-    const hb = await claim(c, hunter, h("df"), k2.dev.keyId);
-    assert(hb.rejected);
-    await warp(c.UNBOND);
-    for (const x of sq) await dvm(c, x.id, false);
-    // end of the window: forger settles both and tries to withdraw in the same block, ahead of the hunter's reveal
-    const kh = await commit(c, hunter, h("df"), k2.dev.keyId);
+    const b = await ethers.provider.getBlock("latest");
+    const t1 = await c.pap.connect(relayer).attest(h("scoop"), b.number, d.dev.keyId, d.dev.sign(msgCap(c, d.dev.keyId, h("scoop"), b.hash)), { gasPrice: 2e9, gasLimit: 500000 });
+    const t2 = await thief.sendTransaction({ to: c.addr, data: t1.data, gasPrice: 3e9, gasLimit: 500000 });
+    await mine(); await automine(true);
+    assert.equal(await st(t1), 0); assert.equal(await st(t2), 1);
+    const v = await c.pap.verify(h("scoop"), d.dev.keyId);
+    assert.equal(v.depositor, thief.address);
+    const relayerNet = await w(relayer), thiefNet = await w(thief);
+    assert.equal(relayerNet, 0n); assert.equal(thiefNet, -P.BOND);
+    // (b) copied register
+    const n = newDevice();
     await automine(false);
-    const tx = [];
-    for (const x of sq) tx.push(await c.oracle.connect(forger).settleAssertion(x.id, { gasPrice: 3e9, gasLimit: 800000 }));
-    tx.push(await c.pap.connect(forger).withdraw(k2.dev.keyId, { gasPrice: 3e9, gasLimit: 300000 }));
-    tx.push(await c.pap.connect(hunter).revealClaim(kh.photo, kh.keyId, kh.ev, kh.salt, { gasPrice: 2e9, gasLimit: 800000 }));
-    await mine(1); await automine(true);
-    const st = []; for (const t of tx) st.push((await ethers.provider.getTransactionReceipt(t.hash)).status);
-    const v = await c.pap.verify(h("df"), k2.dev.keyId);
-    assert.equal(st[2], 0); assert.equal(st[3], 1); assert.equal(v.openClaims, 1n);
-    // and if the forger instead refills both slots in the settlement block, it cannot withdraw until those settle + grace
-    const hid = (await c.pap.openClaimIds(k2.dev.keyId))[0];
-    await uphold(c, hid); await cash(c, hunter);
-    const fNet = (await balOf(forger)) + (await balOf(sybil)) - f0, hNet = (await balOf(hunter)) - h0;
-    CASE("owner fills its own claim slots", `sybil claims fill both slots, so a real claim is refunded; the owner settles them and tries to withdraw in the same block: "claim grace"; the real claim then opens and is upheld`, `owner+sybil net ${F(fNet)} (whole stake lost); hunter net ${F(hNet)}; what it buys: delay only, at ${F(c.BOND / 2n)} per slot per vote (${F((c.STAKE / c.BOND) * c.BOND / 2n)} per period for ${c.STAKE / c.BOND} slots)`);
-    line("claim-slot squatting, all slots filled, same-block exit", "FAILS", `settle/settle/withdraw/hunter-reveal in one block: statuses ${st.join("/")} - withdraw reverts "claim grace" (needs ${c.GRACE} blocks after the last settlement), the hunter's reveal opens a claim (slots free again) and is upheld. Forger+sybil net ${F(fNet)} ETH (full stake lost + 2 weak bonds' net), hunter net ${F(hNet)} ETH. Squatting now buys delay only: ${F(c.BOND / 2n)} ETH per slot per vote period (k = ${c.STAKE / c.BOND} slots at S=${F(c.STAKE)}, B=${F(c.BOND)} -> ${F((c.STAKE / c.BOND) * c.BOND / 2n)} per period) and the forger can never withdraw without a ${c.GRACE}-block period with no open claim`);
+    const t3 = await c.pap.connect(owner).register(n.x, n.y, n.sign(msgReg(c, n.keyId, owner.address)), { gasPrice: 2e9, gasLimit: 500000 });
+    const t4 = await thief.sendTransaction({ to: c.addr, data: t3.data, gasPrice: 3e9, gasLimit: 500000 });
+    await mine(); await automine(true);
+    assert.equal(await st(t3), 1); assert.equal(await st(t4), 0);
+    // (c) copied commitment
+    const fd = await register(c, forger); await attest(c, forger, fd.dev, h("df9"));
+    const salt = ethers.hexlify(ethers.randomBytes(32)), ev = h("e9");
+    const cm = commitmentOf(hunter.address, h("df9"), fd.dev.keyId, ev, salt);
+    await automine(false);
+    const t5 = await c.pap.connect(hunter).commitClaim(cm, { gasPrice: 2e9, gasLimit: 300000 });
+    const t6 = await c.pap.connect(thief).commitClaim(cm, { gasPrice: 3e9, gasLimit: 300000 });
+    await mine(); await automine(true);
+    assert.equal(await st(t5), 0); assert.equal(await st(t6), 1);
+    const rT = await rv(c.pap.connect(thief).revealClaim(h("df9"), fd.dev.keyId, ev, salt), "no commit");
+    const rH = await rv(c.pap.connect(hunter).revealClaim(h("df9"), fd.dev.keyId, ev, salt), "no commit");
+    // (d) the hunter commits again; the forger, without an earlier commitment, sees the reveal and commits in that block
+    const wd = await snap(c, [hunter, forger, sybil]);
+    const kh = await commit(c, hunter, h("df9"), fd.dev.keyId, ev);
+    const salt2 = ethers.hexlify(ethers.randomBytes(32)), cm2 = commitmentOf(sybil.address, h("df9"), fd.dev.keyId, h("x"), salt2);
+    await automine(false);
+    const t7 = await c.pap.connect(hunter).revealClaim(kh.photo, kh.keyId, kh.ev, kh.salt, { gasPrice: 2e9, gasLimit: 2000000 });
+    const t8 = await c.pap.connect(sybil).commitClaim(cm2, { gasPrice: 3e9, gasLimit: 300000 });
+    const t9 = await c.pap.connect(sybil).revealClaim(h("df9"), fd.dev.keyId, h("x"), salt2, { gasPrice: 3e9, gasLimit: 2000000 });
+    await mine(); await automine(true);
+    assert.equal(await st(t7), 1); assert.equal(await st(t8), 1); assert.equal(await st(t9), 0);   // a reveal needs a commit at least one block earlier
+    const id = openedId(c, await ethers.provider.getTransactionReceipt(t7.hash));
+    await vote(c, id, true);
+    await send(c.pap.connect(sybil).revealClaim(h("df9"), fd.dev.keyId, h("x"), salt2));   // photo is Fake now: bond back
+    assert.equal(await wd(hunter), c.payout - P.BOND); assert.equal(await wd(sybil), 0n);
+    await warpTo(kh.at + P.REVEAL + 1); await send(c.pap.forfeitCommit(cm));
+    CASE("mempool copies", `(a) copied attest: the copy (higher gas price) lands first; the record carries the HONEST key and the copier is the depositor; the honest tx reverts "exists"; (b) copied register reverts (proof of possession names msg.sender); (c) a copied commitment landing first makes the honest commit revert "commitment used"; nobody can reveal it ("${rT}" / "${rH}"); the hunter commits again with a new salt and the copy is forfeited`, `(a) honest sender ${F(relayerNet)} tokens (gas only); copier -BOND = ${F(thiefNet)}, locked under the honest key (refunded later unless the photo is proven fake); (b) copier gas only; (c) copier -BOND = ${F(-P.BOND)} (to the burn address), hunter gas only and one block`);
+    CASE("reveal seen in the mempool", `the forger's account commits in the hunter's reveal block and tries to reveal in the same block: reverts ("too early": a reveal needs a commitment from an earlier block); the hunter's accusation opens and is voted true; the forger's later reveal on the Fake photo just gets its bond back`, `hunter +BOND - fee = ${F(await wd(hunter))}; forger's account ${F(await wd(sybil))}; forger -BOND`);
   });
 
-  it("15 commit-reveal mechanics", async () => {
-    const owner = s[1], hunter = s[2], other = s[3], hunter2 = s[4];
-    const k = await register(c, owner); await attest(c, owner, k.dev, h("r"));
-    const kc = await commit(c, hunter, h("r"), k.dev.keyId);
+  it("10 insurance: the forger holds its own earlier commitment and reveals first", async () => {
+    const forger = s[5], sybil = s[6], hunter = s[3];
+    async function scenario(photo, voteDelay, truthful) {
+      const w = await snap(c, [forger, sybil, hunter]);
+      const d = await register(c, forger); await attest(c, forger, d.dev, h(photo));
+      const ks = await commit(c, sybil, h(photo), d.dev.keyId, h("own evidence"));   // the insurance
+      await later(P.REVEAL / 4);
+      const kh = await commit(c, hunter, h(photo), d.dev.keyId);
+      await automine(false);
+      const th = await c.pap.connect(hunter).revealClaim(kh.photo, kh.keyId, kh.ev, kh.salt, { gasPrice: 2e9, gasLimit: 2000000 });
+      const ts = await c.pap.connect(sybil).revealClaim(ks.photo, ks.keyId, ks.ev, ks.salt, { gasPrice: 3e9, gasLimit: 2000000 });
+      await mine(); await automine(true);
+      assert.equal((await ethers.provider.getTransactionReceipt(th.hash)).status, 0);
+      const id = openedId(c, await ethers.provider.getTransactionReceipt(ts.hash));
+      await later(voteDelay); await vote(c, id, truthful);
+      let hunterFate;
+      if ((await ethers.provider.getBlock("latest")).timestamp + 1 <= kh.at + P.REVEAL) {
+        const x = await reveal(c, kh);
+        hunterFate = x.id ? "reveals again: accusation opens" : "reveals again: bond returned";
+        if (x.id) await vote(c, x.id, true);
+      } else {
+        await send(c.pap.forfeitCommit(kh.cm)); hunterFate = "commitment expired during the vote and was forfeited";
+      }
+      return { fnet: (await w(forger)) + (await w(sybil)), hnet: await w(hunter), hunterFate };
+    }
+    const A = await scenario("insured A", 60, true);            // vote shorter than REVEAL_WINDOW (only in a test)
+    const B = await scenario("insured B", P.VOTE, true);        // realistic: UMA's vote takes days
+    const C = await scenario("insured C", P.VOTE, false);       // junk self-accusation, rejected after days
+    assert.equal(A.fnet, -c.fee); assert.equal(A.hnet, 0n);
+    assert.equal(B.fnet, -c.fee); assert.equal(B.hnet, -P.BOND);
+    assert.equal(C.fnet, -c.fee - P.BOND); assert.equal(C.hnet, -P.BOND);   // in C the forger's deposit is still locked (refundable later)
+    // insurance that is never needed
+    const w2 = await snap(c, [forger, sybil]);
+    const d = await register(c, forger); await attest(c, forger, d.dev, h("insured D"));
+    const kf = await commit(c, sybil, h("insured D"), d.dev.keyId);
+    await warpTo(kf.at + P.REVEAL + 1); await send(c.pap.forfeitCommit(kf.cm));
+    const unused = -((await w2(forger)) + (await w2(sybil))) - P.BOND;   // minus the deposit, still locked
+    assert.equal(unused, P.BOND);
+    CASE("insurance (STATED RESIDUAL)", `the forger's account committed first; when the hunter's reveal appears it reveals with a higher gas price and its accusation opens; the hunter's reveal reverts "accusation open". (A) vote true within REVEAL_WINDOW (test only): hunter ${A.hunterFate}; (B) vote true after ${P.VOTE} s: hunter ${B.hunterFate}; (C) junk self-accusation rejected after ${P.VOTE} s: hunter ${C.hunterFate}, photo stays Attested with a longer window`, `forger + account: A -fee = ${F(A.fnet)}, B -fee = ${F(B.fnet)}, C -fee = ${F(C.fnet + P.BOND)} (plus its deposit BOND still locked and refundable); hunter: A ${F(A.hnet)}, B -BOND = ${F(B.hnet)}, C -BOND = ${F(C.hnet)}. FLAW: whenever UMA's vote outlasts REVEAL_WINDOW, a blocked hunter loses BOND. Unused insurance costs BOND = ${F(unused)} per REVEAL_WINDOW (forfeited), or fee = ${F(c.fee)} per round if revealed as a junk self-accusation`);
+  });
+
+  it("11 a second accusation while one is open", async () => {
+    const owner = s[5], A = s[3], B = s[4];
+    const w = await snap(c, [A, B]);
+    const d = await register(c, owner); await attest(c, owner, d.dev, h("p11"));
+    const kA = await accuse(c, A, h("p11"), d.dev.keyId);
+    const kB = await commit(c, B, h("p11"), d.dev.keyId);
+    const r1 = await rv(reveal(c, kB), "accusation open");
+    assert.equal((await c.pap.commits(kB.cm)).live, true);
+    await vote(c, kA.id, false);   // quick vote in this test
+    const xB = await reveal(c, kB);
+    assert(xB.id);
+    await vote(c, xB.id, true);
+    assert.equal(await w(A), -P.BOND); assert.equal(await w(B), c.payout - P.BOND);
+    CASE("second accusation while one is open", `B's reveal while A's accusation is open: "${r1}"; B's commitment stays valid until it expires; A is voted false, then B reveals the same commitment (still within REVEAL_WINDOW) and is voted true`, `A -BOND = ${F(await w(A))}; B +BOND - fee = ${F(await w(B))}. Only one accusation per photo at a time`);
+  });
+
+  it("12 invalid accusations: no record, refunded, fake, out of window, early / late / other account / wrong salt, forfeit", async () => {
+    const owner = s[1], hunter = s[3], other = s[8];
+    const d = await register(c, owner);
+    const burn0 = await tok(c, BURN);
+    const kN = await commit(c, hunter, h("never attested"), d.dev.keyId);
+    const R = { never: await rv(reveal(c, kN), "no record") };
+    const a = await attest(c, owner, d.dev, h("p12"));
+    await warpTo(a.refundableAt); await send(c.pap.refund(h("p12"), d.dev.keyId));
+    const kR = await commit(c, hunter, h("p12"), d.dev.keyId);
+    R.refunded = await rv(reveal(c, kR), "refunded");
+    const b = await attest(c, owner, d.dev, h("p12b"));
+    await warpTo(b.until + 1);
+    const kL = await commit(c, hunter, h("p12b"), d.dev.keyId);
+    R.afterWindow = await rv(reveal(c, kL), "outside window");
+    await attest(c, owner, d.dev, h("p12 fake"));
+    const x = await accuse(c, s[4], h("p12 fake"), d.dev.keyId); await vote(c, x.id, true);
+    const wf = await snap(c, [hunter]);
+    const kF = await commit(c, hunter, h("p12 fake"), d.dev.keyId);
+    const xf = await reveal(c, kF);
+    assert.equal(xf.id, null); assert.equal(await wf(hunter), 0n);
+    const d2 = await register(c, owner); await attest(c, owner, d2.dev, h("p12c"));
+    const salt = ethers.hexlify(ethers.randomBytes(32)), cm = commitmentOf(hunter.address, h("p12c"), d2.dev.keyId, h("e"), salt);
+    await automine(false);
+    const tc = await c.pap.connect(hunter).commitClaim(cm, { gasLimit: 300000 });
+    const tr = await c.pap.connect(hunter).revealClaim(h("p12c"), d2.dev.keyId, h("e"), salt, { gasLimit: 2000000 });
+    await mine(); await automine(true);
+    assert.equal((await ethers.provider.getTransactionReceipt(tc.hash)).status, 1); assert.equal((await ethers.provider.getTransactionReceipt(tr.hash)).status, 0);
+    R.other = await rv(c.pap.connect(other).revealClaim(h("p12c"), d2.dev.keyId, h("e"), salt), "no commit");
+    R.salt = await rv(c.pap.connect(hunter).revealClaim(h("p12c"), d2.dev.keyId, h("e"), ethers.ZeroHash), "no commit");
+    R.forfeitEarly = await rv(c.pap.forfeitCommit(cm), "reveal open");
+    const at = Number((await c.pap.commits(cm)).committedAt);
+    await setNext(at + P.REVEAL + 1);
+    R.late = await rv(c.pap.connect(hunter).revealClaim(h("p12c"), d2.dev.keyId, h("e"), salt, LIM), "too late");
+    for (const k of [kN, kR, kL]) await send(c.pap.forfeitCommit(k.cm));
+    G("forfeitCommit", await send(c.pap.forfeitCommit(cm)));
+    R.twice = await rv(c.pap.forfeitCommit(cm), "no commit");
+    const burned = (await tok(c, BURN)) - burn0;
+    assert.equal(burned, 4n * P.BOND);
+    CASE("invalid accusations", `never attested: "${R.never}"; refunded photo: "${R.refunded}"; committed after the window: "${R.afterWindow}"; on a photo already Fake: no accusation, bond credited back (net 0); revealed in the commit block: tx status 0 ("too early"); by another account: "${R.other}"; wrong salt: "${R.salt}"; forfeit before the deadline: "${R.forfeitEarly}"; after REVEAL_WINDOW: "${R.late}"; forfeit twice: "${R.twice}"`, `each unusable commitment is forfeited: accuser -BOND each, burn address +4 x BOND = ${F(burned)}; depositor 0`);
+  });
+
+  it("13 griefing: N false accusations in a row against an honest photo", async () => {
+    const owner = s[1], griefer = s[4], N = 5;
+    const w = await snap(c, [owner, griefer]), store0 = await tok(c, STORE);
+    const d = await register(c, owner); const a = await attest(c, owner, d.dev, h("honest"));
+    let accused = 0;
+    for (let i = 0; i < N; i++) {
+      const k = await accuse(c, griefer, h("honest"), d.dev.keyId, h("junk" + i));
+      await later(P.VOTE); const r = await vote(c, k.id, false);
+      accused += (await ethers.provider.getBlock(r.blockNumber)).timestamp - Number((await c.pap.accusations(k.id)).openedAt);
+    }
+    const v = await c.pap.verify(h("honest"), d.dev.keyId);
+    await warpTo(Number(v.refundableAt)); await send(c.pap.refund(h("honest"), d.dev.keyId));
+    const delay = Number(v.refundableAt) - a.refundableAt;
+    assert.equal(delay, accused);
+    assert.equal(await w(griefer), -BigInt(N) * P.BOND); assert.equal(await w(owner), BigInt(N) * (c.payout - P.BOND)); assert.equal((await tok(c, STORE)) - store0, BigInt(N) * c.fee);
+    CASE("griefing", `${N} false accusations, each voted false after ${P.VOTE} s; each one extends the window by its duration`, `griefer -N x BOND = ${F(await w(griefer))}; depositor +N x (BOND - fee) = ${F(await w(owner))}; UMA Store +N x fee = ${F(BigInt(N) * c.fee)}; refund delayed by the total time under accusation = ${delay} s (${(delay / 86400).toFixed(2)} days)`);
+  });
+
+  it("14 key revocation", async () => {
+    const owner = s[1], holder = s[7], copier = s[8];
+    const d = await register(c, owner); const a = await attest(c, owner, d.dev, h("p14"));
+    const sig = d.dev.sign(msgRev(c, d.dev.keyId, holder.address));
+    await automine(false);
+    const t1 = await c.pap.connect(holder).revokeKey(d.dev.keyId, sig, { gasPrice: 2e9, gasLimit: 300000 });
+    const t2 = await copier.sendTransaction({ to: c.addr, data: t1.data, gasPrice: 3e9, gasLimit: 300000 });
+    await mine(); await automine(true);
+    const x1 = await ethers.provider.getTransactionReceipt(t1.hash), x2 = await ethers.provider.getTransactionReceipt(t2.hash);
+    assert.equal(x1.status, 1); assert.equal(x2.status, 0); G("revokeKey", x1);
+    const b = await ethers.provider.getBlock("latest");
+    const r1 = await rv(c.pap.connect(owner).attest(h("p14b"), b.number, d.dev.keyId, d.dev.sign(msgCap(c, d.dev.keyId, h("p14b"), b.hash))), "not active");
+    const r2 = await rv(c.pap.connect(holder).revokeKey(d.dev.keyId, sig), "not active");
+    const v = await c.pap.verify(h("p14"), d.dev.keyId);
+    assert.equal(v.state, 1n); assert.equal(v.lockedDeposit, P.BOND); assert.equal(v.reason, 2n); assert.equal(v.recordedBeforeFlag, true);
+    const w = await snap(c, [owner]);
+    await warpTo(a.refundableAt); await send(c.pap.refund(h("p14"), d.dev.keyId));
+    assert.equal(await w(owner), P.BOND);
+    CASE("key revocation", `an account holding the key (not the registering owner) revokes with a signature naming itself; the same tx copied from another address and mined first reverts (status ${x2.status}); the revoked device's attest: "${r1}"; revoke twice: "${r2}"`, `device ${DS[v.deviceStatus]} (${RS[v.reason]}); its record stays ${ST[v.state]} with lockedDeposit ${F(v.lockedDeposit)} and is refunded normally (+BOND = ${F(await w(owner))}); no tokens move at revocation`);
+  });
+
+  it("15 signatures: replay, other key, other contract/chain, anchors, high-s, cross-type reuse", async () => {
+    const o = s[1];
+    const A = await register(c, o), B = await register(c, o);
+    const a = await attest(c, o, A.dev, h("p15"));
     const R = {};
-    R.other = await reverts(c.pap.connect(other).revealClaim(kc.photo, kc.keyId, kc.ev, kc.salt), "no commit");
-    R.salt = await reverts(c.pap.connect(hunter).revealClaim(kc.photo, kc.keyId, kc.ev, ethers.ZeroHash), "no commit");
-    R.window = await reverts(c.pap.forfeitCommit(hunter.address, kc.cm), "window open");
-    await mine(c.W);
-    R.late = await reverts(c.pap.connect(hunter).revealClaim(kc.photo, kc.keyId, kc.ev, kc.salt), "too late");
-    const b0 = await balOf("0x000000000000000000000000000000000000dEaD");
-    G("forfeitCommit", (await rc(c.pap.forfeitCommit(hunter.address, kc.cm))).gas);
-    const burned = (await balOf("0x000000000000000000000000000000000000dEaD")) - b0;
-    R.twice = await reverts(c.pap.forfeitCommit(hunter.address, kc.cm), "no commit");
-    // too early: commit and reveal in the same block
-    const salt = ethers.hexlify(ethers.randomBytes(32)); const cm = commitment(hunter.address, h("r"), k.dev.keyId, h("e"), salt);
-    await automine(false);
-    await c.pap.connect(hunter).commitClaim(cm, { gasLimit: 300000, value: c.BOND });
-    const te = await c.pap.connect(hunter).revealClaim(h("r"), k.dev.keyId, h("e"), salt, { gasLimit: 800000 });
-    await mine(1); await automine(true);
-    const early = (await ethers.provider.getTransactionReceipt(te.hash)).status;
-    let reason = "";
-    try { await c.pap.connect(hunter).revealClaim.staticCall(h("r"), k.dev.keyId, h("e"), salt); } catch (e) { reason = e.message; }
-    const ok = await reveal(c, { who: hunter, photo: h("r"), keyId: k.dev.keyId, ev: h("e"), salt });
-    // two hunters, same record: second reveal rejected, bond refunded (not queued)
-    const k2c = await commit(c, hunter2, h("r"), k.dev.keyId);
-    const second = await reveal(c, k2c);
-    assert(early === 0 && ok.id && second.rejected && burned === c.BOND);
-    line("commit-reveal mechanics", "AS DESIGNED", `reveal by another account: "${R.other}"; wrong salt: "${R.salt}"; same block as commit: status ${early} (reverts "too early"); after ${c.W} blocks: "${R.late}"; forfeit before window: "${R.window}"; forfeit burns ${F(burned)} ETH, twice: "${R.twice}"; second hunter on the same record: rejected, ${F(await c.pap.credit(hunter2.address))} ETH credited back (not queued)`);
-    CASE("claim never revealed / revealed late", `not revealed within ${c.W} blocks: reveal "${R.late}"; anyone may then forfeit the commit (before: "${R.window}"); reveal in the commit block: "too early"`, `claimant loses the bond ${F(burned)} (burned); owner 0`);
-    CASE("two claimants on the same record", "the second reveal is refunded (not queued)", `refund ${F(await c.pap.credit(hunter2.address))}`);
-    void reason; await cash(c, hunter2); await reject(c, ok.id);
-  });
-
-  it("16 signature hygiene: low-s, keyId binding, cross-domain reuse, layouts", async () => {
-    const owner = s[1], ch = s[2];
-    const A = await register(c, owner), B = await register(c, owner);
-    const a = await anchorNow();
-    const capA = A.dev.sign(msgCapK(c, A.dev.keyId, h("hs"), a.hash));
-    const R = {};
-    R.highCap = await reverts(c.pap.attest(h("hs"), a.n, A.dev.keyId, highS(capA)), "bad sig");
+    R.replay = await rv(c.pap.connect(o).attest(h("p15"), a.anchor, A.dev.keyId, a.sig), "exists");
+    const b = await ethers.provider.getBlock("latest");
+    const cap = (dev, cc = c) => dev.sign(msgCap(cc, dev.keyId, h("q"), b.hash));
+    R.otherKey = await rv(c.pap.connect(o).attest(h("q"), b.number, A.dev.keyId, cap(B.dev)), "bad sig");
+    R.otherChain = await rv(c.pap.connect(o).attest(h("q"), b.number, A.dev.keyId, cap(A.dev, { ...c, chainId: 1n })), "bad sig");
+    const c2 = await deploy(); extra.push(c2);
+    await send(c2.pap.connect(o).register(A.dev.x, A.dev.y, A.dev.sign(msgReg(c2, A.dev.keyId, o.address))));
+    R.otherContract = await rv(c2.pap.connect(o).attest(h("q"), b.number, A.dev.keyId, cap(A.dev)), "bad sig");
+    R.highS = await rv(c.pap.connect(o).attest(h("q"), b.number, A.dev.keyId, highS(cap(A.dev))), "bad sig");
     const fresh = newDevice();
-    R.highPop = await reverts(c.pap.connect(owner).register(fresh.x, fresh.y, highS(fresh.sign(msgRegK(c, fresh.keyId, owner.address))), { value: c.STAKE }), "bad pop");
-    R.highExt = await reverts(c.pap.connect(ch).proveKeyMisuse(A.dev.keyId, highS(A.dev.sign(msgExtK(c, A.dev.keyId, ch.address)))), "bad sig");
-    // keyId binding: B signs a capture message that names A; accepted for neither A nor B
-    const bNamesA = B.dev.sign(msgCapK(c, A.dev.keyId, h("kb"), a.hash));
-    R.bNamesAasB = await reverts(c.pap.attest(h("kb"), a.n, B.dev.keyId, bNamesA), "bad sig");
-    R.bNamesAasA = await reverts(c.pap.attest(h("kb"), a.n, A.dev.keyId, bNamesA), "bad sig");
-    R.aSigWithB = await reverts(c.pap.attest(h("hs"), a.n, B.dev.keyId, capA), "bad sig");
-    // cross-domain: each signature type at every other entry point
-    const D = newDevice();
-    const popD = D.sign(msgRegK(c, D.keyId, owner.address));
-    const regE = await register(c, owner, D);
-    const capD = D.sign(msgCapK(c, D.keyId, h("cd"), a.hash));
-    const extD = D.sign(msgExtK(c, D.keyId, ch.address));
-    R.popAsCap = await reverts(c.pap.attest(h("cd"), a.n, D.keyId, popD), "bad sig");
-    R.popAsExt = await reverts(c.pap.connect(ch).proveKeyMisuse(D.keyId, popD), "bad sig");
-    R.capAsExt = await reverts(c.pap.connect(ch).proveKeyMisuse(D.keyId, capD), "bad sig");
-    R.extAsCap = await reverts(c.pap.attest(h("cd"), a.n, D.keyId, extD), "bad sig");
-    const E2 = newDevice();
-    const capE = E2.sign(msgCapK(c, E2.keyId, h("cd"), a.hash)), extE = E2.sign(msgExtK(c, E2.keyId, owner.address));
-    R.capAsPop = await reverts(c.pap.connect(owner).register(E2.x, E2.y, capE, { value: c.STAKE }), "bad pop");
-    R.extAsPop = await reverts(c.pap.connect(owner).register(E2.x, E2.y, extE, { value: c.STAKE }), "bad pop");
-    // the valid low-s ones still work
-    await c.pap.attest(h("cd"), a.n, D.keyId, capD);
-    void regE;
-    // layouts
-    const L = { REGISTER: ethers.getBytes(msgRegK(c, D.keyId, owner.address)).length, CAPTURE: ethers.getBytes(msgCapK(c, D.keyId, h("x"), a.hash)).length, EXTRACTED: ethers.getBytes(msgExtK(c, D.keyId, ch.address)).length };
-    const labels = ["PAPRIKA/REGISTER", "PAPRIKA/CAPTURE", "PAPRIKA/EXTRACTED"];
-    const prefix = labels.some((x) => labels.some((y) => x !== y && y.startsWith(x)));
-    assert(!prefix && new Set(Object.values(L)).size === 3);
-    const sigFns = c.pap.interface.fragments.filter((f) => f.type === "function" && f.inputs.some((i) => i.type === "bytes")).map((f) => `${f.name}(${f.inputs.map((i) => i.type + " " + i.name).join(", ")})`);
-    line("signature hygiene", "FAILS (all rejected)", `high-s capture/PoP/misuse: "${R.highCap}"/"${R.highPop}"/"${R.highExt}"; B's sig over a message naming A, as B / as A: "${R.bNamesAasB}"/"${R.bNamesAasA}"; A's sig with B's keyId: "${R.aSigWithB}"; cross-domain PoP->capture "${R.popAsCap}", PoP->misuse "${R.popAsExt}", capture->misuse "${R.capAsExt}", misuse->capture "${R.extAsCap}", capture->PoP "${R.capAsPop}", misuse->PoP "${R.extAsPop}"`);
-    CASE("signature reuse across keys, domains and chains", "high-s, a signature naming another key, and every signature type at every other entry point: all rejected", "no ETH moves");
-    line("message layouts", "NO COLLISION", `preimage bytes REGISTER ${L.REGISTER} (16+32+20+32+20), CAPTURE ${L.CAPTURE} (15+32+20+32+32+32), EXTRACTED ${L.EXTRACTED} (17+32+20+32+20); labels diverge at byte 8 (R/C/E), none is a prefix of another; signature-taking functions: ${sigFns.join("; ")} - none takes a digest`);
+    R.highPop = await rv(c.pap.connect(o).register(fresh.x, fresh.y, highS(fresh.sign(msgReg(c, fresh.keyId, o.address)))), "bad sig");
+    R.highRev = await rv(c.pap.connect(o).revokeKey(A.dev.keyId, highS(A.dev.sign(msgRev(c, A.dev.keyId, o.address)))), "bad sig");
+    const cur = await ethers.provider.getBlockNumber();
+    R.future = await rv(c.pap.connect(o).attest(h("q"), cur + 5, A.dev.keyId, A.dev.sign(msgCap(c, A.dev.keyId, h("q"), ethers.ZeroHash))), "anchor");
+    const capOld = cap(A.dev);
+    await mine(300);
+    R.stale = await rv(c.pap.connect(o).attest(h("q"), b.number, A.dev.keyId, capOld), "anchor");
+    const X = newDevice();
+    const pop = X.sign(msgReg(c, X.keyId, o.address));
+    const nb = await ethers.provider.getBlock("latest");
+    const capX = X.sign(msgCap(c, X.keyId, h("x"), nb.hash)), revX = X.sign(msgRev(c, X.keyId, o.address));
+    R.capAsPop = await rv(c.pap.connect(o).register(X.x, X.y, capX), "bad sig");
+    R.revAsPop = await rv(c.pap.connect(o).register(X.x, X.y, revX), "bad sig");
+    await send(c.pap.connect(o).register(X.x, X.y, pop));
+    R.popAsCap = await rv(c.pap.connect(o).attest(h("x"), nb.number, X.keyId, pop), "bad sig");
+    R.revAsCap = await rv(c.pap.connect(o).attest(h("x"), nb.number, X.keyId, revX), "bad sig");
+    R.popAsRev = await rv(c.pap.connect(o).revokeKey(X.keyId, pop), "bad sig");
+    R.capAsRev = await rv(c.pap.connect(o).revokeKey(X.keyId, capX), "bad sig");
+    R.noAllowance = await rv(c.pap.connect(s[17]).attest(h("x"), nb.number, X.keyId, capX), "token call failed");
+    await send(c.pap.connect(o).attest(h("x"), nb.number, X.keyId, capX));   // the right one works
+    const L = [msgReg(c, X.keyId, o.address), msgCap(c, X.keyId, h("x"), nb.hash), msgRev(c, X.keyId, o.address)].map((m) => ethers.getBytes(m).length);
+    assert.equal(new Set(L).size, 3);
+    CASE("signatures", Object.entries(R).map(([k, x]) => `${k}: "${x}"`).join("; "), `signed messages: REGISTER ${L[0]} bytes, CAPTURE ${L[1]}, REVOKE ${L[2]} (distinct labels and lengths); no tokens move on any rejection`);
   });
 
-  it("17 regressions from the independent review", async () => {
-    // a claimant contract that refuses ETH cannot block settlement: the claim is upheld and settled; only its own collect() fails
-    const owner = s[1], prover = s[2];
-    const d = await register(c, owner); await attest(c, owner, d.dev, h("refuses-eth"));
-    const rcl = await (await ethers.getContractFactory("RevertingClaimant", s[0])).deploy(c.addr);
-    const ev = h("e"), salt = ethers.hexlify(ethers.randomBytes(32));
-    await (await rcl.commit(commitment(await rcl.getAddress(), h("refuses-eth"), d.dev.keyId, ev, salt), { value: c.BOND })).wait();
-    await c.pap.connect(prover).proveKeyMisuse(d.dev.keyId, d.dev.sign(msgExtK(c, d.dev.keyId, prover.address)));
-    const rx = await (await rcl.reveal(h("refuses-eth"), d.dev.keyId, ev, salt)).wait();
-    const id = rx.logs.map((l) => { try { return c.pap.interface.parseLog(l); } catch { return null; } }).find((p) => p && p.name === "ClaimOpened").args.assertionId;
-    await dvm(c, id, true);
-    const st = await rc(c.oracle.settleAssertion(id));
-    c.extraCredit = [await rcl.getAddress()];
-    await mine(c.W); await c.pap.settleStake(d.dev.keyId);   // the misuse proof's escrow window, then payout to the claim (priority)
-    const dv = await dev_(c, d.dev.keyId);
-    const crC = await c.pap.credit(await rcl.getAddress());
-    const collect = await reverts(rcl.collect(), "send");
-    assert.equal(st.r.status, 1); assert(dv.stakeSettled); assert.equal(dv.reserved, 0n);
-    line("claimant that refuses ETH", "CANNOT BLOCK SETTLEMENT", `settleAssertion succeeds (status ${st.r.status}); device stake settled, reserved ${F(dv.reserved)}; the refusing claimant is credited ${F(crC)} ETH and only its own collect() fails ("${collect}") - nobody else is blocked`);
-    CASE("claimant that cannot receive ETH", "its claim is upheld and settled normally; it is credited; only its own collect() fails", `credited ${F(crC)}; settleAssertion status ${st.r.status}; device stake settled; nobody else blocked`);
-    c.extraCredit = [await rcl.getAddress()];
-    // stated limit: the mock oracle takes the bond in native ETH; UMA's real oracle takes an ERC-20 bond (non-payable calls)
-    const np = await (await ethers.getContractFactory("NonPayableOOv3", s[0])).deploy();
-    const p2 = await (await ethers.getContractFactory("Paprika", s[0])).deploy(await np.getAddress());
-    const c2 = { ...c, pap: p2, addr: await p2.getAddress(), keys: [] };
-    const d2 = newDevice();
-    await (await p2.connect(owner).register(d2.x, d2.y, d2.sign(msgRegK(c2, d2.keyId, owner.address)), { value: c.STAKE })).wait();
-    const a2 = await anchorNow();
-    await (await p2.attest(h("erc20-oracle"), a2.n, d2.keyId, d2.sign(msgCapK(c2, d2.keyId, h("erc20-oracle"), a2.hash)))).wait();
-    const salt2 = ethers.hexlify(ethers.randomBytes(32));
-    await (await p2.connect(s[3]).commitClaim(commitment(s[3].address, h("erc20-oracle"), d2.keyId, ev, salt2), { value: c.BOND })).wait();
-    let rOracle = "accepted"; try { await (await p2.connect(s[3]).revealClaim(h("erc20-oracle"), d2.keyId, ev, salt2)).wait(); } catch (e) { rOracle = "reverts"; }
-    line("oracle with UMA's real bond interface (ERC-20, not payable)", "STATED LIMIT", `revealClaim ${rOracle} against a non-payable oracle; the contract takes the bond in native ETH and the vote path is tested against a mock only`);
-    // free and reserved stake are reported separately
-    const g = await register(c, owner); for (const p of ["w1", "w2"]) await attest(c, owner, g.dev, h(p));
-    for (const p of ["w1", "w2"]) await claim(c, s[8], h(p), g.dev.keyId);
-    const v6 = await c.pap.verify(h("w1"), g.dev.keyId);
-    assert.equal(v6.stakeAtRisk, c.STAKE - 2n * c.BOND); assert.equal(v6.reservedForClaims, 2n * c.BOND);
-    CASE("free vs reserved stake", "verify reports the winnable free stake and the stake locked for open claims separately", `2 open claims: stakeAtRisk ${F(v6.stakeAtRisk)}, reservedForClaims ${F(v6.reservedForClaims)}`);
-    line("free vs reserved stake", "REPORTED SEPARATELY", `verify reports stakeAtRisk (free, winnable) ${F(v6.stakeAtRisk)} and reservedForClaims (locked at the oracle) ${F(v6.reservedForClaims)}`);
-    for (const id6 of await c.pap.openClaimIds(g.dev.keyId)) await reject(c, id6);
-    // every decision on a key is logged, also after the first flag
-    const f = await register(c, owner); await attest(c, owner, f.dev, h("f1")); await attest(c, owner, f.dev, h("f2"));
-    const ca = await claim(c, s[4], h("f1"), f.dev.keyId); const cb = await claim(c, s[5], h("f2"), f.dev.keyId);
-    await uphold(c, ca.id); await c.pap.connect(s[6]).proveKeyMisuse(f.dev.keyId, f.dev.sign(msgExtK(c, f.dev.keyId, s[6].address))); await uphold(c, cb.id);
-    const logs = await c.pap.queryFilter(c.pap.filters.Flagged(f.dev.keyId));
-    CASE("every decision on a key is logged", "one Flagged event per decision, flaggedAtBlock stays the first", `${logs.length} Flagged events`);
-    line("flag history", "LOGGED", `${logs.length} Flagged events for one key: ${logs.map((l) => `[block ${l.blockNumber}, ${["None", "KeyMisuse", "ClaimUpheld"][Number(l.args.reason)]}, first=${l.args.firstFlag}]`).join(" ")}; flaggedAtBlock stays the first`);
-    for (const w of [s[4], s[5], s[6], s[8]]) await cash(c, w);
-    await mine(c.W); await c.pap.settleStake(f.dev.keyId).catch(() => {});
-    line("block-denominated windows", "STATED LIMIT", "REVEAL_WINDOW, CLAIM_GRACE and the 256-block anchor are counted in blocks (chain-dependent)");
+  it("16 no admin: exact function list, callbacks only from the oracle, no ETH", async () => {
+    const fns = c.pap.interface.fragments.filter((f) => f.type === "function").map((f) => `${f.name}${["view", "pure"].includes(f.stateMutability) ? " (view)" : ""}`).sort();
+    assert.deepEqual(fns, ["BOND (view)", "BURN (view)", "LIVENESS (view)", "PHOTO_WINDOW (view)", "REVEAL_WINDOW (view)", "accusations (view)",
+      "assertionDisputedCallback (view)", "assertionResolvedCallback", "attest", "attestersOf (view)", "commitClaim", "commits (view)", "credits (view)", "currency (view)",
+      "devices (view)", "forfeitCommit", "identifier (view)", "oo (view)", "records (view)", "refund", "register", "revealClaim", "revokeKey", "verify (view)", "withdrawCredit"]);
+    assert.equal(c.pap.interface.fragments.some((f) => f.payable), false);
+    const r1 = await rv(s[1].sendTransaction({ to: c.addr, value: 1n }), "receive");
+    const r2 = await rv(c.pap.connect(s[1]).assertionResolvedCallback(h("x"), true), "only oracle");
+    const r3 = await rv(c.pap.connect(s[1]).assertionDisputedCallback.staticCall(h("x")), "only oracle");
+    // a third party's assertion that names Paprika as callback recipient changes nothing
+    await send(c.token.connect(s[9]).approve(await c.oo.getAddress(), ethers.MaxUint256));
+    const args = ["0x01", s[9].address, c.addr, ethers.ZeroAddress, 1, await c.token.getAddress(), P.BOND, ethers.ZeroHash, ethers.ZeroHash];
+    const ar = await send(c.oo.connect(s[9]).assertTruth(...args));
+    const id = c.oo.interface.parseLog(ar.logs.find((l) => l.address === c.oo.target && c.oo.interface.parseLog(l)?.name === "AssertionMade")).args.assertionId;
+    await send(c.oo.connect(s[9]).disputeAssertion(id, s[9].address));
+    await vote(c, id, true);
+    assert.equal((await c.pap.accusations(id)).open, false);
+    CASE("no admin", `external functions (exact list): ${fns.join(", ")}; nothing is payable and plain ETH reverts (no ${r1} function); the UMA callbacks only from the oracle: "${r2}" / "${r3}"; a third party's assertion naming Paprika as callback recipient is ignored`, "no owner, no upgrade, no treasury");
   });
 
-  it("18 registration takes only (x, y, popSig); the contract has no admin or approval function", async () => {
-    const reg = c.pap.interface.getFunction("register");
-    assert.deepEqual(reg.inputs.map((i) => `${i.type} ${i.name}`), ["bytes32 x", "bytes32 y", "bytes popSig"]);
-    const fns = c.pap.interface.fragments.filter((f) => f.type === "function").map((f) => f.name).sort();
-    assert.deepEqual(fns, ["BURN", "CLAIM_BOND", "CLAIM_GRACE", "LIVENESS", "MIN_STAKE", "REVEAL_WINDOW", "REWARD_BPS", "UNBONDING_PERIOD",
-      "assertionDisputedCallback", "assertionResolvedCallback", "attest", "claimCredit", "claims", "commitBondsHeld", "commitClaim", "commits",
-      "credit", "device", "forfeitCommit", "inbox", "openClaimIds", "oracle", "proveKeyMisuse", "records", "register", "requestUnbond",
-      "revealClaim", "settleStake", "verify", "withdraw"]);
-    const writes = c.pap.interface.fragments.filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability)).map((f) => f.name).sort();
-    assert.deepEqual(writes, ["assertionResolvedCallback", "attest", "claimCredit", "commitClaim", "forfeitCommit", "proveKeyMisuse", "register", "requestUnbond", "revealClaim", "settleStake", "withdraw"]);
-    const vOut = c.pap.interface.getFunction("verify").outputs[0].components.map((x) => x.name);
-    const dOut = c.pap.interface.getFunction("device").outputs[0].components.map((x) => x.name);
-    CASE("who can register", `anyone: register(${reg.inputs.map((i) => i.type + " " + i.name).join(", ")}) with the stake; no approval step exists`, `external functions (exact list): ${fns.join(", ")}; state-changing: ${writes.join(", ")}; verify fields: ${vOut.join(", ")}; device fields: ${dOut.join(", ")}`);
+  it("17 a depositor that cannot receive tokens blocks nobody", async () => {
+    const owner = s[1], blockedDep = s[9], griefer = s[4], hunter = s[3];
+    const d = await register(c, owner);
+    await attest(c, blockedDep, d.dev, h("p17")); await attest(c, blockedDep, d.dev, h("p17 fake"));
+    await send(c.token.setBlocked(blockedDep.address, true));
+    const k = await accuse(c, griefer, h("p17"), d.dev.keyId); await vote(c, k.id, false);
+    const k2 = await accuse(c, hunter, h("p17 fake"), d.dev.keyId); await vote(c, k2.id, true);
+    const v = await c.pap.verify(h("p17"), d.dev.keyId);
+    await warpTo(Number(v.refundableAt)); await send(c.pap.refund(h("p17"), d.dev.keyId));
+    const cr = await c.pap.credits(blockedDep.address);
+    const r1 = await rv(c.pap.connect(blockedDep).withdrawCredit(), "token call failed");
+    assert.equal(cr, P.BOND + (c.payout - P.BOND)); assert.equal(await cash(c, hunter), c.payout);
+    CASE("depositor that cannot receive tokens", `the token refuses transfers to it (blacklist); a rejected accusation, the refund and a proven accusation on its other photo all settle; only its own withdrawCredit fails ("${r1}")`, `it is credited BOND + (BOND - fee) = ${F(cr)}, which stays in Paprika (counted in the invariant); the hunter collects 2 x BOND - fee = ${F(c.payout)}`);
   });
 
-  it("19 front-running a misuse proof: a copied proof is useless", async () => {
-    const owner = s[1], prover = s[2], thief = s[3];
-    const k = await register(c, owner); await attest(c, owner, k.dev, h("mp"));
-    const sig = k.dev.sign(msgExtK(c, k.dev.keyId, prover.address));
-    const rT = await reverts(c.pap.connect(thief).proveKeyMisuse.staticCall(k.dev.keyId, sig), "bad sig");
-    const p0 = await balOf(prover), t0 = await balOf(thief);
-    await automine(false);
-    const t1 = await c.pap.connect(prover).proveKeyMisuse(k.dev.keyId, sig, { gasPrice: 2e9, gasLimit: 300000 });
-    const t2 = await thief.sendTransaction({ to: c.addr, data: (await ethers.provider.getTransaction(t1.hash)).data, gasPrice: 3e9, gasLimit: 300000 });
-    await mine(1); await automine(true);
-    const st1 = (await ethers.provider.getTransactionReceipt(t1.hash)).status, st2 = (await ethers.provider.getTransactionReceipt(t2.hash)).status;
-    assert.equal(st1, 1); assert.equal(st2, 0);
-    await mine(c.W); await c.pap.settleStake(k.dev.keyId);
-    const got = await cash(c, prover);
-    assert.equal(got, c.STAKE / 2n); assert.equal(await c.pap.credit(thief.address), 0n);
-    line("front-running (copy a pending misuse proof)", "FAILS", `the proof names its sender; the copy (mined first, higher gas price) reverts (status ${st2}, "${rT}"), the original succeeds (status ${st1})`);
-    CASE("mempool copy of a misuse proof", `the copier's tx is mined first and reverts ("${rT}": the signed message names the prover); the original flags the key and is paid after ${c.W} blocks`, `prover +${F(got)} (net of gas ${F((await balOf(prover)) - p0)}); copier ${F((await balOf(thief)) - t0)} (gas only)`);
+  it("18 constructor checks and a second deployment with other parameters", async () => {
+    const Fy = await ethers.getContractFactory("Paprika", s[0]);
+    const oo = await c.oo.getAddress(), tk = await c.token.getAddress();
+    const bad = [[P.MIN_BOND - 1n, P.WINDOW, P.REVEAL, P.LIVENESS], [0n, P.WINDOW, P.REVEAL, P.LIVENESS], [P.BOND, 0, P.REVEAL, P.LIVENESS], [P.BOND, P.WINDOW, 0, P.LIVENESS], [P.BOND, P.WINDOW, P.REVEAL, 0]];
+    for (const x of bad) await rv(Fy.deploy(oo, tk, ...x), "bad params");
+    const P2 = { ...P, BOND: P.BOND * 3n, WINDOW: P.WINDOW / 7, REVEAL: P.REVEAL / 6 };
+    const c2 = await deploy(P2); extra.push(c2);
+    const w = await snap(c2, [s[1], s[3]]);
+    const d = await register(c2, s[1]);
+    const a = await attest(c2, s[1], d.dev, h("p18")), a2 = await attest(c2, s[1], d.dev, h("p18 b"));
+    assert.equal(a.until - (await ethers.provider.getBlock(a.r.blockNumber)).timestamp, P2.WINDOW);
+    const k = await accuse(c2, s[3], h("p18"), d.dev.keyId); await vote(c2, k.id, true);
+    await warpTo(a2.refundableAt); await send(c2.pap.refund(h("p18 b"), d.dev.keyId));
+    assert.equal(await w(s[3]), c2.payout - P2.BOND); assert.equal(await w(s[1]), -P2.BOND);
+    CASE("constructor and parameters", `BOND below the oracle's minimum bond, BOND 0, PHOTO_WINDOW 0, REVEAL_WINDOW 0 or LIVENESS 0: each reverts "bad params"; a second deployment uses its own values`, `second deployment (BOND x3, PHOTO_WINDOW /7, REVEAL_WINDOW /6): attest locks ${F(P2.BOND)}; refundableAt = attest time + ${P2.WINDOW + P2.REVEAL + 1} s; winner net +BOND - fee = ${F(await w(s[3]))}; depositor of the fake -BOND = ${F(await w(s[1]))}`);
+  });
+  it("19 verification from a file alone: attestersOf(photoHash)", async () => {
+    const A = await register(c, s[1]), B = await register(c, s[2]);
+    const a = await attest(c, s[1], A.dev, h("shared file"));
+    await later(1000);
+    const b = await attest(c, s[2], B.dev, h("shared file"));
+    const list = [...(await c.pap.attestersOf(h("shared file")))], none = [...(await c.pap.attestersOf(h("unknown file")))];
+    assert.deepEqual(list, [A.dev.keyId, B.dev.keyId]); assert.deepEqual(none, []);
+    gasLog["attestersOf (view, eth_estimateGas, 2 keys)"] = await c.pap.attestersOf.estimateGas(h("shared file"));
+    const k = await accuse(c, s[3], h("shared file"), A.dev.keyId); await vote(c, k.id, true);
+    const vA = await c.pap.verify(h("shared file"), A.dev.keyId), vB = await c.pap.verify(h("shared file"), B.dev.keyId);
+    assert.equal(vA.state, 4n); assert.equal(vB.state, 1n); assert.equal(vB.lockedDeposit, P.BOND); assert.equal(vB.depositor, s[2].address);
+    assert.equal(Number(vB.accusableUntil) - Number(vA.accusableUntil), b.until - a.until);
+    await warpTo(b.refundableAt); await send(c.pap.refund(h("shared file"), B.dev.keyId));
+    CASE("verification from a file alone", `a verifier hashes the file, calls attestersOf(hash), then verify(hash, keyId) for each key; two devices attested the same file: both key ids are returned in order; an unknown hash returns []`, `${list.length} keys; A's record proven Fake (lockedDeposit ${F(vA.lockedDeposit)}), B's record independent: ${ST[vB.state]}, its own depositor, deposit BOND = ${F(vB.lockedDeposit)} and window (${b.until - a.until} s later), refunded on its own schedule`);
   });
 });
 
 after(async () => {
-  console.log("\n      GAS Paprika (gasUsed, optimizer 200 runs, hardfork osaka; settle rows = MockArbiter.settleAssertion incl. the callback)");
-  for (const [k, g] of Object.entries(gasLog)) console.log(`        ${k.padEnd(40)} ${g}`);
+  console.log("\n      GAS Paprika with MockOptimisticOracleV3 (gasUsed, optimizer 200 runs, hardfork osaka; oracle rows include the mock's own work)");
+  for (const [k, g] of Object.entries(gasLog)) console.log(`        ${k.padEnd(62)} ${g}`);
   console.log("\n      SIZE (non-empty, non-comment lines of Solidity; deployed bytecode bytes)");
   const loc = (f) => fs.readFileSync(f, "utf8").split("\n").filter((l) => l.trim() && !l.trim().startsWith("//")).length;
-  for (const n of ["Paprika", "MockArbiter"]) console.log(`        ${n.padEnd(24)} ${String(loc(path.join(__dirname, "..", "contracts", n + ".sol"))).padStart(4)} lines  ${String(((await artifacts.readArtifact(n)).deployedBytecode.length - 2) / 2).padStart(6)} bytes`);
+  for (const [n, f] of [["Paprika", "Paprika.sol"], ["MockOptimisticOracleV3", "test/MockOptimisticOracleV3.sol"], ["TestToken", "test/TestToken.sol"]])
+    console.log(`        ${n.padEnd(24)} ${String(loc(path.join(__dirname, "..", "contracts", f))).padStart(4)} lines  ${String(((await artifacts.readArtifact(n)).deployedBytecode.length - 2) / 2).padStart(6)} bytes`);
 });

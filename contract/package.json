@@ -2,10 +2,15 @@
   "name": "paprika",
   "private": true,
   "type": "commonjs",
-  "description": "Paprika contract on a local Hardhat chain (osaka, P-256 precompile): scenario/attack suite and randomised stateful test",
-  "scripts": { "test": "hardhat test" },
+  "description": "Paprika contract with UMA's Optimistic Oracle V3 on a local Hardhat chain (osaka, P-256 precompile)",
+  "scripts": {
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy-local.js --network localhost"
+  },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@uma/contracts-node": "^0.4.28",
     "ethers": "^6.17.0",
     "hardhat": "^2.29.2"
   }

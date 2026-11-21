@@ -1,68 +1,86 @@
-# Paprika: what happens in each case
+# Paprika: cases, costs and limits
 
-All amounts in ETH, taken from `output/2026-11-20-run.txt` (CASE and ATTACK lines). "Net" = after the gas the party
-paid in the test (gas price of the local Hardhat chain, about 1 gwei), so it differs from the round number by a few
-millionths. Parameters: stake S = 0.25 (minimum), reward share 50%, claim bond B = 0.11, unbonding 30 days,
-reveal window and misuse escrow 50 blocks, claim grace 100 blocks. The oracle is the test mock `MockArbiter`
-(same payout rule as UMA OOv3: the loser's bond goes half to the winner, half as a fee to UMA's Store; in this
-table that fee counts as burned, since nobody in the protocol gets it). Burned ETH goes to 0x...dEaD.
+Measured in `output/2026-11-21-run.txt`. There are two suites:
 
-Where an upheld claim pays out, the 0.25 stake splits like this: 0.11 is reserved for the dispute (0.055 to the
-claimant, 0.055 oracle fee); the remaining free 0.14 is slashed (0.07 to the claimant, 0.07 burned). The claimant is
-credited 0.11 (own bond back) + 0.055 + 0.07 = 0.235, i.e. +0.125 on the 0.11 it put in.
+- `test/paprika.integration.test.js` runs against the **real UMA Optimistic Oracle V3** stack, deployed from `@uma/contracts-node`. Only the vote is UMA's `MockOracleAncillary`.
+- `test/paprika.test.js` runs against `MockOptimisticOracleV3`, which has the same interface and payouts.
 
-Test names are the `it(...)` titles in `test/paprika.test.js` (suite "Paprika").
+Parameters: `BOND` = 100 tokens (UMA's minimum bond for a final fee of 50), `PHOTO_WINDOW` = 7 days,
+`REVEAL_WINDOW` = 1 hour, `LIVENESS` = 7200 s. `fee = burnedBondPercentage x BOND` = 0.5 x 100 = 50 tokens; it goes
+to UMA's Store. "Net" means the change in tokens plus uncollected credit.
 
-| # | case | who does what | what the contract does | who gains and loses how much | test name |
-|---|------|---------------|------------------------|------------------------------|-----------|
-| 1 | Honest path | Owner registers a device key (stake 0.25 + proof of possession signed by the key, naming the owner). The device signs photo hash + recent block hash; a relayer submits it. Anyone calls `verify(photoHash, keyId)`. | Stores the key as Active, records the photo with its anchor block and recorded block. `verify` returns, field by field: `anchorBlock` 3, `recordedBlock` 4 (the photo existed between these blocks), `verdict` None, `status` Active, `flaggedAtBlock` 0, `flagReason` None, `stake` 0.25, `recordedBeforeFlag` true, `stakeAtRisk` 0.25 (free stake a successful challenger could win), `withdrawnAtBlock` 0, `misusePending` false, `openClaims` 0, `reservedForClaims` 0. | Owner: 0.25 locked + 0.000246 gas. Relayer: 0.000102 gas. Nobody gains. | 0 honest path: register, attest, verify, claims both ways, misuse proof, unbond, withdraw |
-| 2 | One pixel changed | Someone asks `verify` about a modified file (different sha256), same key. | Nothing is stored for that hash: `recordedBlock` 0, `anchorBlock` 0, `recordedBeforeFlag` false. (`status` Active and `stake` 0.25 are still shown, but they describe the key, not the photo.) | No ETH moves. | 0 honest path: ... |
-| 3 | A flagged party comes back with a new key | The owner of a flagged key tries to register the same key again, then registers a fresh key. | Old key: "key used" (a key can be registered once, ever). The new key is accepted like any newcomer; nothing links it to the old one. | Cost of coming back: a new stake 0.25 + 0.000148 gas (146,075 gas). | 1 ban evasion |
-| 4a | Registered software key attests synthetic bytes | A forger registers a key that lives in software and attests a generated image. | Accepted: the contract cannot tell a camera from software. | Forger: stake 0.25 at risk + gas. | 2 synthetic content and its punishment |
-| 4b | ... then a claim with public evidence (upheld) | A claimant commits, then reveals a claim (bond 0.11) that the record is not a genuine capture. | The contract asserts the claim at the oracle and disputes it itself with 0.11 of the device stake (so every claim goes to a vote). The vote upholds: record marked UpheldFake, key Flagged (ClaimUpheld), stake paid out. | Claimant +0.124516 net (credited 0.235 for its 0.11 bond). Owner -0.25. Burned 0.07 (0xdEaD) + 0.055 (oracle fee). | 2 synthetic content and its punishment |
-| 5a | False claim against an honest device (vote rejects) | A griefer claims an honest record is fake; the owner does nothing. | Contract contests with 0.11 of the stake; vote rejects; device stays Active; the winnings go into the device stake. | Claimant -0.110453 (bond 0.11 + gas). Owner +0.055 (stake 0.25 -> 0.305). Oracle fee 0.055. | 5 griefing an honest device (unwatched) |
-| 5b | ... and if the vote errs | (a) Vote wrongly upholds the false claim. (b) Vote wrongly rejects a true claim. | The contract follows the vote; it cannot tell. (a) Exactly row 4b: record UpheldFake, key Flagged; earlier records stay returned with `recordedBeforeFlag` true (row 15). (b) Exactly row 5a. | (a) Honest owner -0.25; claimant +0.125 minus gas; burned 0.07 + 0.055. (b) True claimant -0.11; forger's stake +0.055. Protection is only as good as the vote. | 2 synthetic content ...; 5 griefing ...; 6 retroactive effect ... |
-| 6 | Owner tries to profit by accusing itself | 5 keys flagged by the owner's own second account via proof of key misuse; 5 keys via an upheld claim by the second account. | Pays normally each time. Contract balance before and after: 1.0 -> 1.0 (no treasury to drain). | Owner + second account, per key: misuse path -0.125269, claim path -0.125863 (both = -(1 - 0.5) x 0.25 - gas). Totals for 5 keys: -0.626346 and -0.629317. | 4 self-report loop; effective penalty (1 - alpha) x S |
-| 7 | Owner slashes itself before anyone accuses it | The owner's second account proves key misuse before any claim is committed; later a hunter commits a claim on a fake record. | Flags at once; after 50 blocks pays the prover 50% of the free stake. The hunter's later claim has no priority: it still reserves 0.11 and wins only the oracle split. | Owner + second account recover 0.069877 of 0.25 (net -0.180123); with no later claim they recover 0.125 (lose 0.125 + gas, row 6). Later hunter +0.054553 net. Burned 0.07 + 0.055 fee. Same block as the hunter's commit: tie goes to the proof (recovered 0.069716; hunter +0.054485). One block after the commit: the claim wins (hunter credited 0.235, net +0.124553; prover 0; whole 0.25 lost). | 12 reward sniping: open claim, hidden commit, self-slash before any commit |
-| 8 | Copying a pending transaction from the mempool | Thief copies (a) an attestation, (b) a registration, (c) a claim commitment, (d) a proof of key misuse, each with a higher gas price. | (a) The copy records the HONEST key (the honest tx then reverts "exists"). (b) Reverts: the proof of possession names the sender. (c) The copy is stored but only its sender can reveal, and the commitment names the honest claimant: "no commit"; the honest reveal opens the claim. (d) The copy is mined first and reverts "bad sig" (the signed message names the prover); the original succeeds. | Honest parties lose nothing. Copier: gas; in (c) also its 0.11 bond (burned when forfeited); in (d) -0.000116 gas. Prover in (d): +0.125 (net 0.124782). | 3 front-running: attest copy, same hash, register copy, commit copy (misuse-proof copy: test 19); 19 front-running a misuse proof: a copied proof is useless |
-| 9 | Claim against a photo the device never attested | Claimant commits and reveals a claim naming a key and a hash with no record. | Reveal reverts "no record". The commit cannot be used; after 50 blocks anyone forfeits it. | Claimant -0.11 (burned) + gas. Owner 0. | 9 key squatting; claim on an unattested photo |
-| 10 | Proof of key misuse by someone who obtained the key | Holder of the key signs "PAPRIKA/EXTRACTED" naming its own address and calls `proveKeyMisuse`. | Flags the key at once (KeyMisuse). Reward escrowed: `settleStake` reverts "not settleable" for 50 blocks (credit 0 meanwhile; `misusePending` true); then anyone settles. A claim committed in an EARLIER block has priority (claimant credited 0.235, prover 0); if that claim is rejected, the prover is paid. Earlier records stay: e.g. `recordedBlock` 1453, `status` Flagged, `flaggedAtBlock` 1454, `flagReason` KeyMisuse, `recordedBeforeFlag` true, `stakeAtRisk` 0. | Prover +0.125 after the window (50% of the free stake); owner -0.25; burned 0.125. After a rejected earlier claim: prover 0.1525 (the stake had grown to 0.305). | 13 stolen honest key; several claims per device; 0 honest path ...; 12 reward sniping ... |
-| 11 | Stolen key of an honest owner | Thief extracts an honest device's key and proves misuse. | Same as row 10: the contract cannot tell theft from extraction by the owner. | Thief +0.125; honest owner -0.25; burned 0.125. Accepted custody risk. Earlier records keep `recordedBeforeFlag` true, but the reason KeyMisuse tells a verifier the time of theft is unknown. | 13 stolen honest key; several claims per device |
-| 12 | Owner withdraws after unbonding, nobody claimed | Owner calls `requestUnbond`, waits 30 days, calls `withdraw`; afterwards someone claims against an old record. | Pays the stake back; the late claim is refunded (no stake left to contest). `verify` afterwards: `anchorBlock` 1140, `recordedBlock` 1141, `verdict` None, `status` Retired, `flaggedAtBlock` 0, `flagReason` None, `stake` 0, `recordedBeforeFlag` true, `stakeAtRisk` 0, `withdrawnAtBlock` 1144, `misusePending` false, `openClaims` 0, `reservedForClaims` 0. Withdraw is refused with an open claim ("open claims"), for 100 blocks after the last claim settles ("claim grace"), and if flagged during unbonding ("not retired"). | Owner gets 0.25 back (0.249960 net). Late claimant refunded 0.11 (loses gas only). | 10 withdrawal races; 10c optimistic finality |
-| 13 | Owner fills its own claim slots to block others | Forger retires its key; its second account files weak claims on 2 harmless records, filling both slots (0.25 / 0.11 = 2); a hunter's real claim is refunded. When the weak claims are rejected, the forger settles both and calls `withdraw` in the same block. | Withdraw reverts "claim grace"; the hunter's reveal in that block opens (slots free again) and is upheld. With only one weak claim, the hunter's claim opens next to it. | Forger + second account -0.221676 (whole stake lost, weak bonds' net included). Hunter +0.179073. What it buys: delay only, costing 0.055 per slot per vote (0.11 per vote period for 2 slots); never a withdrawal without a 100-block period with no open claim. | 14 claim-slot squatting: partial and full |
-| 14a | Claim never revealed | Claimant commits and does not reveal. | After 50 blocks anyone calls `forfeitCommit` (before: "window open"; twice: "no commit"). | Claimant -0.11 (burned). Owner 0. | 15 commit-reveal mechanics |
-| 14b | Claim revealed late (or too early) | Reveal after 50 blocks; reveal in the commit block. | "too late" (then forfeited as in 14a); "too early". A reveal by another account or with a wrong salt: "no commit". A second claim on a record that already has one is refunded, not queued. | Late: -0.11 (burned). Second claimant: refunded 0.11. | 15 commit-reveal mechanics |
-| 14c | Claimant that cannot receive ETH | A contract that refuses ETH files a claim; it is upheld. | Settlement goes through (oracle payout lands in Paprika, which credits the claimant); the device stake is settled; only the claimant's own `collect()` fails ("send"). | Claimant credited 0.235 (cannot collect, by its own choice). Nobody else blocked. | 17 regressions from the independent review |
-| 15 | 100 earlier records after a flag | Owner records 100 photos, then one fake that is judged by an upheld claim. | The key is flagged; the judged photo is UpheldFake; all 100 earlier records are still returned. | 100/100 returned with `recordedBlock` > 0, `recordedBeforeFlag` true, `verdict` None. | 6 retroactive effect: 100 earlier records |
-| 16 | Two upheld claims on one key | Two claims on two records; the later-committed one is revealed and settled first. | Payout waits until no claim with an earlier commit is open; the earliest commit takes the stake share; the other gets only its oracle payout. A 2nd claim on a record with an open claim, and a claim after the slash, are refunded. | Earlier-committed claimant credited 0.305; later 0.165; refunds 0.22 (two bonds). | 4b double rewards; first upheld by COMMIT order takes the stake |
-| 17 | Many claims against one device | Griefer files 3 claims on a retiring device. | Each open claim reserves 0.11 of the free stake: 2 fit, the 3rd is refunded; withdraw waits for the votes. `verify` shows free and reserved stake separately (2 open claims: `stakeAtRisk` 0.03, `reservedForClaims` 0.22). | Griefer -0.11 per rejected claim (0.055 to the device stake, 0.055 fee). | 13 stolen honest key; several claims per device; 17 regressions from the independent review |
-| 18 | Replay, other key, other chain, stale or future anchor | Re-submit an attestation; sign with another key; sign for another chain; anchor older than 256 blocks or in the future. | Rejected: "exists", "bad sig", "bad sig", "anchor", "anchor". | No ETH moves. | 7 replay / domain / anchors |
-| 19 | Signature tricks | High-s twins; a signature naming another key; each signature type (register / capture / misuse) used at every other entry point. | All rejected ("bad sig" / "bad pop" / "exists"). The three signed messages have distinct labels and lengths (120, 163, 121 bytes). | No ETH moves. | 11 signature malleability; 16 signature hygiene: low-s, keyId binding, cross-domain reuse, layouts |
-| 20 | Admin or treasury | Look for an admin function; send ETH directly. | None exist; plain ETH from anyone but the oracle: "only oracle". | No ETH moves. | 8 no admin |
-| 21 | Every decision on a key is logged | A key gets an upheld claim, a misuse proof, a second upheld claim. | One `Flagged` event per decision (3); `flaggedAtBlock` stays the first. | - | 17 regressions from the independent review |
-| 22 | Who can register | Anyone with a key and the stake calls `register(bytes32 x, bytes32 y, bytes popSig)`. | No approval step exists: the only inputs are the public key and the key's own signature naming the sender. The complete list of state-changing functions is: `register`, `attest`, `proveKeyMisuse`, `settleStake`, `commitClaim`, `revealClaim`, `forfeitCommit`, `assertionResolvedCallback` (oracle only), `requestUnbond`, `withdraw`, `claimCredit`; none is restricted to an admin. | - | 18 registration takes only (x, y, popSig); the contract has no admin or approval function |
+## With the real UMA oracle
 
-## Gas (gasUsed, optimizer 200 runs, hardfork osaka)
+| case | what happens | who gains / loses (formula = measured) |
+|------|--------------|-----------------------------------------|
+| Honest path | A key registers for free. A relayer attests a photo and locks `BOND`. `refund` reverts "too early" until `accusableUntil + REVEAL_WINDOW` has passed, then a stranger triggers it. The record stays, as Refunded. | Relayer: locks `BOND` = 100, net 0. |
+| One pixel changed | `attestersOf(modified hash)` = `[]`, and `verify` finds nothing (state None). | No tokens move. |
+| True accusation | Commit, then reveal: Paprika calls `assertTruth` and `disputeAssertion` at OOv3 (the oracle holds 200). The vote is TRUE and `settleAssertion` runs. The photo becomes Fake and the device Flagged (FakeProven). | Accuser credited `2 x BOND - fee` = 150 (net `+BOND - fee` = +50). Depositor: `-BOND` = -100. Store: `+fee` = +50. |
+| False accusation | The vote is FALSE. The deposit is restored, the record returns to Attested, and `accusableUntil` is extended by the time spent under accusation (172,802 s). The device is untouched, and the refund works afterwards. | Accuser: `-BOND` = -100. Depositor: `+BOND - fee` = +50 (deposit returned). Store: `+fee` = +50. |
+| Second accusation while one is open | The second reveal reverts "accusation open". The second commitment stays valid until it expires; after the first is voted FALSE, it is revealed and voted TRUE. | One accusation per photo at a time. |
+| Self-accusation | The forger's second account accuses the forger's photo and wins. | Net `-fee` = -50. This is the real penalty for a fake. |
+| Key revocation | A copy from another address reverts "bad sig". The key holder revokes. The revoked device's `attest` reverts "not active". Its record stays Attested and is refunded. | No tokens move. |
+| Signatures and replay | Each attempt is rejected: replay "exists"; another key, another chain, high-s, or a proof-of-possession signature used as a capture: "bad sig"; future anchor "anchor"; a key registered twice "key used"; a callback not from the oracle "only oracle". | No tokens move. |
 
-| function | gas | note |
-|----------|-----|------|
-| `register` | 146,111 | first registration of the run; varies by about +-12 gas per zero byte in the random key/signature calldata (row 3: 146,075) |
-| `attest` | 63,980 | relayed, no deposit (+-12 between runs: calldata noise) |
-| `verify` (view) | 36,027 | `eth_estimateGas`; free when called off-chain |
-| `commitClaim` | 67,915 | same calldata noise (random commitment) |
-| `revealClaim` | 385,165 | includes the oracle assertion and the contract's own dispute |
-| `assertionResolvedCallback`, claim upheld | 239,036 | whole `MockArbiter.settleAssertion` tx incl. flag + slash |
-| `assertionResolvedCallback`, claim rejected | 131,343 | whole `settleAssertion` tx |
-| `claimCredit` | 28,602 | |
-| `proveKeyMisuse` | 94,563 | flag + escrow |
-| `settleStake` | 68,724 | after the escrow window |
-| `requestUnbond` | 50,980 | |
-| `withdraw` | 40,407 | |
-| `forfeitCommit` | 39,253 | |
+The real oracle behaved exactly like the mock. It pays the asserter and the disputer (both are Paprika)
+`2 x bond - fee`, sends `fee` to the Store, and calls `assertionResolvedCallback` after paying. The identifier is
+`ASSERT_TRUTH`, and the bonds are pulled with `transferFrom` from Paprika, which approves `2 x BOND`. No change to
+the contract or the mock was needed.
 
-`assertionDisputedCallback` runs inside `revealClaim`; `receive` accepts ETH only from the oracle (inside settlement).
+## With the mock oracle (19 tests)
 
-## Size
+The same cases, plus these:
 
-`contracts/Paprika.sol`: 271 lines of code (non-empty, non-comment; includes the two oracle interfaces, 20 lines),
-12,736 bytes deployed (limit 24,576).
+- **Refund timing.** Repeated self-accusations cost `-ROUNDS x fee` (3 rounds = -150) and push the window out by exactly the time spent accused.
+- **The vote errs.** An honest depositor loses `BOND`, and its key stays flagged.
+- **A flagged party comes back with a new key** for free.
+- **Mempool copies.** A copied `attest` makes the copier the depositor of the honest key's record. A copied `register` reverts. A copied commitment blocks the honest commit for one block, and the copier loses `BOND`.
+- **A reveal seen in the mempool.** The forger cannot get in first without a commitment from an earlier block.
+- **Insurance** (see Known limits).
+- **Invalid accusations** each revert or forfeit `BOND` to `0x…dEaD`.
+- **Griefing N = 5.** The griefer pays `-N x BOND` = -500, the depositor gets `+N x (BOND - fee)` = +250, and the refund is delayed by N x the vote time.
+- **A depositor that cannot receive tokens** blocks nobody.
+- **Constructor checks.** A bond below UMA's minimum reverts "bad params".
+- **`attestersOf`.** Two devices that attested the same file are both listed, and each record is independent.
+
+## Gas (gasUsed)
+
+| function | real OOv3 | mock |
+|---|---|---|
+| `register` | - | 101,860 |
+| `attest` (incl. token pull and `attestersOf` index) | - | 169,388 |
+| `commitClaim` | - | 89,174 |
+| `revealClaim` (assert + dispute) | **673,488** | 390,047 |
+| `settleAssertion` -> callback, fake proven | **165,524** | 130,276 |
+| `settleAssertion` -> callback, rejected | **140,870** | 142,628 |
+| `refund` | - | 55,940 |
+| `forfeitCommit` | - | 49,172 |
+| `revokeKey` | - | 44,161 |
+| `withdrawCredit` | - | 37,244 |
+| `verify` / `attestersOf` (view, estimateGas) | - | 31,756 / 28,836 |
+
+Size: `Paprika.sol` 219 code lines, 11,157 bytes deployed.
+
+## Design choices made where the brief was silent
+
+1. **The refund comes strictly after the last possible reveal** (`> accusableUntil + REVEAL_WINDOW`), so a refund can never get in ahead of a valid accusation.
+2. **A commitment must come from a block at or after the photo's own block.** This blocks commitments made before the photo existed.
+3. **An unknown assertion id in `assertionResolvedCallback` is ignored, not rejected.** Reverting there would block UMA's settlement of a third party's assertion that names Paprika as its callback recipient.
+4. **A reveal on a Fake photo gets its bond back only after passing the window checks.**
+5. **A revoked device keeps its first flag.** A fake proven afterwards does not change the reason (KeyRevoked).
+6. **Token transfers accept tokens that return nothing as well as tokens that return `true`.**
+
+## Known limits
+
+- **FLAW: an accusation can outlast the commitments it blocks.** While one accusation is open (UMA's vote takes days), every other commitment on that photo expires after `REVEAL_WINDOW` (1 hour) and is forfeited. A forger holding its own commitment can reveal first when a hunter's reveal appears, and the hunter then loses `BOND` (mock test 10, scenarios B and C). The forger's cost is `fee`. Simplest fix, not applied: while the photo is Accused, return the bond on reveal instead of reverting.
+- **Insurance residual.** When the vote is short, the hunter only gets its bond back (net 0). Unused insurance costs `BOND` per `REVEAL_WINDOW` if forfeited, or `fee` per round if revealed as a junk self-accusation.
+- **Self-accusation makes the penalty for a fake `fee`, not `BOND`.** Repeated rejected self-accusations cost `fee` per round and do not make the window expire, because the window is extended each time.
+- **One accusation per photo at a time.**
+- **A flagged party returns for free with a new key.** Registration costs nothing.
+- **After `accusableUntil + REVEAL_WINDOW` a fake can no longer be punished.**
+- **The outcome is only as good as UMA's vote.** A wrong TRUE costs an honest depositor `BOND` and its key.
+- **Griefing delays the refund by the vote time of each false accusation.** Each costs the griefer `BOND`.
+- **`attestersOf` lists grow without limit.** Anyone with a free key can attach records to a famous hash, at a refundable `BOND` each.
+- **A copied commitment that lands first blocks the honest one** (one block of delay; the copier loses `BOND`).
+- **Tokens sent to Paprika outside the protocol stay there for good.**
+- **Not tested: a missing P-256 precompile.** In the code, every signature check then fails.

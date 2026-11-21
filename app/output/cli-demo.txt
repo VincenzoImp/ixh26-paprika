@@ -1,0 +1,110 @@
+Demo on chain 31337: B = 100 DBT, f = 0.5, challenge period 3600 s, reveal period 600 s
+
+== 1. Device -> Register (free)
+   keyId 0x6ca4bed7f41260e6269d4f5add24e0198a89a35a30345c997a8e167bb463ff4f
+  money moved: none
+   PASS
+
+== 2. Capture -> sign & submit (deposit B)
+   photoHash 0xfa7620310acc1a4582d0cd3db3897ef8779f32b7cd341d2626c2b78ab4bb7f10, anchor block 22, 2 tx
+  money moved:
+    photographer         -100 DBT
+    Paprika              +100 DBT
+   PASS
+
+== 3. Verify this photo
+  record  photo 0xfa762031...bb7f10  key 0x6ca4bed7...63ff4f
+    state            attested
+    signed between   block 22 and block 24 (recorded 2026-11-21T00:06:20Z)
+    depositor        0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+    deposit locked   100 DBT
+    accusable until  2026-11-21T01:06:20Z   refundable at 2026-11-21T01:16:21Z
+    device           active
+   A registered device signed this exact file between block 22 and block 24 and a deposit was at stake.
+   PASS
+
+== 4. Negative case 1: one pixel changed
+   0 record(s) for the changed file
+   PASS
+
+== 5. Accuse -> Commit (bond B, only a hash on chain)
+   commitment 0x735b7c06cd3a06a176f93c98cf4a6afcabf578d83697939e05736234bcd77556
+  money moved:
+    accuser              -100 DBT
+    Paprika              +100 DBT
+   PASS
+
+== 6. Reveal -> UMA assertion, disputed at once
+   assertionId 0x573ef7592a905e6ac712d9dab450d4f7b8af5b147c96dab87a3f5c20f2b48fd3
+  money moved:
+    Paprika              -200 DBT
+    UMA OOv3             +200 DBT
+   PASS
+
+== 7. Negative case 2: vote 'evidence does not prove it' (simulated)
+   photographer withdrew 50 DBT
+  money moved:
+    photographer         +50 DBT
+    UMA Store            +50 DBT
+    Paprika              +100 DBT
+    UMA OOv3             -200 DBT
+   accuser net over steps 5-7: -100 DBT
+   PASS
+
+== 8. Advance time by one challenge period -> Refund
+   refund before the period ends -> error "too early"
+   advanced 4197 s, now 2026-11-21T01:16:23Z (refundable at 2026-11-21T01:16:23Z)
+  money moved:
+    photographer         +100 DBT
+    Paprika              -100 DBT
+   PASS
+
+== 9. Activity log
+   block   22  0xa4cfc6db193569a774415188fadc34f2be1564133c87e01f66d7cd5310c2807b  photographer Paprika.register
+   block   23  0xff6424af98de481956337d837f753468a59d00d557d7b824e4ac952eec1ef01e  photographer DBT.approve
+   block   24  0x2c7e256121c582dcc38efb8d3bf64babf0e071af0023a221e2653637cf850f63  photographer Paprika.attest
+   block   25  0x154ee8634119038fee4d621e084d041791828b83e84beb5e6f3fd73afb5c2135  accuser      DBT.approve
+   block   26  0x616ba751c44e063e9c7eca82069a9d8a51afa1318696e9bcad6a8f0bd2dd8f4a  accuser      Paprika.commitClaim
+   block   27  0x3487e180a15b991168fb085e49999307b5d4be584d481ea15cfef8a6c0b5dbe3  accuser      Paprika.revealClaim
+   block   28  0xed2d04a0b1519476c8199f51cf267a2c0b640eace380699e743ad16d3503c532  operator     UMA MockOracle.pushPrice (simulated vote)
+   block   29  0x68457aa5ce54d7ffe4caab25d5bbf89136a57aa826264a110115d1969f95d845  operator     UMA OOv3.settleAssertion
+   block   30  0xb753d1769b172cb20f14d61fa4bf40cbdc69fa616d11e1925a9aafc157baefac  photographer Paprika.withdrawCredit
+   block   32  0x53c5fa96e79177ec52179021b6c490d4b8784bc9cfc651708c4623140add001c  photographer Paprika.refund
+   block   33  0x92b37d33c50f1c2438104b06e94f91a007f3247c2cf3c1ff1a70dccf136165b6  photographer Paprika.withdrawCredit
+   PASS
+
+== 10. Optional: evidence PROVES the fake
+   accuser withdrew 150 DBT
+  money moved:
+    photographer         -100 DBT
+    accuser              +50 DBT
+    UMA Store            +50 DBT
+  record  photo 0xa77332e2...69f4a2  key 0x6ca4bed7...63ff4f
+    state            fake
+    signed between   block 33 and block 35 (recorded 2026-11-21T01:16:27Z)
+    depositor        0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+    deposit locked   0 DBT
+    accusable until  2026-11-21T02:16:27Z   refundable at 2026-11-21T02:26:28Z
+    device           flagged at block 40 (fake-proven); record predates the flag
+   flagged device tries to attest again -> error "not active"
+   PASS
+
+== 11. Optional: revoke key (no money moves)
+  money moved: none
+   re-register the revoked key -> error "key used"
+   PASS
+
+== Summary
+   PASS  1. Device -> Register (free)
+   PASS  2. Capture -> sign & submit (deposit B)
+   PASS  3. Verify this photo
+   PASS  4. Negative case 1: one pixel changed
+   PASS  5. Accuse -> Commit (bond B, only a hash on chain)
+   PASS  6. Reveal -> UMA assertion, disputed at once
+   PASS  7. Negative case 2: vote 'evidence does not prove it' (simulated)
+   PASS  8. Advance time by one challenge period -> Refund
+   PASS  9. Activity log
+   PASS  10. Optional: evidence PROVES the fake
+   PASS  11. Optional: revoke key (no money moves)
+
+Demo passed: 11 steps.
