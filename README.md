@@ -3,6 +3,8 @@
 Paprika records the origin of photos on Ethereum. A device key signs each photo together with a recent block hash.
 Each record carries a refundable deposit. Anyone can accuse a record with an equal bond, and UMA's open vote decides.
 
+▶ **Watch the 2-minute video:** https://youtu.be/YXVzxmXqm5s
+
 It answers Track 1 of [IXH26](https://www.decifris.it/ixh26/): *"Design a secure protocol that generalises to any
 device and guarantees authentic photo origin via decentralised blockchains technology."*
 

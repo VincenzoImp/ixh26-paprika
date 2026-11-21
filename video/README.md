@@ -1,5 +1,7 @@
 # Paprika video
 
+On YouTube: https://youtu.be/YXVzxmXqm5s
+
 `paprika.mp4`: 1920x1080, about 2 minutes, English narration. Made from the slides and screenshots of the running web app; voice synthesised with Piper (voice `en_US-ryan-high`), assembled with ffmpeg.
 
 ## Narration
