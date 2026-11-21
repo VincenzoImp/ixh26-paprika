@@ -13,11 +13,10 @@ that anyone can win by proving the photo fake. We do not claim that the file cam
 ## 2. The problem (40 s)
 
 The brief's example is close to a solution but centralised. It has three weaknesses: a single
-point of failure, cross-platform lock-in, and retroactive censorship. We wrote our original
-proposal as a contract, exactly as described, and attacked it. A pending attestation could be
-stolen from the mempool. The treasury could be drained by self-accusation. A device could be
-banned over a photo it never attested, or because nobody contested. The three phases stayed, and
-every phase was repaired.
+point of failure, cross-platform lock-in, and retroactive censorship. Paprika answers each one.
+There is no central list or authority, and accusations are decided by UMA's public vote. Anyone
+registers and verifies with public data. Records are never erased, and every decision is dated. No
+manufacturer is needed; the price is an economic guarantee, not a proof of physical origin.
 
 ## 3. The protocol at a glance (40 s)
 
@@ -32,7 +31,7 @@ and a UMA vote. Anyone can verify by hashing the file and asking the contract.
 There is no manufacturer, no committee, no owner and no treasury, and nobody keeps a revocation
 list. That single point of failure is removed. Lock-in is removed for vendors; what remains is one
 public chain and a node to read it. Records are never erased and flags carry their date. A flag
-stops new attestations, and every earlier record keeps its own deposit and window. Trust is moved,
+stops new attestations, and every record made before it keeps its own deposit and window. Trust is moved,
 not eliminated: it goes to UMA's vote for accusations, and to the deposit.
 
 ## 5. The mechanism (50 s)

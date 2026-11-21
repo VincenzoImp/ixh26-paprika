@@ -1,6 +1,4 @@
 % PAPRIKA pitch deck (7 slides, 5 minutes). Final protocol: docs/1-come-funziona.md.
-% Same preamble, colours and layout as the sibling ORIGO draft (crypto/slides/draft/deck-draft.tex),
-% so the two decks can be compared on equal terms.
 % Build: pdflatex deck-draft.tex (twice). Coordinates are millimetres from the top-left corner
 % of a 160 x 90 mm page.
 % Every number carries a comment with the file it comes from. NOT YET CLAIM-AUDITED.
@@ -44,7 +42,7 @@
 
 % Amounts and durations are deployment parameters (docs/1-come-funziona.md, "I parametri"):
 % the slides use the symbols B, T_photo, T_reveal, f. No gas figures: contract/output/cases.md
-% still describes the previous design (MockArbiter, separate deposit and bond) at the time of writing.
+% did not match the deployed contract at the time of writing.
 \newcommand{\Tp}{T_{\mathrm{photo}}}
 \newcommand{\Tr}{T_{\mathrm{reveal}}}
 \tikzset{box/.style={draw=ink,line width=0.8pt,rounded corners=2.5pt,align=left,font=\scriptsize,inner sep=2mm,anchor=north west}}
@@ -73,14 +71,11 @@
     \textbf{Single point of failure.} ``Apple maintains central revocation lists. A compromised CA invalidates millions of devices.''\\[2mm]
     \textbf{Cross-platform lock-in.} ``Non-Apple devices cannot natively verify claims without relying on Apple servers.''\\[2mm]
     \textbf{Retroactive censorship.} ``Historic photos become unverifiable if central servers shut down or alter public keys.''}
-  \card{81}{27}{70}{47}{lemon}{\ct{Our original proposal, attacked}
-    Register a key $\cdot$ attest $\mathrm{SHA}(photo)$ for a fee into a treasury $\cdot$ ban a device when UMA says a photo is fake.\\[1.5mm]
-    \textbf{Written as a contract, then attacked:}\\[0.8mm]
-    $\bullet$ a pending attestation stolen from the mempool\\[0.5mm]
-    $\bullet$ the treasury drained by self-accusation\\[0.5mm]
-    $\bullet$ a device banned for a photo it never attested\\[0.5mm]
-    $\bullet$ an honest device banned because nobody contested\\[1.5mm]
-    {\color{ink!70}Same three phases; every phase repaired.}} % docs/2-cosa-e-cambiato.md; prove/originale-attaccato/README.md
+  \card{81}{27}{70}{47}{mint}{\ct{Paprika's answer}
+    \textbf{Single point of failure:} no central list or authority; accusations are decided by UMA's public vote.\\[2mm]
+    \textbf{Cross-platform lock-in:} anyone registers and verifies, with public data.\\[2mm]
+    \textbf{Retroactive censorship:} records are never erased, and every decision is dated.\\[2.5mm]
+    \textbf{No manufacturer is needed.} The price: an economic guarantee, not a proof of physical origin.}
   \node[anchor=north west,inner sep=0pt,font=\scriptsize,text width=142mm,align=left] at \at{9}{79}
     {\textbf{Our test for each weakness:} is it \textbf{removed}, or only \textbf{moved} somewhere else?};
 \end{tikzpicture}
@@ -102,7 +97,7 @@
   \draw[flow] (att.east) -- (ok.west);
   \draw[flow] (att.east) -- (acc.west);
   \card{9}{63}{142}{17}{white}{\textbf{\color{accent}VERIFY: ANYONE, WITHOUT PERMISSION}\\[0.8mm]
-    Hash the file, ask the contract: the block window in which it was signed; the photo's state (deposit locked, under accusation, window passed, fake proven); the device's state. One changed pixel: no record.\\[0.5mm]
+    Hash the file, ask the contract: the block window in which it was signed; the photo's state (deposit locked, under accusation, window passed, fake proven); the device's state. Change one pixel: no record.\\[0.5mm]
     {\color{ink!70}One contract, no owner, no fee, no treasury. Parameters fixed at deployment.}}
 \end{tikzpicture}
 \end{frame}
@@ -113,7 +108,7 @@
   \head{Why a blockchain}{Removed, or moved?}
   \card{9}{27}{92}{14.5}{rose}{\textbf{Single point of failure} $\rightarrow$ \textbf{No manufacturer, no committee, no owner, no treasury.}\\ \textbf{Removed:} no revocation list kept by anyone. \textbf{Moved:} accusations are decided by UMA's vote.}
   \card{9}{44}{92}{14.5}{peach}{\textbf{Cross-platform lock-in} $\rightarrow$ \textbf{Anyone registers; verifying needs chain data and SHA-256.}\\ \textbf{Removed} for vendors. Remains: one public chain, and a node to read it.}
-  \card{9}{61}{92}{14.5}{lemon}{\textbf{Retroactive censorship} $\rightarrow$ \textbf{Records are never erased; flags are dated.}\\ \textbf{Removed} as erasure. A flag stops new attestations; every earlier record stays, with its own deposit and window.}
+  \card{9}{61}{92}{14.5}{lemon}{\textbf{Retroactive censorship} $\rightarrow$ \textbf{Records are never erased; flags are dated.}\\ \textbf{Removed} as erasure. A flag stops new attestations; every record made before it stays, with its own deposit and window.}
   \card{105}{27}{46}{48.5}{white}{\ct{Where the trust goes}
     \textbf{Not} to manufacturers, a committee, an administrator, or anyone watching the chain for owners.\\[1.5mm]
     \textbf{To} UMA's vote, for accusations; to the \textbf{deposit} the attester loses; to the chain itself.\\[1.5mm]
@@ -156,8 +151,8 @@
   \head{Live demo}{Sign a photo, then try to cheat}
   \fill[ink,rounded corners=2.5pt] ($(current page.north west)+(9mm,-27.8mm)$) rectangle ++(84mm,-52mm);
   \draw[ink,line width=0.8pt,rounded corners=2.5pt,fill=white] \at{9}{27} rectangle ++(84mm,-52mm);
-  \IfFileExists{../../impl/mock/mock-verify-ok.png}{%
-    \node[anchor=center,inner sep=0pt] at \at{51}{53} {\includegraphics[width=81.6mm,height=49.6mm,keepaspectratio]{../../impl/mock/mock-verify-ok.png}};
+  \IfFileExists{../impl/mock/mock-verify-ok.png}{%
+    \node[anchor=center,inner sep=0pt] at \at{51}{53} {\includegraphics[width=81.6mm,height=49.6mm,keepaspectratio]{../impl/mock/mock-verify-ok.png}};
   }{%
     \draw[ink!50,dashed,line width=0.6pt] \at{13}{31} rectangle ++(76mm,-44mm);
     \node[font=\scriptsize,text=ink!60,align=center] at \at{51}{53} {Screenshot placeholder\\ (verify page of the running prototype)};
@@ -170,7 +165,7 @@
     \num{5}\; True accusation: upheld, device flagged\\[1mm]
     \num{6}\; False accusation: rejected\\[1mm]
     \num{7}\; Advance time past $\Tp$: refund}
-  \node[anchor=north west,inner sep=0pt,font=\tiny,text=ink!70,text width=142mm] at \at{9}{81} {Local Ethereum chain; UMA's contracts real; vote simulated (with UMA's own mock oracle).};
+  \node[anchor=north west,inner sep=0pt,font=\tiny,text=ink!70,text width=142mm] at \at{9}{81} {Local Ethereum chain; UMA's contracts real; vote simulated with UMA's test oracle.};
 \end{tikzpicture}
 \end{frame}
 

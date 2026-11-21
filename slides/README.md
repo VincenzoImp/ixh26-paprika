@@ -2,25 +2,24 @@
 
 | File | Content |
 |---|---|
-| `draft/deck-draft.tex` | The 7-slide pitch deck for Paprika (final protocol), LaTeX Beamer |
-| `draft/deck-draft.pdf` | Compiled deck (`pdflatex deck-draft.tex`, run twice, from `draft/`) |
-| `draft/speaker-notes.md` | 2-4 sentences per slide, about 650 words, for a 5-minute pitch |
-| `draft/hard-questions.md` | The 8 hardest questions we expect from the judges, with short answers |
+| `deck.tex` | The 7-slide pitch deck for Paprika (LaTeX Beamer) |
+| `deck.pdf` | Compiled deck (`pdflatex deck.tex`, run twice, from this folder) |
+| `speaker-notes.md` | 2-4 sentences per slide, about 650 words, for a 5-minute pitch |
+| `hard-questions.md` | The 8 hardest questions we expect from the judges, with short answers |
 
 ## Constraints
 
-- Same preamble, colours, layout and slide structure as the sibling ORIGO draft
-  (`crypto/slides/draft/deck-draft.tex`), so the two decks compare on equal terms.
-- Source of truth: `docs/1-come-funziona.md`. Where `docs/2` or `docs/3` disagree with it, `docs/1`
-  wins.
+- Source of truth: `docs/1-come-funziona.md`.
+- The deck presents one solution, Paprika, as it is.
 - Amounts and durations are deployment parameters, so the slides use the symbols `B`, `T_photo`,
-  `T_reveal` and `f`. The only number tied to a measurement or source is the arbiter latency
-  (48-72 h, from `docs/3`), and its source is noted in a LaTeX comment.
-- There are no gas figures and no per-network costs. When the deck was written,
-  `contract/output/cases.md` still described the previous design (a mock arbiter, separate deposit
-  and bond).
+  `T_reveal` and `f`. The only number tied to a source is the arbiter latency (48-72 h, from
+  `docs/3`), and its source is noted in a LaTeX comment.
+- There are no gas figures and no per-network costs.
 - No "first", "novel", "secure" or "guarantees authenticity".
-- Slide 6 includes `../../impl/mock/mock-verify-ok.png` if it exists, otherwise a placeholder box.
+- Slide 6 includes `../impl/mock/mock-verify-ok.png` if it exists, otherwise a placeholder box. No
+  app screenshots existed when the deck was compiled.
+- Demo statement: local Ethereum chain, UMA's real contracts, the vote simulated with UMA's test
+  oracle (`MockOracleAncillary`, per `contract/lib/deploy-uma.js`).
 
 ## Not yet audited
 

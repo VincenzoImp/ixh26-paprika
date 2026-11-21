@@ -17,16 +17,16 @@ well-made fake that leaves no such trace is not caught.
 
 **3. Why is the ban free to evade?**
 Registration is free, so a flagged party registers a new key. What the flag costs is the deposit
-on the proven fake and the device's history, which verifiers can read. A registration deposit would
+on the proven fake and the device's record of attestations, which verifiers can read. A registration deposit would
 price evasion, but it would also exclude people; the team chose a per-photo deposit instead, so
 spam and fakes are priced per photo.
 
 **4. Why UMA, and what if the vote is bought?**
-UMA was in the original proposal, it has a deployed contract interface (Optimistic Oracle V3), and
-its rules require public verifiability. The vote's security is UMA's, not ours: whoever controls
+UMA has a deployed contract interface (Optimistic Oracle V3) that a contract can call, and its
+rules require public verifiability. The vote's security is UMA's, not ours: whoever controls
 enough votes can steer a decision. The damage is bounded: one verdict decides one accusation, moves
 at most `B`, flags one device, and erases nothing. A different arbiter, such as Kleros, would have to
-be chosen before deployment, because the contract cannot be changed afterwards.
+be chosen before deployment, because the contract cannot be modified afterwards.
 
 **5. Why commit-reveal?**
 Pending transactions are public. A one-step accusation could be copied by a front-runner, who would
