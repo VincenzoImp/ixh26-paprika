@@ -14,7 +14,8 @@
     "start": "node scripts/start.js",
     "stop": "node scripts/stop.js",
     "demo:cli": "node cli.js demo",
-    "screens": "node e2e/screens.mjs"
+    "screens": "node e2e/screens.mjs",
+    "e2e": "node e2e/demo.e2e.mjs"
   },
   "dependencies": {
     "ethers": "^6.17.0"
