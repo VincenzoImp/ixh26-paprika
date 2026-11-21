@@ -49,18 +49,16 @@ export function fmtTime(sec) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-// Formats a duration in seconds in plain words ("7 days", "1 hour", "90 seconds").
+// Formats a duration in seconds in plain words ("7 days", "1 hour 15 minutes 1 second").
 export function fmtDuration(sec) {
-  const s = Number(sec);
-  const units = [["day", 86400], ["hour", 3600], ["minute", 60]];
-  for (const [name, size] of units) {
-    if (s >= size && s % size === 0) {
-      const n = s / size;
-      return `${n} ${name}${n === 1 ? "" : "s"}`;
-    }
+  let s = Math.round(Number(sec));
+  if (s <= 0) return "0 seconds";
+  const parts = [];
+  for (const [name, size] of [["day", 86400], ["hour", 3600], ["minute", 60], ["second", 1]]) {
+    const n = Math.floor(s / size);
+    if (n) { parts.push(`${n} ${name}${n === 1 ? "" : "s"}`); s -= n * size; }
   }
-  if (s >= 3600) return `${(s / 3600).toFixed(1)} hours`;
-  return `${s} second${s === 1 ? "" : "s"}`;
+  return parts.slice(0, 3).join(" ");
 }
 
 // Turns any thrown value into a readable message (the library throws Error(revert reason)).

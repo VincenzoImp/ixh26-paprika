@@ -155,7 +155,13 @@ function stateChip(rec) {
   if (st === "accused") return ["under accusation", "p"];
   if (st === "refunded") return [acc.rejected ? "not proven fake · refunded" : "challenge period over · refunded", "m"];
   if (challengeOver(rec)) return [acc.rejected ? "not proven fake · refundable" : "challenge period over · refundable", "m"];
-  return [`open to challenge until ${fmtTime(rec.accusableUntil)}`, "s"];
+  return [`open · until ${shortTime(rec.accusableUntil)}`, "s"];
+}
+
+// Chain time as "HH:MM" (with the date when it is not today's chain date).
+function shortTime(sec) {
+  const full = fmtTime(sec);
+  return full.slice(0, 10) === fmtTime(S.chain.timestamp).slice(0, 10) ? full.slice(11, 16) : full.slice(0, 16);
 }
 
 // Deposit text of a record.
@@ -199,7 +205,7 @@ function describe(item) {
     [/approve/i, "allowed Paprika to take B", "plumbing"],
     [/\.attest/i, "attested a photo · deposit B locked", "attest"],
     [/commitClaim/i, "committed an accusation · bond B locked", "commit"],
-    [/revealClaim/i, "revealed · Paprika asserted to UMA and disputed at once", "reveal"],
+    [/revealClaim/i, item.noAssertion ? "revealed · bond credited back, no accusation opened" : "revealed · case sent to UMA vote (2 × B held by UMA until the vote)", "reveal"],
     [/commit/i, "committed a hidden vote", "vote"],
     [/reveal/i, "revealed a vote", "vote"],
     [/pushPrice/i, "entered the vote result", "vote"],
@@ -268,7 +274,7 @@ function renderGroups(el, items, { rawCalls = false } = {}) {
       det.appendChild(sum);
       for (const i of g.items) {
         const sub = document.createElement("div");
-        sub.className = "sub";
+        sub.className = "txsub";
         sub.textContent = `${describe(i).full} · tx ${short(i.txHash)}${rawCalls ? ` · block ${i.blockNumber} · ${i.call}` : ""}`;
         det.appendChild(sub);
       }
@@ -301,7 +307,7 @@ function renderTimeline() {
         const sum = document.createElement("summary");
         sum.textContent = g.text;
         det.appendChild(sum);
-        for (const i of g.items) { const sub = document.createElement("div"); sub.className = "sub"; sub.textContent = `${describe(i).full} · ${short(i.txHash)}`; det.appendChild(sub); }
+        for (const i of g.items) { const sub = document.createElement("div"); sub.className = "txsub"; sub.textContent = `${describe(i).full} · ${short(i.txHash)}`; det.appendChild(sub); }
         if (raw) det.open = true;
         body.appendChild(det);
       } else body.textContent = g.text;
@@ -360,6 +366,7 @@ const REVERT_WHY = {
 // Lights a step of the protocol map ("register", "attest", "commit", "reveal", "vote", "outcome", "refund", "verify", "revoke").
 function setStep(step) {
   if (!step) return;
+  if (["commit", "reveal", "vote", "outcome"].includes(step)) step = "challenge";
   S.seenSteps.add(step);
   for (const el of document.querySelectorAll(".pmap [data-step]")) {
     el.classList.toggle("cur", el.dataset.step === step);
@@ -436,7 +443,17 @@ function notice(msg) {
 function accusationPending() {
   if (S.records.some((r) => stateOf(r) === "accused")) return true;
   const a = S.acc;
-  return !!(a && a.commitment && !a.voted && !a.dead && !a.noAssertion);
+  return !!(a && (liveCommit(a) || (a.assertionId && !a.voted)));
+}
+
+// True when the commitment's reveal period is over: the next block (at least one second later) would be too late.
+function isDead(a) {
+  return !!(a && a.commitment && !a.assertionId && !a.noAssertion && a.committedAt
+    && S.chain.timestamp + 1 > a.committedAt + Number(S.ctx.params.revealWindow));
+}
+// True for a committed, unrevealed, still revealable commitment (its secret must not be dropped).
+function liveCommit(a) {
+  return !!(a && a.commitment && /^0x/.test(a.commitment) && !a.assertionId && !a.noAssertion && !a.voted && !a.forfeited && !isDead(a));
 }
 
 // Why the Photographer cannot attest the loaded photo now ("" when it can).
@@ -457,16 +474,18 @@ const RULES = {
   "btn-verify-last": () => !!S.attested,
   "btn-change-pixel": () => !!S.verify?.bytes && S.verify.bytes.length > 0 && /^image\//.test(S.verify.type || ""),
   "btn-commit": () => !!q("select-accuse-photo").value && !S.acc?.commitment,
-  "btn-reveal": () => !!S.acc?.commitment && !S.acc?.assertionId && !S.acc?.noAssertion && !S.acc?.dead && !!S.acc?.salt,
+  "btn-reveal": () => !!S.acc && liveCommit(S.acc) && !!S.acc.salt,
   "btn-vote-fake": () => !!S.acc?.assertionId && !S.acc?.voted,
   "btn-vote-not-fake": () => !!S.acc?.assertionId && !S.acc?.voted,
-  "btn-accuse-new": () => !!S.acc && (!S.acc.assertionId || !!S.acc.voted),
+  "btn-accuse-new": () => !!S.acc && !liveCommit(S.acc),
+  "btn-forfeit": () => !!S.acc && isDead(S.acc) && !S.acc.forfeited,
+  "btn-new-key-attest": () => !!S.deviceFlag,
   "btn-accuse-verify": () => !!S.acc?.voted,
   "btn-withdraw-accuser": () => S.credits.accuser > 0n,
   "btn-withdraw-photographer": () => S.credits.photographer > 0n,
   "btn-deposits-withdraw": () => S.credits.photographer > 0n,
   "btn-revoke": () => !!S.device && !!S.registered && !S.revoked && !S.deviceFlag,
-  "btn-advance-time": () => !accusationPending(),
+  "btn-advance-time": () => !accusationPending() && S.records.some((r) => stateOf(r) === "attested" && !refundable(r)),
 };
 
 // Enables or disables every button from RULES, per-row flags (data-enabled) and the busy state; shows the reasons.
@@ -477,10 +496,17 @@ function syncButtons() {
     let ok = true;
     if (RULES[id]) ok = RULES[id]();
     else if (b.dataset.enabled !== undefined) ok = b.dataset.enabled === "1";
-    b.disabled = S.busy || !ok;
+    b.disabled = S.busy || S.chainDown || !ok;
   }
-  setText("attest-why", S.photo || S.deviceFlag ? attestBlocker() : "");
-  setText("advance-why", accusationPending() ? "Not while an accusation is open: decide it first (Accuser tab). Skipping time now would expire UMA's vote." : "");
+  // Refusal box: shown for a real blocker, never for the photo that was just attested (its result is shown instead).
+  const justDone = !!(S.photo && S.attested && S.photo.hash === S.attested.photoHash);
+  const why = (S.photo || S.deviceFlag) && !justDone ? attestBlocker() : "";
+  setText("attest-why", why);
+  q("attest-refusal").classList.toggle("hidden", !why);
+  q("btn-new-key-attest").classList.toggle("hidden", !S.deviceFlag);
+  setText("accuse-new-why", S.acc && liveCommit(S.acc) ? "Reveal first: dropping a live commitment would lose its bond B." : "");
+  setText("advance-why", accusationPending() ? "Not while an accusation is open: decide it first (Accuser tab). Skipping time now would expire UMA's vote."
+    : !S.records.some((r) => stateOf(r) === "attested" && !refundable(r)) ? "Nothing to wait for: no attested photo is still in its challenge period." : "");
 }
 
 // Runs one user action: one at a time, buttons disabled meanwhile, transactions collected, errors shown, then
@@ -665,6 +691,11 @@ function renderDevice() {
   st.dataset.status = S.deviceFlag ? "flagged" : S.registered ? "active" : "none";
   st.className = "status " + (S.deviceFlag ? "am" : S.registered ? "ok" : "");
   q("flag-note").classList.toggle("hidden", !S.deviceFlag);
+  q("register-card").classList.toggle("done", !!S.registered);
+  q("btn-generate-key").classList.toggle("hidden", !S.registered);
+  const old = JSON.parse(localStorage.getItem(storeKey("oldkeys")) || "[]");
+  setText("old-keys", old.length ? `${old.length} earlier key${old.length > 1 ? "s" : ""} kept in this browser.` : "");
+  q("old-keys").classList.toggle("hidden", !old.length);
   const rt = q("register-tx");
   rt.textContent = S.registered?.txHash ? "tx " + short(S.registered.txHash) : "";
   rt.title = S.registered?.txHash || "";
@@ -674,6 +705,14 @@ function renderDevice() {
 
 // Creates a new device key (software P-256 key in this browser).
 async function doGenerateKey() {
+  // Keep the current key (it may still be needed, e.g. to revoke it): saved in a list of earlier keys.
+  if (S.device && S.dev.exportDevice) {
+    try {
+      const old = JSON.parse(localStorage.getItem(storeKey("oldkeys")) || "[]");
+      old.push(await S.dev.exportDevice(S.device));
+      localStorage.setItem(storeKey("oldkeys"), JSON.stringify(old));
+    } catch (e) { console.warn("Could not keep the earlier key", e); }
+  }
   S.device = await S.dev.createDevice();
   S.registered = null; S.revoked = null;
   if (S.photo) S.photo.already = false;
@@ -693,11 +732,13 @@ async function doRegister() {
 // (+ "Retake" for a camera still); nothing -> "Start camera". One primary button at a time.
 function renderCaptureControls() {
   const live = !!S.stream, still = !!S.photo;
+  const done = !!(S.photo && S.attested && S.photo.hash === S.attested.photoHash);   // this photo was just attested
+  q("btn-new-photo").classList.toggle("hidden", !done);
   // "Start camera" stays available next to a file or sample image (as a secondary button); hidden for a camera still.
   q("btn-start-camera").classList.toggle("hidden", live || !!S.photo?.fromCamera);
   q("btn-start-camera").classList.toggle("pri", !still);
   q("btn-take-photo").classList.toggle("hidden", !live);
-  q("btn-attest").classList.toggle("hidden", live || !still);
+  q("btn-attest").classList.toggle("hidden", live || !still || done);
   q("btn-retake").classList.toggle("hidden", live || !S.photo?.fromCamera);
 }
 
@@ -709,11 +750,11 @@ async function loadCapturePhoto(bytes, type, name, fromCamera = false) {
   showImage(box, bytes, type);
   q("capture-placeholder").classList.add("hidden");
   setTag(fromCamera ? "Still: exactly the bytes that will be attested" : "");
-  setText("capture-file-name", `${name} · ${bytes.length} bytes`);
+  setText("capture-file-name", `${name} · ${bytes.length} byte${bytes.length === 1 ? "" : "s"}`);
   const warn = q("capture-warning");
   warn.textContent = /^image\//.test(type || "") ? "" : `This file does not look like an image (${type || "unknown type"}). It can still be attested, but a verifier will not see a picture.`;
   warn.classList.toggle("hidden", !warn.textContent);
-  setText("capture-result", "");               // a new photo clears the line of the previous attestation
+  q("capture-result-box").classList.add("hidden");   // a new photo clears the result of the previous attestation
   q("capture-details").open = false;
   // Pre-check: has this key already attested this exact file? Then the button stays disabled (nothing is sent).
   S.photo.hash = toHex(await S.dev.sha256(bytes));
@@ -751,7 +792,7 @@ async function doStartCamera() {
   q("capture-placeholder").classList.add("hidden");
   setTag("Live camera");
   setText("capture-file-name", "Camera on: frame the shot, then press Take a selfie.");
-  setText("capture-result", "");
+  q("capture-result-box").classList.add("hidden");
   renderCaptureControls();
 }
 
@@ -807,8 +848,11 @@ function renderCapture() {
   // Use the current record (its challenge period grows after a rejected accusation).
   a.rec = S.records.find((x) => same(x.photoHash, a.photoHash) && same(x.keyId, a.keyId)) || a.rec;
   const r = a.rec ? Number(a.rec.recordedBlock) : "?";
-  if (S.photo && S.photo.hash === a.photoHash) {
-    setText("capture-result", `Attested ${shortHash(a.photoHash)} · signed between blocks ${a.anchorBlock} and ${r} · open to challenge until ${a.rec ? fmtTime(a.rec.accusableUntil) : "—"} · refundable after ${a.rec ? fmtTime(a.rec.refundableAt) : "—"} (chain time)`);
+  const showing = !!(S.photo && S.photo.hash === a.photoHash);
+  q("capture-result-box").classList.toggle("hidden", !showing);
+  if (showing) {
+    setText("capture-result", `✓ Recorded on chain · ${tok(S.ctx.params.bond)} locked`);
+    setText("capture-result-detail", `Photo ${shortHash(a.photoHash)} · signed between blocks ${a.anchorBlock} and ${r} · open to challenge until ${a.rec ? shortTime(a.rec.accusableUntil) : "—"} (chain time)`);
   }
   setShort("capture-hash", a.photoHash, 8);
   setText("capture-anchor-block", `block ${a.anchorBlock}`);
@@ -840,6 +884,7 @@ function renderDeposits() {
     const [label, cls] = stateChip(r);
     const c2 = tr.insertCell();
     const chip = document.createElement("span"); chip.className = "chip " + cls; chip.textContent = label; chip.dataset.testid = "deposit-state";
+    chip.title = `open to challenge until ${fmtTime(r.accusableUntil)} · refundable after ${fmtTime(r.refundableAt)} (chain time)`;
     c2.appendChild(chip);
     const acc = accusationsOf(r);
     if (acc.rejected) { const n = document.createElement("div"); n.className = "d"; n.textContent = `${acc.rejected} accusation${acc.rejected > 1 ? "s" : ""} rejected`; c2.appendChild(n); }
@@ -849,7 +894,8 @@ function renderDeposits() {
     b.className = "sm"; b.dataset.testid = "btn-refund"; b.dataset.photoHash = hash;
     b.textContent = stateOf(r) === "refunded" ? "Refunded" : "Refund";
     b.dataset.enabled = refundable(r) ? "1" : "0";
-    b.title = refundable(r) ? "Credit the deposit back to the depositor" : `Possible after ${fmtTime(r.refundableAt)} (chain time)`;
+    b.classList.toggle("hidden", !refundable(r));   // shown only when it can be pressed
+    b.title = "Credit the deposit back to the depositor";
     b.addEventListener("click", () => run("Refund", () => S.lib.refund(S.ctx, "photographer", { photoHash: hash, keyId: toHex(r.keyId) }),
       { after: () => explain("Refund", "Nobody proved this photo fake in time, so its deposit B was credited back to the Photographer. The record stays.",
         "a refund is possible only after T_photo + T_reveal, so an accusation committed at the last second can still be revealed. Anyone may trigger the refund; the money always goes to the depositor.", S.actionTxs, "Photographer", "refund") }));
@@ -859,17 +905,25 @@ function renderDeposits() {
       const dl = document.createElement("button");
       dl.className = "sm"; dl.dataset.testid = "btn-download"; dl.dataset.photoHash = hash; dl.textContent = "Download";
       dl.title = "The exact bytes that were attested: drop them on the Verifier tab";
-      dl.addEventListener("click", () => download(f.bytes, `paprika-${hash.slice(2, 10)}.${f.type === "image/png" ? "png" : "jpg"}`, f.type));
+      dl.addEventListener("click", () => download(f.bytes, `paprika-${hash.slice(2, 10)}.${extOf(f)}`, f.type || "application/octet-stream"));
       c4.appendChild(dl);
     }
   }
+}
+
+// File extension for a download: from the original name, else from the MIME type.
+function extOf(f) {
+  const m = /\.([a-z0-9]{1,8})$/i.exec(f.name || "");
+  if (m) return m[1].toLowerCase();
+  const map = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp", "image/heic": "heic", "application/pdf": "pdf" };
+  return map[f.type] || "bin";
 }
 
 // Re-checks, by the chain's clock, which Refund buttons may be clicked (without re-creating the rows).
 function updateRefundButtons() {
   for (const b of document.querySelectorAll('[data-testid="btn-refund"]')) {
     const r = S.records.find((x) => same(x.photoHash, b.dataset.photoHash) && same(x.depositor, addr("photographer")));
-    if (r) b.dataset.enabled = refundable(r) ? "1" : "0";
+    if (r) { b.dataset.enabled = refundable(r) ? "1" : "0"; b.classList.toggle("hidden", !refundable(r)); }
   }
 }
 
@@ -919,7 +973,9 @@ async function runVerify(rehash) {
 
 // The record to show when a file has several (one per key): this page's key first, else the newest.
 function mainRecord(records) {
-  return records.find((r) => S.device && same(r.keyId, S.device.keyId)) || records[records.length - 1];
+  const worst = records.find((r) => stateOf(r) === "fake") || records.find((r) => stateOf(r) === "accused")
+    || records.find((r) => deviceOf(r).status === "flagged" && stateOf(r) !== "refunded");
+  return worst || records.find((r) => S.device && same(r.keyId, S.device.keyId)) || records[records.length - 1];
 }
 
 // One verdict for one record: [cls, seal, title, detail, state]. Neutral colours: blue for "open", never a green check.
@@ -927,22 +983,23 @@ function verdictOf(rec) {
   const st = stateOf(rec);
   const dev = deviceOf(rec);
   const acc = accusationsOf(rec);
-  const hist = acc.rejected ? `Accusations: ${acc.rejected}, rejected by UMA's vote.` : "Never accused.";
+  const hist = acc.rejected ? `${acc.rejected} accusation${acc.rejected > 1 ? "s" : ""} rejected` : "never accused";
+  const unvouched = "Treat it as unvouched: this app vouches for it neither way.";
   if (st === "fake") return ["bad", "✕", "Proven fake", "UMA's voters found the evidence proves this photo is not a genuine capture by this key. The depositor lost B. The record stays, marked.", "fake"];
-  if (st === "accused") return ["flag", "!", "Under accusation", "An accusation was sent to UMA; the vote is pending. The deposit is UMA's dispute stake.", "accused"];
+  if (st === "accused") return ["flag", "!", "Under accusation", "An accusation was sent to UMA; the vote is pending. UMA holds both stakes until the vote.", "accused"];
   if (dev.status === "flagged" && st !== "refunded") {
+    const still = challengeOver(rec) ? "Its challenge period is over." : `It can still be accused until ${fmtTime(rec.accusableUntil)}.`;
     if (dev.reason === "key revoked") return ["flag", "!", `Not judged · its key was revoked at block ${dev.flaggedAtBlock}`,
-      `The key holder declared the key compromised. This record is older than the revocation, so a thief may have made it. It can still be accused until ${fmtTime(rec.accusableUntil)}.`, "flagged-key-revoked"];
+      `The key holder declared the key compromised. This record is older than the revocation, so a thief may have made it. ${still} ${unvouched}`, "flagged-key-revoked"];
     const bad = S.accusations.find((a) => same(a.keyId, rec.keyId) && a.fakeProven);
     return ["flag", "!", "Not judged · its key is flagged",
-      `Another photo of this key${bad ? ` (${shortHash(bad.photoHash)})` : ""} was proven fake at block ${dev.flaggedAtBlock}. ${challengeOver(rec) ? "This photo's challenge period is over." : `This photo can still be accused until ${fmtTime(rec.accusableUntil)}.`}`, "flagged-fake-proven"];
+      `Another photo of this key${bad ? ` (${shortHash(bad.photoHash)})` : ""} was proven fake at block ${dev.flaggedAtBlock}. ${still} ${unvouched}`, "flagged-fake-proven"];
   }
-  if (st === "refunded") return ["neutral", "○", acc.rejected ? "Not proven fake · deposit returned" : "Challenge period over · never accused · deposit returned",
-    `Nobody proved it fake within the challenge period. ${hist}`, "unchallenged"];
-  if (challengeOver(rec)) return ["neutral", "○", acc.rejected ? "Not proven fake · challenge period over" : "Challenge period over · never accused",
-    `Nobody proved it fake within the challenge period; the deposit can be refunded. ${hist}`, "unchallenged"];
+  const notProof = "Nobody proved it fake within the challenge period. This is not proof that it is real.";
+  if (st === "refunded") return ["open", "◷", `Signed · ${hist} · deposit returned`, notProof, "unchallenged"];
+  if (challengeOver(rec)) return ["open", "◷", `Signed · ${hist} · challenge period over`, `${notProof} The deposit can be refunded.`, "unchallenged"];
   return ["open", "◷", "Signed and staked · open to challenge",
-    `Anyone can accuse it until ${fmtTime(rec.accusableUntil)}. Deposit B is refunded after ${fmtTime(rec.refundableAt)} if nobody proves it fake (chain time). ${acc.rejected ? hist : ""}`.trim(), "attested"];
+    `Anyone can accuse it until ${fmtTime(rec.accusableUntil)}. Deposit B is refunded after ${fmtTime(rec.refundableAt)} if nobody proves it fake (chain time).${acc.rejected ? ` ${hist}.` : ""}`, "attested"];
 }
 
 // Shows the verdict, the honest sentence and the details.
@@ -960,19 +1017,20 @@ function renderVerify() {
   cmp.classList.toggle("hidden", !v.prevHash);
   const attesters = q("verify-attesters");
   if (!v.records.length) {
-    set(["bad", "✕", "No record for this file",
+    set(["none", "∅", "No record for this exact file",
       "No registered key signed this exact file. A resized or recompressed copy also has no record: \"no record\" does not mean \"fake\".", "no-record"]);
     box.dataset.recordState = "none";
-    for (const id of ["verify-record", "verify-honest-sentence", "verify-not-shown", "verify-other-records", "verify-attesters"]) q(id).classList.add("hidden");
+    for (const id of ["verify-record", "verify-shows", "verify-other-records", "verify-attesters"]) q(id).classList.add("hidden");
     return;
   }
   const rec = mainRecord(v.records);
   box.dataset.recordState = stateOf(rec);
-  set(verdictOf(rec));
+  const vd = verdictOf(rec);
+  if (v.records.length > 1 && new Set(v.records.map((r) => verdictOf(r)[4])).size > 1) vd[2] = `Several keys · ${vd[2]}`;   // records disagree: worst first
+  set(vd);
   const dev = deviceOf(rec);
   const A = Number(rec.anchorBlock), B = Number(rec.recordedBlock);
-  q("verify-honest-sentence").classList.remove("hidden");
-  q("verify-not-shown").classList.remove("hidden");
+  q("verify-shows").classList.remove("hidden");
   setText("verify-block-a", A); setText("verify-block-b", B);
   q("verify-record").classList.remove("hidden");
   setShort("verify-record-device", rec.keyId, 6);
@@ -1023,7 +1081,7 @@ function explainVerify(pixel = false) {
   }
   const what = {
     "no-record": "The page hashed the file and read the contract: no registered key signed this exact file.",
-    attested: `A registered key signed this exact file between block ${q("verify-block-a").textContent} and block ${q("verify-block-b").textContent}, and a deposit B is at stake. Nothing more is claimed.`,
+    attested: "The page hashed the file and read the contract: the record is on the left, with what it shows and what it does not.",
     accused: "The record exists and is under accusation: UMA's vote is pending.",
     unchallenged: "The record exists and nobody proved it fake within its challenge period.",
     fake: "The record exists and is marked Fake: UMA's voters found the evidence proves it. The key is flagged.",
@@ -1061,7 +1119,7 @@ function renderAccuseSelect() {
   const ok = S.records.filter((r) => !notAccusableReason(r)).reverse();
   const options = [...ok];
   // The photo of the open accusation stays shown even if it is no longer accusable.
-  const live = a && a.commitment && !a.voted && !a.dead && !a.noAssertion;   // an accusation still in progress
+  const live = a && a.commitment && !a.voted && !isDead(a) && !a.noAssertion;   // an accusation still in progress
   if (live && !ok.some((r) => same(r.photoHash, a.photoHash) && same(r.keyId, a.keyId))) {
     const r = S.records.find((x) => same(x.photoHash, a.photoHash) && same(x.keyId, a.keyId));
     if (r) options.unshift(r);
@@ -1124,15 +1182,19 @@ async function doReveal() {
   const r = await S.lib.revealAccusation(S.ctx, "accuser", { photoHash: a.photoHash, keyId: a.keyId, evidenceHash: a.evidenceHash, salt: a.salt });
   a.revealTxs = [...S.actionTxs];
   a.assertionId = toHex(r.assertionId);
-  if (!r.assertionId || /^0x0*$/.test(a.assertionId)) { a.assertionId = ""; a.noAssertion = true; }   // bond returned
+  if (!r.assertionId || /^0x0*$/.test(a.assertionId)) {   // no accusation opened: the bond was credited back
+    a.assertionId = ""; a.noAssertion = true;
+    const rec = (await S.lib.verifyPhoto(S.ctx, a.photoHash)).find((x) => same(x.keyId, a.keyId));
+    a.bondReason = stateOf(rec) === "fake" ? "this photo was already proven fake" : "this photo already has an open accusation";
+    for (const it of S.actionTxs) if (/revealClaim/i.test(it.call)) it.noAssertion = true;
+  }
   saveAcc();
 }
 
 // Brings the local accusation in line with the chain: rebuilds a revealed accusation that this browser does not know
 // (fresh browser, cleared storage), marks one decided elsewhere, and marks a commitment whose reveal period is over.
 async function reconcileAccusation() {
-  const open = S.accusations.find((x) => x.open);
-  let a = S.acc;
+  const a = S.acc;
   if (a?.assertionId && !a.voted) {
     const onChain = S.accusations.find((x) => same(x.assertionId, a.assertionId));
     if (onChain && !onChain.open) {
@@ -1141,25 +1203,57 @@ async function reconcileAccusation() {
       saveAcc();
     }
   }
-  const inProgress = a && a.commitment && !a.assertionId && !a.dead && !a.noAssertion && !a.voted;   // committed, not revealed
-  if (open && !inProgress && !(a && same(a.assertionId, open.assertionId))) {
-    S.acc = a = { photoHash: open.photoHash, keyId: open.keyId, assertionId: open.assertionId, commitment: "(revealed earlier; rebuilt from the chain)",
-      evidenceHash: open.evidenceHash, before: null, fromChain: true };
+  // Never switch silently: an open accusation from elsewhere is adopted only when this browser has none.
+  const opens = S.accusations.filter((x) => x.open);
+  if (!a && opens.length === 1) {
+    S.acc = { photoHash: opens[0].photoHash, keyId: opens[0].keyId, assertionId: opens[0].assertionId,
+      commitment: "(revealed earlier; rebuilt from the chain)", evidenceHash: opens[0].evidenceHash, before: null, fromChain: true };
     saveAcc();
   }
-  if (a && a.commitment && !a.assertionId && !a.noAssertion && a.committedAt) {
-    a.dead = S.chain.timestamp > a.committedAt + Number(S.ctx.params.revealWindow);
+}
+
+// Lists the open accusations on the chain that this page is not showing, with a button to show one and vote on it.
+function renderOpenList() {
+  const box = q("open-accusations");
+  const others = S.accusations.filter((x) => x.open && !(S.acc && same(S.acc.assertionId, x.assertionId)));
+  box.replaceChildren();
+  box.classList.toggle("hidden", !others.length);
+  if (!others.length) return;
+  box.className = "openlist";
+  const h = document.createElement("b");
+  h.textContent = S.acc ? `Other open accusations on the chain (${others.length}):` : `Open accusations on the chain (${others.length}): choose one to vote on.`;
+  box.appendChild(h);
+  for (const o of others) {
+    const row = document.createElement("div");
+    row.dataset.testid = "open-accusation-row";
+    const label = document.createElement("span");
+    label.textContent = `photo ${shortHash(o.photoHash)} · key ${short(o.keyId)} · assertion ${short(o.assertionId)}`;
+    const b = document.createElement("button");
+    b.className = "sm";
+    b.dataset.testid = "btn-pick-accusation";
+    b.dataset.assertion = o.assertionId;
+    b.textContent = "Show this one";
+    b.dataset.enabled = S.acc && liveCommit(S.acc) ? "0" : "1";   // never drop a live commitment's secret
+    b.title = b.dataset.enabled === "1" ? "Show this accusation and vote on it" : "Reveal your own commitment first";
+    b.addEventListener("click", () => {
+      S.acc = { photoHash: o.photoHash, keyId: o.keyId, assertionId: o.assertionId, commitment: "(revealed elsewhere; picked from the chain)",
+        evidenceHash: o.evidenceHash, before: null, fromChain: true };
+      saveAcc();
+      renderAccuse(); renderAccuseSelect(); renderOpenList(); syncButtons();
+      explain("Accusation chosen", `You are now looking at the accusation of photo ${shortHash(o.photoHash)}. The vote buttons act on this one only.`, "", [], "Accuser", "vote");
+    });
+    row.append(label, b);
+    box.appendChild(row);
   }
 }
 
 // Marks a vote phase in the progress list: "run" or "done".
 function phaseState(name, state, note = "") {
-  const li = q(`vote-phase-${name}`);
-  if (!li) return;
-  li.className = state;
-  let small = li.querySelector("small");
-  if (!small) { small = document.createElement("small"); li.appendChild(small); }
-  small.textContent = note;
+  const el = q(`vote-phase-${name}`);
+  if (!el) return;
+  el.className = state;
+  el.title = note;
+  el.textContent = el.textContent.replace(/ ✓$/, "") + (state === "done" ? " ✓" : "");
 }
 
 // Normalises a phase name from the library to "commit" | "reveal" | "settled".
@@ -1188,7 +1282,27 @@ async function doVote(fakeProven) {
     }[name] || `UMA vote: ${p.phase}`;
     explain(`UMA vote · ${name}`, text, "", txs, "UMA", "vote");
   };
-  const r = await S.lib.umaVote(S.ctx, a.assertionId, fakeProven, { onPhase });
+  // Re-read the assertion before and after: another window or the CLI may have decided it meanwhile.
+  const decidedElsewhere = async () => {
+    await readAccusations();
+    const on = S.accusations.find((x) => same(x.assertionId, a.assertionId));
+    if (on && !on.open) {
+      a.voted = true; a.fakeProven = on.fakeProven; a.decidedElsewhere = true;
+      a.after = await settleSnapshot(a.photoHash, a.keyId);
+      saveAcc();
+      return true;
+    }
+    return false;
+  };
+  const already = "This accusation was already decided (in another window or by the CLI). Its outcome is shown below.";
+  if (await decidedElsewhere()) throw new Error(already);
+  let r;
+  try {
+    r = await S.lib.umaVote(S.ctx, a.assertionId, fakeProven, { onPhase });
+  } catch (e) {
+    if (await decidedElsewhere()) throw new Error(already);
+    throw new Error(/coalesce/i.test(errText(e)) ? "The vote did not go through: the assertion changed meanwhile. Reload the page to see its state." : errText(e));
+  }
   for (const n of order) if (q(`vote-phase-${n}`).className !== "done") phaseState(n, "done");
   a.voteTxs = r?.txHashes || [];
   a.voted = true;
@@ -1216,6 +1330,7 @@ function explainOutcome() {
 
 // Starts over with a new accusation (an unrevealed commitment is dropped from this browser; its bond stays locked).
 function doNewAccusation() {
+  if (S.acc && liveCommit(S.acc)) return;   // never drop the secret of a commitment that can still be revealed
   S.acc = null;
   saveAcc();
   q("input-evidence").value = defaultEvidence();
@@ -1235,10 +1350,11 @@ function renderDeadline() {
   const a = S.acc;
   if (!a?.commitment || a.assertionId || a.noAssertion || !a.committedAt) return setText("reveal-deadline", "");
   const deadline = a.committedAt + Number(S.ctx.params.revealWindow);
-  const left = deadline - S.chain.timestamp;
-  setText("reveal-deadline", left > 0
+  const left = deadline - S.chain.timestamp - 1;   // the reveal lands in the next block, at least one second later
+  if (a.forfeited) return setText("reveal-deadline", "The bond of this commitment was burned (forfeited).");
+  setText("reveal-deadline", !isDead(a)
     ? `Reveal before ${fmtTime(deadline)} (chain time) · ${fmtDuration(Math.max(0, left))} left. The secret is saved in this browser.`
-    : `The reveal period ended at ${fmtTime(deadline)}: this bond can only be forfeited now. Start a new accusation.`);
+    : `The reveal period ended at ${fmtTime(deadline)}: the bond can no longer be revealed. Anyone may burn it (forfeit); then start a new accusation.`);
 }
 
 // Shows the stepper and the four step cards of the current accusation.
@@ -1253,9 +1369,10 @@ function renderAccuse() {
   q("input-evidence").disabled = k > 0;
   if (a?.evidence && k > 0) q("input-evidence").value = a.evidence;
   setText("commit-status", !a?.commitment ? "" : a.fromChain ? "Accusation rebuilt from the chain (revealed earlier, vote pending)."
-    : a.dead ? "Committed, not revealed in time: the bond is lost." : "Committed: only a hash is on chain · bond B locked");
-  setText("reveal-status", a?.noAssertion ? "nothing to vote on: the photo was already decided or under accusation; the bond was credited back"
-    : a?.assertionId ? "sent to UMA and disputed" : "");
+    : a.forfeited ? "Not revealed in time: the bond was burned." : isDead(a) ? "Committed, not revealed in time: the bond is lost." : "Committed: only a hash is on chain · bond B locked");
+  q("btn-forfeit").classList.toggle("hidden", !(a && isDead(a) && !a.forfeited));
+  setText("reveal-status", a?.noAssertion ? `Bond returned: ${a.bondReason || "no accusation opened"}. The bond B was credited back to the Accuser (credit now ${tok(S.credits.accuser)}).`
+    : a?.assertionId ? "Case sent to UMA's vote; UMA holds both stakes until the vote." : "");
   if (a?.salt) setShort("accuse-secret", a.salt, 8); else setText("accuse-secret", "random, created at commit, kept by the accuser (saved in this browser)");
   if (a?.commitment && /^0x/.test(a.commitment)) setShort("commit-commitment", a.commitment, 8);
   else setText("commit-commitment", a?.commitment || "keccak256(accuser, photo, device, evidence hash, secret)");
@@ -1264,6 +1381,7 @@ function renderAccuse() {
   setText("reveal-photo", a ? shortHash(a.photoHash) : "");
   if (a?.assertionId) setShort("reveal-assertion-id", a.assertionId, 8); else setText("reveal-assertion-id", "");
   renderDeadline();
+  renderOpenList();
   if (a?.voted) renderSettle();
 }
 
@@ -1275,6 +1393,13 @@ function renderSettle() {
   const o = q("settle-outcome");
   o.innerHTML = up ? '<span class="chip r">fake proven</span>' : '<span class="chip m">not proven fake</span>';
   o.dataset.outcome = up ? "fake-proven" : "not-proven";
+  const sum = q("settle-summary");
+  sum.replaceChildren();
+  const add = (txt, cls) => { const e = document.createElement("span"); e.textContent = txt; if (cls) e.className = cls; sum.appendChild(e); };
+  add(up ? "Voters: FAKE → " : "Voters: NOT PROVEN → ");
+  add(`Accuser ${signed(up ? B - fB : -B)}`, "act-ac"); add(" · ");
+  add(`Photographer ${signed(up ? -B : B - fB)}`, "act-ph"); add(" · ");
+  add(`UMA fee ${signed(fB)}`, "act-uma");
   const expA = up ? B - fB : -B, expD = up ? -B : B - fB;
   setText("settle-formula-accuser", up ? "−B + B back + (B − f×B)" : "−B");
   setText("settle-formula-depositor", up ? "−B (deposit lost)" : "B kept + (B − f×B)");
@@ -1335,6 +1460,13 @@ function verifyFile(f) {
   return run("Verify", async () => loadVerifyFile(await blobBytes(f), f.type, f.name), { tx: false, after: () => explainVerify() });
 }
 
+// Explainer after a photo is loaded: the next step, or the refusal if the key cannot attest.
+function explainReady() {
+  const why = attestBlocker();
+  if (why) explain("Cannot attest", `Refused before any transaction: ${why} No money moved.`, "", [], "Photographer", "attest");
+  else explain("Photo ready", `Next: press Sign & attest (locks ${tok(S.ctx.params.bond)}). The key will sign the photo's SHA-256 together with a recent block hash.`, "", [], "Photographer", "attest");
+}
+
 // Connects every control to its action.
 function wire() {
   const on = (id, fn) => q(id).addEventListener("click", fn);
@@ -1350,14 +1482,32 @@ function wire() {
   on("btn-register", () => run("Register", doRegister, { after: () => explain("Register a device key",
     "The key signed a message naming the Photographer's account, and Paprika stored the public key on chain. It cost only gas: no manufacturer or authority approved it. Here the key is a software key in this browser.",
     "a public key is public. Without this proof of possession anyone could register someone else's key, and the real holder could never register it.", S.actionTxs, "Photographer", "register") }));
-  on("btn-start-camera", () => run("Start camera", doStartCamera, { tx: false }));
-  on("btn-take-photo", () => run("Take a selfie", doTakePhoto, { tx: false }));
+  on("btn-start-camera", () => run("Start camera", doStartCamera, { tx: false,
+    after: () => explain("Camera on", "Frame the shot, then press Take a selfie. The still you take is exactly the file that will be signed.", "", [], "Photographer", "attest") }));
+  on("btn-take-photo", () => run("Take a selfie", doTakePhoto, { tx: false, after: explainReady }));
   on("btn-retake", () => run("Retake", async () => { S.photo = null; await doStartCamera(); }, { tx: false }));
   q("toggle-mirror").addEventListener("change", (e) => q("capture-preview").classList.toggle("mirror", e.target.checked));
   on("btn-choose-file", () => q("input-capture-file").click());
-  onFileInput("input-capture-file", (f) => run("Load file", async () => { stopCamera(); await loadCapturePhoto(await blobBytes(f), f.type, f.name); }, { tx: false }));
-  on("btn-sample-image", () => run("Sample image", async () => { stopCamera(); await loadCapturePhoto(await sampleImage(), "image/jpeg", `sample-${Date.now()}.jpg`); }, { tx: false }));
+  onFileInput("input-capture-file", (f) => run("Load file", async () => { stopCamera(); await loadCapturePhoto(await blobBytes(f), f.type, f.name); }, { tx: false, after: explainReady }));
+  on("btn-sample-image", () => run("Sample image", async () => { stopCamera(); await loadCapturePhoto(await sampleImage(), "image/jpeg", `sample-${Date.now()}.jpg`); }, { tx: false, after: explainReady }));
   on("btn-attest", () => run("Sign & attest", doAttest, { after: explainAttest }));
+  on("btn-new-photo", () => {
+    S.photo = null;
+    const box = q("capture-preview");
+    for (const el of box.querySelectorAll("img,video,.tag")) el.remove();
+    q("capture-placeholder").classList.remove("hidden");
+    q("capture-result-box").classList.add("hidden");
+    setText("capture-file-name", "");
+    renderCaptureControls(); syncButtons();
+  });
+  on("btn-new-key-attest", () => run("Register a new key", async () => { await doGenerateKey(); await doRegister(); },
+    { after: () => explain("Register a new key", "A new key was created and registered for free. It starts with no history; the flagged key stays flagged.",
+      "a flag costs the forger the lost deposit and the key's history, not the ability to come back with a new key.", S.actionTxs, "Photographer", "register") }));
+  on("btn-forfeit", () => run("Forfeit", async () => {
+    await S.lib.forfeitCommitment(S.ctx, "accuser", S.acc.commitment);
+    S.acc.forfeited = true; saveAcc();
+  }, { after: () => explain("Forfeit an expired commitment", "The commitment was not revealed within the reveal period, so its bond B was sent to the burn address. Nobody gets it.",
+    "the target of a commitment is hidden, so no depositor is known to receive the bond; burning it is the only neutral choice.", S.actionTxs, "Accuser", "commit") }));
   on("btn-deposits-withdraw", () => run("Withdraw credit", () => doWithdraw("photographer"), { after: explainWithdraw("Photographer") }));
   on("btn-advance-time", () => run("Advance time", async () => {
     if (accusationPending()) throw new Error("An accusation is open: decide it first. Skipping time now would expire UMA's vote.");
@@ -1378,7 +1528,17 @@ function wire() {
   const dz = q("verify-dropzone");
   dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
   dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
-  dz.addEventListener("drop", (e) => { e.preventDefault(); dz.classList.remove("drag"); const f = e.dataTransfer.files[0]; if (f) verifyFile(f); });
+  dz.addEventListener("drop", async (e) => {
+    e.preventDefault(); dz.classList.remove("drag");
+    const files = [...e.dataTransfer.files];
+    if (!files.length) return;
+    await verifyFile(files[0]);
+    if (files.length > 1) {   // one file at a time: say so instead of ignoring the others silently
+      const w = q("verify-warning");
+      w.textContent = `${files.length} files dropped: only the first (${files[0].name}) was verified. Drop one file at a time.`;
+      w.classList.remove("hidden");
+    }
+  });
   addEventListener("dragover", (e) => e.preventDefault());   // a file dropped elsewhere must not navigate away
   addEventListener("drop", (e) => e.preventDefault());
   // Accuser
@@ -1389,8 +1549,8 @@ function wire() {
     "a pending transaction is public. A one-step accusation could be copied under another name, even by the forger itself. The hash includes the accuser's address, so a copied commitment is useless.",
     S.actionTxs, "Accuser", "commit") }));
   on("btn-reveal", () => run("Reveal", doReveal, { after: () => explain("Accuse · Reveal",
-    S.acc?.noAssertion ? "There was nothing to vote on (the photo was already decided or under accusation), so the bond was credited back."
-      : "Paprika recomputed the commitment, then opened the case at UMA with the accuser's bond and, in the same transaction, contested it with the photographer's deposit. Both stakes (2B) are now at UMA.",
+    S.acc?.noAssertion ? `Bond returned: ${S.acc.bondReason}. No accusation opened; the bond B was credited back to the Accuser.`
+      : "Paprika checked the commitment and sent the case to UMA's vote. UMA holds both stakes (B from the accuser, B from the photographer's deposit) until the vote, then pays the winner.",
     "in UMA an undisputed claim is accepted as true. Without the immediate dispute a false accusation would win by silence against a photographer who was not watching.",
     S.actionTxs, "Accuser", "reveal") }));
   on("btn-vote-fake", () => run("UMA vote", () => doVote(true), { after: explainOutcome }));
@@ -1419,6 +1579,12 @@ function fatal(reason, title, howtoText, howto, retry = true) {
   if (howto) setText("fatal-howto", howto);
   q("fatal-retry").classList.toggle("hidden", !retry);
   q("fatal-message").classList.remove("hidden");
+  // The start command with this instance's real ports (the server tells them).
+  if (retry && !howto) fetch("/server-info.json", { cache: "no-store" }).then((r) => r.json()).then(({ rpcPort, webPort }) => {
+    const vars = [rpcPort !== 8545 ? `RPC_PORT=${rpcPort}` : "", webPort !== 5173 ? `WEB_PORT=${webPort}` : ""].filter(Boolean).join(" ");
+    setText("fatal-howto", `cd app\n${vars ? vars + " " : ""}npm start`);
+    setText("fatal-howto-text", `Start this instance (chain on port ${rpcPort}, web on port ${webPort}) with:`);
+  }).catch(() => {});
   // Retry by itself: reload when the server answers with a deployment whose contract exists on the chain.
   if (retry) setInterval(async () => {
     try {
@@ -1517,13 +1683,16 @@ async function main() {
         return;
       }
       await refreshBalances(false);
+      S.chainDown = false;
       q("chain-dot").classList.remove("off");
       updateRefundButtons();
       renderDeadline();
       syncButtons();
     } catch {
+      S.chainDown = true;   // actions are disabled until the chain answers again
       q("chain-dot").classList.add("off");
       setText("chain-label", "local chain not answering");
+      syncButtons();
     }
   }, 3000);
 }

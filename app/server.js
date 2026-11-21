@@ -32,6 +32,7 @@ function deploymentFile() {
 }
 
 // JSON-RPC methods the page needs (reads, transactions from the unlocked demo accounts, the demo clock).
+const RPC_MAX_BYTES = 1024 * 1024;   // /rpc body size limit (the page sends small requests)
 const RPC_ALLOWED = /^(eth_|net_version$|web3_clientVersion$|evm_increaseTime$|evm_setNextBlockTimestamp$|evm_mine$)/;
 
 // Content types by file extension. Unknown extensions are served as raw bytes.
@@ -83,19 +84,43 @@ function resolveFile(urlPath) {
 // Forwards one JSON-RPC POST body to the local chain and pipes the answer back.
 function proxyRpc(req, res) {
   const chunks = [];
-  req.on("data", (c) => chunks.push(c));
+  let size = 0, tooBig = false;
+  req.on("data", (c) => {
+    size += c.length;
+    if (size > RPC_MAX_BYTES) { tooBig = true; req.destroy(); return; }
+    if (!tooBig) chunks.push(c);
+  });
+  req.on("close", () => { if (tooBig && !res.headersSent) reply(res, 413, null, -32600, `request body larger than ${RPC_MAX_BYTES} bytes`); });
   req.on("end", () => {
+    if (tooBig) return reply(res, 413, null, -32600, `request body larger than ${RPC_MAX_BYTES} bytes`);
     const body = Buffer.concat(chunks);
     let calls;
-    try { calls = JSON.parse(body.toString("utf8")); } catch { calls = null; }
-    const list = Array.isArray(calls) ? calls : [calls];
-    const bad = list.find((c) => !c || typeof c.method !== "string" || !RPC_ALLOWED.test(c.method));
-    if (bad) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ jsonrpc: "2.0", id: bad?.id ?? null, error: { code: -32601, message: `method not allowed through /rpc: ${bad?.method}` } }));
-    }
-    forward(body, res);
+    try { calls = JSON.parse(body.toString("utf8")); } catch { return reply(res, 400, null, -32700, "invalid JSON"); }
+    const problem = checkRpc(calls);
+    if (problem) return reply(res, 403, null, -32601, problem);
+    forward(Buffer.from(JSON.stringify(calls)), res);   // forward the validated value, re-serialised
   });
+}
+
+// Validates a parsed JSON-RPC body: one request object, or a non-empty array of request objects, each with an
+// allowed method. Returns "" when valid, else the reason. null, scalars, empty or mixed arrays are refused.
+function checkRpc(calls) {
+  const isReq = (c) => c !== null && typeof c === "object" && !Array.isArray(c) && typeof c.method === "string";
+  const list = Array.isArray(calls) ? calls : [calls];
+  if (!list.length) return "empty batch";
+  if (list.length > 100) return "batch too large";
+  for (const c of list) {
+    if (!isReq(c)) return "not a JSON-RPC request object";
+    if (!RPC_ALLOWED.test(c.method)) return `method not allowed through /rpc: ${c.method}`;
+  }
+  return "";
+}
+
+// Sends a JSON-RPC error answer with an HTTP status (the request never reaches the chain).
+function reply(res, status, id, code, message) {
+  if (res.headersSent) return;
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }));
 }
 
 // Sends a JSON-RPC body to the local chain and pipes the answer back.
@@ -115,6 +140,10 @@ function forward(body, res) {
 // Answers one request: POST /rpc to the chain; GET/HEAD of a file; 404 otherwise. Nothing is cached.
 function handle(req, res) {
   if (req.method === "POST" && req.url.split("?")[0] === "/rpc") return proxyRpc(req, res);
+  if (req.url.split("?")[0] === "/server-info.json") {   // the real ports, for the page's "start the system" hint
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(JSON.stringify({ rpcPort: RPC_PORT, webPort: PORT }));
+  }
   if (req.url.split("?")[0] === "/deployment.json" && (req.method === "GET" || req.method === "HEAD")) return serveFile(deploymentFile(), req, res, "/deployment.json");
   if (req.method !== "GET" && req.method !== "HEAD") {
     res.writeHead(405, { "Content-Type": "text/plain" });

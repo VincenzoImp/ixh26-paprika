@@ -143,8 +143,8 @@ try {
   expect(await t("btn-attest").isEnabled(), "still taken: Sign & attest enabled");
   await shot("camera-still-ready-to-attest", "capture-preview");
   await click("btn-attest");
-  expect((await text("capture-result")).startsWith("Attested"), "selfie attested");
-  await shot("selfie-attested", "btn-attest");
+  expect((await text("capture-result")).includes("Recorded on chain"), "selfie attested");
+  await shot("selfie-attested", "capture-result-box");
 
   // Verifier: drop the downloaded selfie (real drop), then one pixel changed.
   const selfie = await download(0);
@@ -173,7 +173,7 @@ try {
   await shot("deposit-refunded", "deposits-table");
   await t("tab-verifier").click();
   await click("btn-verify-last");
-  expect((await verdict()) === "unchallenged", "refunded selfie: not proven fake");
+  expect((await verdict()) === "unchallenged", "refunded selfie: accusation rejected, deposit returned");
   await shot("verifier-not-proven-fake");
 
   // Two sample photos; the second is proven fake, so the key is flagged.

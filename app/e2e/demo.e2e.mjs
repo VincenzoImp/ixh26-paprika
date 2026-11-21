@@ -209,7 +209,11 @@ async function story() {
       document.querySelector('[data-testid="explainer"]').getBoundingClientRect().bottom <= document.querySelector("footer").getBoundingClientRect().top + 1));
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  await check("F1: parameters always visible", await t("param-photo-window").isVisible() && await t("param-fee").isVisible());
+  // F1 (moved by review 2): B and T_photo are always visible in the protocol map; all four in "Parameters & contracts".
+  await check("F1: B and T_photo always visible (protocol map)", (await text("map-attest")).includes(fmt(B)) && (await text("map-challenge")).includes((await t("param-photo-window").textContent()).trim()));
+  await t("params-toggle").click();
+  await check("F1: all four parameters in the Parameters panel", await t("param-photo-window").isVisible() && await t("param-fee").isVisible() && await t("param-reveal-window").isVisible());
+  await t("params-toggle").click();
   await eq("param B shown", (await t("param-bond").textContent()).trim(), fmt(B));
   await headerMatchesChain("start");
 
@@ -237,7 +241,7 @@ async function story() {
   const file1 = await downloadLast(0);
   // M3: the same photo cannot be attested twice by the same key, and a forced click sends nothing.
   await check("M3: re-attest button disabled", !(await t("btn-attest").isEnabled()));
-  await check("M3: re-attest reason shown", /already attested/i.test(await text("attest-why")));
+  await check("M3: one result block after the attest (no warning)", /Recorded on chain/.test(await text("capture-result")) && !(await t("attest-refusal").isVisible()));
   const ra0 = await money();
   await t("btn-attest").evaluate((b) => { b.disabled = false; b.click(); });
   await page.waitForTimeout(150); await idle();
@@ -311,7 +315,7 @@ async function story() {
   await eq("refund: My photos row refunded", await t("deposit-row").first().getAttribute("data-state"), "refunded");
   await verifyFile(file1);
   await eq("verify after refund: unchallenged", await verdict(), "unchallenged");
-  await check("F2: refunded after a rejected accusation reads 'Not proven fake'", /Not proven fake/.test(await text("verify-title")));
+  await check("F2: refunded after a rejected accusation says what happened", /accusation rejected · deposit returned/.test(await text("verify-title")));
   // B4: a refunded photo is not offered to the accuser, and the reason is shown.
   await t("tab-accuser").click();
   const opts1 = await t("select-accuse-photo").locator("option").evaluateAll((os) => os.map((o) => o.value));
