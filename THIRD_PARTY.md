@@ -13,6 +13,8 @@ libraries or design assets), but they must be mentioned in your submission."*
 | solc (Solidity compiler) | 0.8.28 | GPL-3.0 | https://github.com/ethereum/solidity | Compiles `Paprika.sol`. Hardhat downloads it |
 | `@uma/contracts-node` | 0.4.28 | AGPL-3.0-or-later | https://github.com/UMAprotocol/protocol | `contract/lib/deploy-uma-dvm.js`, `contract/lib/vote.js`: UMA's compiled contracts (OptimisticOracleV3, Finder, Store, AddressWhitelist, IdentifierWhitelist, Registry, VotingV2, VotingToken, FixedSlashSlashingLibrary, and UMA's copy of WETH9 as the bond currency), deployed unchanged on the local chain. UMA compiled them with solc 0.8.16. No UMA source is copied into this repository |
 | Playwright | 1.65.1 | Apache-2.0 | https://github.com/microsoft/playwright | `app/e2e/`: browser tests and screenshots (dev dependency; drives Chromium) |
+| Piper TTS (voice `en_US-ryan-high`) | 1.x | MIT (voice: see model card) | https://github.com/rhasspy/piper | `video/`: narration of the presentation video |
+| FFmpeg | 7.x | LGPL/GPL | https://ffmpeg.org | `video/`: video assembly |
 | Node.js | 26 or later | MIT | https://nodejs.org | Runtime for the tests, the scripts and the app |
 
 The interfaces `IOptimisticOracleV3` and `IOptimisticOracleV3CallbackRecipient` in `Paprika.sol` repeat the function
