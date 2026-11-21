@@ -77,7 +77,7 @@ try {
   // Verify the downloaded file; tamper test.
   const dl = page.waitForEvent("download");
   await t("btn-download").click();
-  const file1 = path.join(os.tmpdir(), `paprika-screens-${Date.now()}.jpg`);
+  const file1 = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "paprika-")), "selfie.jpg");
   await (await dl).saveAs(file1);
   await go("#/verify");
   await t("input-verify-file").setInputFiles(file1);
@@ -101,8 +101,9 @@ try {
   expect((await state("record-verdict")) === "accused", "record under accusation");
   await shot("under-accusation-vote-pending");
   await t("local-tools-toggle").click();
-  await shot("local-network-tools", "local-tools-bar");
-  await click("btn-vote-not-fake");
+  await shot("local-network-tools");
+  await t("local-tools-close").click();
+  await click("btn-vote-not-fake-inline");
   expect(/Accusation rejected/.test(await text("settle-outcome")), "outcome not proven");
   await shot("outcome-not-proven", "record-accusations");
   await t("protocol-toggle").check();
@@ -112,7 +113,10 @@ try {
   // Alice: claim, skip wait, refund; the explorer shows the decoded refund.
   await mm.use("alice"); await page.waitForTimeout(800); await idle();
   await shot("alice-claimable-credit");
-  await click("btn-claim-record");
+  await t("account-button").click();
+  await shot("alice-account-menu-claim");
+  await click("btn-claim");
+  await t("account-button").click();   // close the menu
   await click("btn-skip-wait");
   await shot("record-refundable");
   await click("btn-refund");

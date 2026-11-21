@@ -41,7 +41,8 @@ export function plainError(e) {
 
 // Runs one user action. label: toast title; fn: async () => result; opts: { after(result), step, signs }.
 // Every transaction the library reports during fn is listed in the toast with an explorer link.
-export async function act(label, fn, { after = null, step = null, local = false } = {}) {
+export async function act(label, fn, opts = {}) {
+  const { after = null, step = null, local = false } = opts;
   if (S.busy) return null;
   S.busy = true;
   S.actionTxs = [];
@@ -57,7 +58,7 @@ export async function act(label, fn, { after = null, step = null, local = false 
     result = await fn();
     ok = true;
     const last = S.actionTxs[S.actionTxs.length - 1];
-    t.update("ok", last ? `Confirmed in block ${last.blockNumber}` : "Done", S.actionTxs.map(txLabel));
+    t.update("ok", opts.okText || (last ? `Confirmed in block ${last.blockNumber}` : "Done"), S.actionTxs.map(txLabel));
   } catch (e) {
     console.warn(label, e);
     t.update(isRejection(e) ? "rejected" : "failed", `${isRejection(e) ? "" : "Failed: "}${plainError(e)}`, S.actionTxs.map(txLabel));

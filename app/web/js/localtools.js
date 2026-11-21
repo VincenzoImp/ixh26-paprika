@@ -15,6 +15,10 @@ export const isLocal = () => !!S.network?.local;
 // Why the clock cannot move now ("" if it can): never while an accusation waits for its vote.
 export function skipBlocker() {
   if (S.accusations.some((a) => a.open) || S.records.some((r) => stateOf(r) === "accused")) return "Not while an accusation waits for its UMA vote: resolve the vote first.";
+  // A commitment of this browser that is not revealed yet: skipping time would end its reveal period and burn the bond.
+  const rw = Number(S.ctx.params.revealWindow);
+  if (Object.values(S.mine || {}).some((m) => m.commitment && !m.assertionId && !m.noAssertion && !m.forfeited && (m.pending || S.chain.timestamp + 1 <= Number(m.committedAt) + rw)))
+    return "Not while an accusation is committed but not revealed: reveal it first, or skipping would make it expire.";
   return "";
 }
 
@@ -50,33 +54,30 @@ export async function resolveVote(assertionId, fakeProven) {
 // A dashed inline chip (local network facility).
 export function localChip(label, onclick, { testid, disabled = "" } = {}) {
   if (!isLocal()) return null;
-  return h("button", { class: "localchip", testid, onclick, disabled: !!disabled, title: disabled || "Local network tool: not available on public networks" }, `⏩ ${label}`);
+  return h("button", { class: "localchip", testid, onclick, disabled: !!disabled, title: disabled || "Local network tool: not available on public networks" }, label);
 }
 
 let open = false;
-// Draws the local tools pill/bar (bottom-left).
+// Draws the local tools: a button in the header and, when open, a bar in the page flow under the banner (it never
+// covers content). Only the chain clock lives here; the vote chips sit next to the vote they resolve.
 export function renderTools() {
-  const el = tid("local-tools");
-  if (!el) return;
-  if (!isLocal() || !S.ctx) { el.classList.add("hidden"); return; }
+  const btn = tid("local-tools-toggle"), el = tid("local-tools");
+  if (!btn || !el) return;
+  const show = isLocal() && !!S.ctx;
+  btn.classList.toggle("hidden", !show);
+  if (!show || !open) { el.classList.add("hidden"); btn.classList.toggle("on", false); return; }
+  btn.classList.toggle("on", true);
   el.classList.remove("hidden");
-  if (!open) {
-    mount(el, h("button", { class: "localpill", testid: "local-tools-toggle", onclick: () => { open = true; renderTools(); } }, "⚙ Local network"));
-    return;
-  }
-  const openAcc = S.accusations.filter((a) => a.open);
   const blocker = skipBlocker();
   mount(el, h("div", { class: "localbar", testid: "local-tools-bar" },
-    h("div", { class: "lb-head" }, h("b", {}, "Local network tools"), h("span", { class: "d" }, ` · ${S.network.name} · not available on public networks`),
-      h("button", { class: "t-close", onclick: () => { open = false; renderTools(); } }, "–")),
-    h("div", { class: "lb-row" }, h("span", {}, "Chain clock ", h("b", { testid: "clock-time" }, exactTime(S.chain.timestamp))),
-      h("button", { testid: "btn-advance-time", disabled: !!blocker || S.busy, title: blocker, onclick: () => skipWait() },
-        `⏩ Skip ${dur(Number(S.ctx.params.photoWindow) + Number(S.ctx.params.revealWindow) + 1)}`),
-      blocker ? h("span", { class: "d", testid: "advance-why" }, blocker) : null),
-    h("div", { class: "lb-row" }, h("span", {}, "UMA vote · simulated voters (3 local accounts)"),
-      openAcc.length ? openAcc.map((a) => h("span", { class: "lb-acc" }, h("a", { class: "link mono", href: `#/record/${a.photoHash}` }, `${a.photoHash.slice(0, 8)}…`),
-        h("button", { testid: "btn-vote-fake", disabled: S.busy, onclick: () => resolveVote(a.assertionId, true) }, "Fake proven"),
-        h("button", { testid: "btn-vote-not-fake", disabled: S.busy, onclick: () => resolveVote(a.assertionId, false) }, "Not proven")))
-        : h("span", { class: "d" }, "no accusation is waiting for a vote")),
-    h("div", { class: "lb-row d" }, "Test ETH comes from Hardhat's prefunded accounts; it has no value.")));
+    h("b", {}, "Local network tools"), h("span", { class: "d" }, `${S.network.name} only · not available on public networks`),
+    h("span", {}, "Chain clock ", h("b", { testid: "clock-time" }, exactTime(S.chain.timestamp))),
+    h("button", { testid: "btn-advance-time", disabled: !!blocker || S.busy, title: blocker, onclick: () => skipWait() },
+      `Skip ${dur(Number(S.ctx.params.photoWindow) + Number(S.ctx.params.revealWindow) + 1)}`),
+    blocker ? h("span", { class: "why", testid: "advance-why" }, blocker) : null,
+    h("span", { class: "d" }, "UMA's vote uses UMA's voting contract with 3 local voter accounts; resolve it on the record page."),
+    h("button", { class: "t-close", testid: "local-tools-close", title: "Close the local tools", onclick: () => { open = false; renderTools(); } }, "Close")));
 }
+
+// Opens or closes the local tools bar (header button).
+export function toggleTools() { open = !open; renderTools(); }

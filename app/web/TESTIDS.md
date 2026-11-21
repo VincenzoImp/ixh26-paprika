@@ -72,3 +72,19 @@ Accuse panel: `accuse-panel`, `accuse-stepper`, `accuse-step-1` … `accuse-step
 `explorer-tx-row` (many), `tx-page`, `tx-hash`, `tx-status`, `tx-from`, `tx-call` (`data-method`, e.g.
 `Paprika.attest`), `tx-events`, `tx-event` (many; `data-event`, e.g. `Attested`), `tx-open-record`, `tx-missing`,
 `block-page`, `address-page`, `device-page`.
+
+## Added in the staging-3 / design pass
+
+- Shell: `local-tools-toggle` is now a header button ("Local network tools"); the bar `local-tools-bar` opens in the page
+  flow under the banner (never over content) and has `local-tools-close`. It holds only the chain clock
+  (`clock-time`, `btn-advance-time`, `advance-why`); the vote chips live next to the waiting vote.
+- `btn-switch-chain` reads "Wrong network · Switch to Paprika local"; the `network-pill` turns rose then.
+- `toast-close`; ok and rejected toasts close by themselves after 6 s, failed ones stay.
+- Dialog confirm labels: `confirm-attest-ok` "Attest in MetaMask", `confirm-commit-ok` "Commit in MetaMask",
+  `prepare-ok` "Prepare in MetaMask", `revoke-ok` "Revoke in MetaMask" (danger, focus on Cancel),
+  `forfeit-dialog` / `forfeit-ok` / `forfeit-cancel` (danger).
+- Record: `record-bad-link` (malformed link), the action and `record-action-why` sit inside `record-verdict`;
+  `record-scope` under the lifecycle; `record-accusation-count` ("1 committed by you (hidden until you reveal)");
+  `settle-money` (three cells: accuser, depositor, UMA fee); accuse panel `commit-pending`, `btn-discard-pending`,
+  `commit-error` ("Add the evidence first…"), `vote-in-progress`; stepper labels "1 Commit" … "4 Settled".
+- Menu: `btn-claim` shown only when the credit is above 0; My activity's claim is "Claim to wallet".

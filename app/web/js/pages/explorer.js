@@ -50,7 +50,7 @@ function search() {
 
 // Draws an explorer route: { view: "home" | "tx" | "block" | "address" | "device", id }.
 export function render(root, { view, id }) {
-  const head = h("div", { class: "rec-head" }, h("h1", {}, S.network?.local ? "Localhost explorer" : "Explorer"), search());
+  const head = h("div", { class: "rec-head" }, h("h1", {}, `Explorer · ${S.network?.name || "network"} (chain ${S.network?.chainId})`), search());
   if (view === "tx") return mount(root, head, txPage(id));
   if (view === "block") return mount(root, head, blockPage(id));
   if (view === "address") return mount(root, head, addressPage(id));
@@ -71,7 +71,7 @@ export function render(root, { view, id }) {
 function txPage(hash) {
   const d = useData(`tx:${hash}`, () => explorer.tx(hash));
   if (!d) return h("p", { class: "d" }, "Reading…");
-  if (d.error || !d.tx) return h("p", { class: "err", testid: "tx-missing" }, "No such transaction on this network.");
+  if (d.error || !d.tx) return h("div", { class: "card empty-state", testid: "tx-missing" }, h("b", {}, `No transaction ${String(hash).slice(0, 10)}… on ${S.network?.name || "this network"}.`), " ", h("a", { class: "link", href: "#/explorer" }, "← Back to Explorer"));
   const { tx, receipt, block } = d;
   const call = decodeCall(tx);
   const logs = (receipt?.logs || []).map(decodeLog);

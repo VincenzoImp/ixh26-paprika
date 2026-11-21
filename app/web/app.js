@@ -10,7 +10,8 @@ import { S, on, emit, load } from "./js/state.js";
 import { loadNetwork, readAccusations } from "./js/api.js";
 import { renderAccount, reconnect, listen, refreshAccount, loadDevice, refreshDevice } from "./js/wallet.js";
 import { setOpen, render as renderDrawer } from "./js/drawer.js";
-import { renderTools } from "./js/localtools.js";
+import { renderTools, toggleTools } from "./js/localtools.js";
+import { wrongChain } from "./js/wallet.js";
 import * as verifyPage from "./js/pages/verify.js";
 import * as attestPage from "./js/pages/attest.js";
 import * as recordPage from "./js/pages/record.js";
@@ -37,7 +38,7 @@ function route() {
 function draw() {
   if (!S.ctx) return;
   const { page, parts, params } = route();
-  const nav = { verify: "verify", record: "verify", attest: "attest", activity: "activity", explorer: "explorer", tx: "explorer", block: "explorer", address: "explorer", device: "explorer" };
+  const nav = { verify: "verify", attest: "attest", activity: "activity", explorer: "explorer", tx: "explorer", block: "explorer", address: "explorer", device: "explorer" };
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("on", a.dataset.v === nav[page]);
   const root = tid("page");
   root.dataset.page = page;
@@ -49,14 +50,15 @@ function draw() {
     else verifyPage.render(root);
   } catch (e) {
     console.error(e);
-    mount(root, h("p", { class: "err" }, `This page could not be drawn: ${errText(e)}`));
+    mount(root, h("p", { class: "t-bad" }, `This page could not be drawn: ${errText(e)}`));
   }
   renderAccount();
   renderTools();
   const pill = tid("network-pill");
-  pill.textContent = `● ${S.network.name} · #${S.chain.blockNumber}`;
+  // One network indicator: green when fine, rose when the chain is down or MetaMask is on another network.
+  pill.textContent = S.chainDown ? "● Network down · retrying" : wrongChain() ? "● Wrong network in MetaMask" : `● ${S.network.name} · block ${S.chain.blockNumber}`;
   pill.title = `Chain ${S.network.chainId} · chain time ${new Date(S.chain.timestamp * 1000).toLocaleString()}`;
-  pill.classList.toggle("down", S.chainDown);
+  pill.classList.toggle("down", S.chainDown || wrongChain());
 }
 
 // Re-reads the chain: block, records, accusations, the account and the device key; then redraws.
@@ -112,7 +114,13 @@ async function main() {
   tid("protocol-toggle").addEventListener("change", (e) => setOpen(e.target.checked));
   await refresh();
   on("change", draw);
-  on("account", async () => { try { await refresh(); } catch (e) { console.warn(e); } draw(); });
+  on("account", async () => {
+    // Another account in MetaMask: an open accuse form belonged to the previous one.
+    if (/\/accuse/.test(location.hash)) history.replaceState(null, "", location.hash.replace(/\/accuse/, ""));
+    try { await refresh(); } catch (e) { console.warn(e); }
+    draw();
+  });
+  tid("local-tools-toggle").addEventListener("click", toggleTools);
   on("drawer-refresh", renderDrawer);
   addEventListener("hashchange", draw);
   draw();

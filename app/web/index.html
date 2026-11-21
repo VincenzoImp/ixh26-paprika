@@ -20,17 +20,20 @@
   <a href="#/activity" data-v="activity" data-testid="nav-activity">My activity</a>
   <a href="#/explorer" data-v="explorer" data-testid="nav-explorer">Explorer</a>
  </nav>
- <label class="pv" title="Show how the protocol works, step by step"><input type="checkbox" data-testid="protocol-toggle"> Protocol view</label>
- <span class="netpill" data-testid="network-pill">● connecting…</span>
- <div class="account" data-testid="account"></div>
+ <div class="hdr-right">
+  <button class="localpill hidden" data-testid="local-tools-toggle" title="Tools of the local test network">Local network tools</button>
+  <label class="pv" title="Show how the protocol works, step by step"><input type="checkbox" data-testid="protocol-toggle"> Protocol view</label>
+  <span class="netpill" data-testid="network-pill">● connecting…</span>
+  <div class="account" data-testid="account"></div>
+ </div>
 </header>
-<div class="netbanner hidden" data-testid="network-banner">Local test network · test ETH has no value · UMA voters are simulated</div>
+<div class="netbanner hidden" data-testid="network-banner">Local test network · test ETH has no value · UMA's vote is cast by 3 local voter accounts</div>
+<div class="localtools hidden" data-testid="local-tools"></div>
 <div class="menu-slot hidden" data-testid="account-menu-slot"></div>
 <div class="shell">
  <main data-testid="page"><p class="d">Loading…</p></main>
  <aside class="drawer hidden" data-testid="protocol-drawer"></aside>
 </div>
 <div class="toasts" data-testid="toasts"></div>
-<div class="localtools hidden" data-testid="local-tools"></div>
 </body>
 </html>

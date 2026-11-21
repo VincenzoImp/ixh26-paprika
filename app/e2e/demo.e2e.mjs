@@ -77,10 +77,24 @@ async function story() {
   const pa = await money();
   await check("prepare: Alice holds WETH for deposits (chain)", pa.alice >= 3n * B);
   await check("prepare: Paprika approved (chain)", (await ctx.contracts.token.allowance(mm.address("alice"), ctx.addresses.paprika)) >= 1000n * B);
+  const wReg = (await money()).alice;
   await click("btn-register");
   const key1 = await page.evaluate(() => window.paprikaState.device.keyId);
   await eq("register: device key active (chain)", (await deviceOnChain(key1)).status, "active");
+  await eq("register: free (Alice WETH unchanged, chain)", (await money()).alice, wReg);
+  await eq("register: device status shown in the menu", await t("device-status").getAttribute("data-status"), "active");
+  const ethChain = Number(await ctx.provider.getBalance(mm.address("alice"))) / 1e18;
+  await check("numbers: menu ETH = chain (rounded)", Math.abs(parseFloat(await text("menu-eth")) - ethChain) < 1);
+  await eq("numbers: menu WETH = chain", await text("menu-weth"), fmt((await money()).alice));
   await t("account-button").click();
+
+  // ---- camera path (Chromium's fake camera): live preview, still, stream stopped
+  await go("#/attest");
+  await click("btn-start-camera");
+  await check("camera: live preview shown", await t("camera-video").isVisible());
+  await click("btn-take-photo");
+  await check("camera: the still is ready to attest", await t("btn-attest").isEnabled() && /selfie/.test(await text("capture-file-name")));
+  await check("camera: the stream is stopped after the photo", await page.evaluate(() => !document.querySelector("video")));
 
   // ---- attest: confirmation, exactly one signature
   await go("#/attest");
@@ -88,7 +102,7 @@ async function story() {
   const m0 = await money();
   const sig0 = mm.state.sent.length;
   await t("btn-attest").click();
-  await check("attest: confirmation dialog shows the deposit", /1 WETH|deposit/i.test(await t("confirm-attest-dialog").innerText()));
+  await check("attest: confirmation dialog shows the amount B", (await t("confirm-attest-dialog").innerText()).includes(fmt(B)));
   await t("confirm-attest-ok").click(); await page.waitForTimeout(150); await idle();
   await eq("attest: exactly one MetaMask signature after Prepare account", mm.sentSince(sig0).length, 1);
   const toast1 = await driver(page).lastToast();
@@ -100,7 +114,6 @@ async function story() {
   const m1 = await money();
   await eq("attest: Alice WETH −B (chain)", m1.alice - m0.alice, -B);
   await eq("attest: Paprika +B (chain)", m1.paprika - m0.paprika, B);
-  await check("attest: re-attesting the same file is blocked", !(await t("btn-attest").isVisible().catch(() => false)) || !(await t("btn-attest").isEnabled()));
   // empty file refused, previous photo cleared
   await t("btn-new-photo").click();
   await click("btn-sample-image");
@@ -111,6 +124,7 @@ async function story() {
   // ---- record page
   await go(`#/record/${photo1}`);
   await eq("record: verdict attested", await t("record-verdict").getAttribute("data-state"), "attested");
+  await check("record: refund not offered before the period ends", !(await page.getByTestId("btn-refund").count()));
   await eq("record: lifecycle on the challenge period", await t("record-lifecycle").getAttribute("data-current"), "Challenge period");
   await check("record: honest sentence names the anchor block", (await text("verify-honest-sentence")).includes(String(r1.anchorBlock)));
   await check("record: history lists the attest with a tx link", (await t("history-row").count()) >= 1);
@@ -130,6 +144,10 @@ async function story() {
   await t("verify-dropzone").dispatchEvent("drop", { dataTransfer: dt });
   await page.waitForFunction(() => document.querySelector('[data-testid="verify-status"]')?.dataset.state === "attested", null, { timeout: 8000 }).catch(() => {});
   await eq("verify: a dropped file verifies as attested", await t("verify-status").getAttribute("data-state"), "attested");
+  // the same file again on Attest: refused before any transaction, with the reason
+  await go("#/attest"); if (await t("btn-new-photo").isVisible().catch(() => false)) await t("btn-new-photo").click();
+  await t("input-capture-file").setInputFiles(file1); await page.waitForTimeout(400); await idle();
+  await check("attest: re-attesting the same file is disabled with the reason", !(await t("btn-attest").isEnabled()) && /already attested/i.test(await text("attest-blocked")));
 
   // ---- explorer decodes the attest transaction
   const attestTx = mm.state.sent[sig0].hash;
@@ -155,14 +173,20 @@ async function story() {
   const before = await money();
   const sig1 = mm.state.sent.length;
   await t("btn-commit").click();
-  await check("commit: confirmation dialog shows the bond", /Bond|bond/.test(await t("confirm-commit-dialog").innerText()));
+  await check("commit: confirmation dialog shows the bond amount B", (await t("confirm-commit-dialog").innerText()).includes(fmt(B)));
   await t("confirm-commit-ok").click(); await page.waitForTimeout(150); await idle();
+  await eq("toast: commit confirmed", (await driver(page).lastToast())?.status, "ok");
+  await check("commit: Details say the accusation is committed and hidden", /committed by you \(hidden until you reveal\)/.test(await text("record-accusation-count")));
+  await t("local-tools-toggle").click();
+  await check("B1: skip wait disabled while the commitment is unrevealed, with the reason", !(await t("btn-advance-time").isEnabled()) && (await t("advance-why").isVisible()));
+  await t("local-tools-close").click();
   await eq("commit: exactly one MetaMask signature after Prepare account", mm.sentSince(sig1).length, 1);
   await eq("commit: record still attested (the commitment hides the target)", (await recordOf(photo1)).state, "attested");
   await page.reload(); await page.waitForTimeout(1200); await idle();
-  await check("reload after commit: Reveal still offered", await t("btn-reveal").isVisible());
-  await check("reload after commit: reveal countdown shown", /Reveal before/.test(await text("reveal-deadline")));
-  await click("btn-reveal");
+  await check("reload after commit: Reveal still offered and enabled", await t("btn-reveal").isEnabled());
+  await check("reload after commit: reveal countdown shown", /Reveal within/.test(await text("reveal-deadline")));
+  const until0 = BigInt((await recordOf(photo1)).accusableUntil);
+  await eq("toast: reveal confirmed", (await click("btn-reveal"))?.status, "ok");
   await eq("reveal: chain record accused", (await recordOf(photo1)).state, "accused");
   await eq("reveal: UMA OOv3 holds 2B (chain)", (await money()).oo, 2n * B);
   const acc = (await lib.listAccusations(ctx)).find((a) => a.open);
@@ -179,9 +203,12 @@ async function story() {
   await p2.goto(`${inst.base}/#/record/${photo1}`); await p2.waitForTimeout(1200);
   await check("second window: sees the open accusation and the vote chip", await p2.getByTestId("btn-vote-not-fake-inline").isVisible());
   const d2 = driver(p2);
-  const [o1, o2] = await Promise.all([click("btn-vote-not-fake"), d2.click("btn-vote-not-fake-inline")]);
-  await check("concurrency: no raw UMA error in either window", !/Revealed data|Cannot commit|coalesce/i.test(`${o1?.text} ${o2?.text}`), `${o1?.text} | ${o2?.text}`);
+  await t("local-tools-close").click();
+  const [o1, o2] = await Promise.all([click("btn-vote-not-fake-inline"), d2.click("btn-vote-not-fake-inline")]);
+  await check("concurrency: both windows got an answer, none a raw UMA error", !!o1 && !!o2 && !/Revealed data|Cannot commit|coalesce/i.test(`${o1?.text} ${o2?.text}`), `${o1?.text} | ${o2?.text}`);
   await check("concurrency: the accusation is decided once", !(await lib.listAccusations(ctx)).some((a) => a.open));
+  await p2.reload(); await p2.waitForTimeout(1500);
+  await eq("A-2: the second window shows the same outcome", await p2.getByTestId("settle-outcome").first().getAttribute("data-outcome"), "not-proven");
   await ctx2.close();
   await page.reload(); await page.waitForTimeout(1200); await idle();
   const after = await money();
@@ -190,12 +217,16 @@ async function story() {
   await eq("vote not proven: Alice credit +B − fB (chain)", after.cAlice - before.cAlice, B - fB);
   await eq("vote not proven: Store +fB (chain)", after.store - before.store, fB);
   await check("vote not proven: outcome in words on the record", /Accusation rejected/.test(await text("settle-outcome")));
+  await check("vote not proven: the challenge period was extended (chain)", BigInt((await recordOf(photo1)).accusableUntil) > until0);
 
   // ---- Alice: claim, skip wait, refund
   await mm.use("alice"); await page.waitForTimeout(800); await idle();
   await check("switch back: Alice's claim badge shows her credit", (await text("account-claim-badge")).includes(fmt(B - fB)));
+  await check("record: Claim does not replace the record's action (credit lives in the menu)", !(await page.getByTestId("btn-claim-record").count()));
   const c0 = await money();
-  await click("btn-claim-record");
+  await t("account-button").click();
+  await click("btn-claim");
+  await t("account-button").click();   // close the menu
   const c1 = await money();
   await eq("claim: credit now 0 (chain)", c1.cAlice, 0n);
   await eq("claim: wallet + credit (chain)", c1.alice - c0.alice, c0.cAlice);
@@ -206,8 +237,11 @@ async function story() {
   await eq("refund: chain record refunded", (await recordOf(photo1)).state, "refunded");
   await eq("refund: Alice credit +B (chain)", (await money()).cAlice - f0.cAlice, B);
   await eq("refund: verdict says what happened", await t("record-verdict").getAttribute("data-state"), "unchallenged");
-  await check("refund: verdict text 'accusation rejected · deposit returned'", /accusation rejected · deposit returned/.test(await text("record-verdict-title")));
-  await click("btn-claim-record");
+  await check("refund: verdict says 'Not proven fake · deposit refunded'", /Not proven fake · deposit refunded/.test(await text("record-verdict-title")));
+  await check("B4: a refunded record offers no accusation, with the reason", !(await t("btn-accuse").isVisible().catch(() => false)) && (await t("record-action-why").isVisible()));
+  await t("account-button").click();
+  await click("btn-claim");
+  await t("account-button").click();
 
   // ---- second photo: proven fake
   await go("#/attest"); await click("btn-sample-image");
@@ -225,10 +259,17 @@ async function story() {
   const dev = await deviceOnChain(key1);
   await eq("vote fake: device flagged, reason fake-proven (chain)", `${dev.status}/${dev.reason}`, "flagged/fake-proven");
   await eq("vote fake: Bob net +B − fB (chain)", a1.bob + a1.cBob - a0.bob - a0.cBob, B - fB);
+  await eq("vote fake: Store +fB (chain)", a1.store - a0.store, fB);
+  await check("B4: a proven-fake record offers no accusation", !(await t("btn-accuse").isVisible().catch(() => false)));
+  await check("vote fake: the verdict says the device key is flagged", /flagged/.test(await text("record-verdict-detail")));
   await eq("vote fake: verdict proven fake", await t("record-verdict").getAttribute("data-state"), "fake");
   await t("protocol-toggle").check(); await page.waitForTimeout(300);
   await check("protocol view: measured on chain = rule for the fake-proven outcome", /Measured on chain = expected by the rule ✓/.test(await text("settle-check")), await text("settle-check").catch(() => ""));
   await t("protocol-toggle").uncheck();
+  const wb0 = await money();
+  await t("account-button").click(); await click("btn-claim"); await t("account-button").click();
+  const wb1 = await money();
+  await eq("claim: Bob withdraws his winnings (wallet + credit, chain)", wb1.bob - wb0.bob, wb0.cBob);
 
   // ---- Alice with the flagged key; new key; revoke; rejection in the wallet
   await mm.use("alice"); await page.waitForTimeout(800); await idle();
@@ -270,7 +311,8 @@ async function story() {
   const p3 = await ctx3.newPage();
   await p3.route("**/network.json", async (route) => { const r = await route.fetch(); const j = await r.json(); await route.fulfill({ json: { ...j, local: false, name: "Test network" } }); });
   await p3.goto(`${inst.base}/#/attest`); await p3.waitForTimeout(1500);
-  await check("local:false: no local tools, banner or sample image", !(await p3.getByTestId("local-tools-toggle").count()) && !(await p3.getByTestId("network-banner").isVisible()) && !(await p3.getByTestId("btn-sample-image").count()));
+  await check("local:false: the app works (Attest page and Connect shown)", (await p3.getByRole("heading", { name: "Attest a photo" }).isVisible()) && (await p3.getByTestId("btn-connect").isVisible()));
+  await check("local:false: no local tools, banner or sample image", !(await p3.getByTestId("local-tools-toggle").isVisible()) && !(await p3.getByTestId("network-banner").isVisible()) && !(await p3.getByTestId("btn-sample-image").count()));
   await ctx3.close();
 
   // ---- layout
@@ -287,8 +329,9 @@ try {
   const deployment = await (await fetch(`${inst.base}/deployment.json`)).json();
   lib = await import(path.join(APP, "lib", "paprika.js"));
   ctx = lib.connect({ rpcUrl: inst.rpc, deployment });
-  browser = await chromium.launch({ headless: !process.env.HEADED });
+  browser = await chromium.launch({ headless: !process.env.HEADED, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  await context.grantPermissions(["camera"], { origin: inst.base });
   mm = await installFakeMetaMask(context, inst.rpc);
   page = await context.newPage();
   page.on("pageerror", (e) => consoleErrors.push("pageerror: " + e.message));

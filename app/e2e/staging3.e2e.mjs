@@ -201,9 +201,8 @@ async function run() {
   // vote not proven via the local tools bar
   const cB0 = await lib.credits(ctx, mm.address("bob")), cA0 = await lib.credits(ctx, mm.address("alice"));
   const until0 = BigInt((await lib.verifyPhoto(ctx, X))[0].accusableUntil);
-  await t("local-tools-toggle").click().catch(() => {}); await page.waitForTimeout(200);
-  await click("btn-vote-not-fake");
-  await page.locator("[data-testid=local-tools-bar] .t-close").click().catch(() => {});
+  // (the resolve chips moved next to the waiting vote on the record page; the tools bar keeps only the clock)
+  await click("btn-vote-not-fake-inline");
   await eq("vote not proven: X back to attested (chain)", await stateOf(X), "attested");
   const cA1 = await lib.credits(ctx, mm.address("alice"));
   await check("vote not proven: Alice credited B - fee (chain)", cA1 - cA0 > 0n && cA1 - cA0 < B, `${cA1 - cA0}`);
@@ -286,13 +285,19 @@ async function run() {
   await t("input-evidence").fill("reload mid-transaction");
   const rel2 = mm.hold();
   await t("btn-commit").click(); await t("confirm-commit-ok").click();
-  await sleep(1200);
+  await sleep(3000);   // until the commit's confirmation is open in the wallet (the page publishes the evidence first)
   await page.reload(); release && rel2(); await sleep(2500); await idle();
   await go(`#/record/${V}`); await page.waitForTimeout(800); await idle();
   const bobCommits = (await ctx.contracts.paprika.queryFilter(ctx.contracts.paprika.filters.Committed?.() ?? "Committed").catch(() => [])).length;
   await check("reload mid-commit: the signed commitment can still be revealed or forfeited from the page (salt kept before signing)",
     (await t("btn-reveal").isVisible().catch(() => false)) || (await t("btn-forfeit").isVisible().catch(() => false)), `commit events on chain: ${bobCommits}`);
   await shot("reload-midcommit");
+  // Bob finishes his accusation: a live commitment blocks every time skip (M1), so it must be revealed and decided first.
+  for (const photo of [V, Z]) {
+    await go(`#/record/${photo}`); await page.waitForTimeout(800); await idle();
+    if (await t("btn-reveal").isVisible().catch(() => false)) { await click("btn-reveal"); await page.waitForTimeout(800); }
+    if (await t("btn-vote-not-fake-inline").isVisible().catch(() => false)) await click("btn-vote-not-fake-inline");
+  }
 
   // ---------------------------------------------------------------- skip wait, refund, revoke (Alice)
   await as("alice", d);

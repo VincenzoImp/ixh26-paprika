@@ -32,8 +32,8 @@ const STEPS = {
   reveal: { title: "Accuse · Reveal", map: "challenge",
     text: "Paprika checked the commitment and sent the case to UMA's vote. UMA holds both stakes (the accuser's bond and the photo's deposit) until the vote, then pays the winner.",
     why: "In UMA an undisputed claim is accepted as true. Paprika disputes at once with the deposit, so a false accusation can never win by silence." },
-  vote: { title: "UMA vote (simulated voters)", map: "challenge",
-    text: "Three local UMA voter accounts committed, revealed and the assertion was settled; Paprika credited the winner.",
+  vote: { title: "UMA vote (3 local voter accounts)", map: "challenge",
+    text: "Three local voter accounts committed and revealed their votes in UMA's voting contract; then the assertion was settled (anyone can settle) and Paprika credited the winner.",
     why: "On mainnet UMA token holders vote; this takes 48-72 h. The reward is the record's own deposit: there is no shared fund to drain." },
   refund: { title: "Refund", map: "refund",
     text: "Nobody proved the photo fake in time, so its deposit was credited back to the depositor. The record stays.",
@@ -80,7 +80,7 @@ export function render() {
   const st = last ? STEPS[last.key] : null;
   const p = S.ctx.params;
   mount(el,
-    h("div", { class: "dr-head" }, h("b", {}, "Protocol view"), h("button", { class: "t-close", testid: "protocol-close", onclick: () => setOpen(false) }, "×")),
+    h("div", { class: "dr-head" }, h("b", {}, "Protocol view"), h("button", { class: "t-close", testid: "protocol-close", title: "Close the protocol view", onclick: () => setOpen(false) }, "Close")),
     h("ol", { class: "pmap", testid: "protocol-map", "data-step": st?.map || "" },
       MAP.map(([k, n]) => h("li", { class: st?.map === k ? "cur" : "", "data-step": k, testid: `map-${k}` }, n))),
     st ? h("div", { class: "dr-step", testid: "explainer" },
@@ -108,13 +108,13 @@ export function render() {
 
 // The outcome check for the jury: money moved (measured on chain) next to the rule with B and f.
 function ruleTable(c) {
-  const row = (who, measured, rule, expected) => h("tr", {}, h("td", {}, who), h("td", { testid: `settle-${who.toLowerCase()}` }, measured == null ? "—" : signedTok(measured)),
-    h("td", { class: "d" }, rule), h("td", { testid: `settle-expected-${who.toLowerCase()}` }, signedTok(expected)));
+  const row = (who, measured, rule, expected) => h("tr", {}, h("td", {}, who), h("td", { testid: `settle-${who.split(" ")[0].toLowerCase().replace("uma","store")}` }, measured == null ? "—" : signedTok(measured)),
+    h("td", { class: "d" }, rule), h("td", { testid: `settle-expected-${who.split(" ")[0].toLowerCase().replace("uma","store")}` }, signedTok(expected)));
   const ok = c.measured && c.measured.accuser === c.expected.accuser && c.measured.depositor === c.expected.depositor && c.measured.store === c.expected.store;
   return h("div", { class: "rule" },
     h("table", { testid: "settle-table" }, h("tr", {}, h("th", {}, ""), h("th", {}, "Measured"), h("th", {}, "Rule"), h("th", {}, "Expected")),
       row("Accuser", c.measured?.accuser, c.fake ? "−B + B + (B − f×B)" : "−B", c.expected.accuser),
       row("Depositor", c.measured?.depositor, c.fake ? "−B" : "B kept + (B − f×B)", c.expected.depositor),
-      row("Store", c.measured?.store, "+f×B", c.expected.store)),
+      row("UMA Store (fee)", c.measured?.store, "+f×B", c.expected.store)),
     h("p", { class: "status", testid: "settle-check" }, ok ? "Measured on chain = expected by the rule ✓" : "Not measured in this browser (no snapshot from before the commit)."));
 }

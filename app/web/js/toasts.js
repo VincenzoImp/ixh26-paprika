@@ -13,7 +13,7 @@ export function toast(title, { status = "pending", text = "", tag = "" } = {}) {
   const id = n;
   const body = h("div", { class: "t-text", testid: "toast-text" }, text);
   const links = h("div", { class: "t-links" });
-  const close = h("button", { class: "t-close", title: "Close", onclick: () => el.remove() }, "×");
+  const close = h("button", { class: "t-close", title: "Close this message", testid: "toast-close", onclick: () => el.remove() }, "×");
   const el = h("div", { class: `toast ${status}`, testid: "toast", "data-status": status, "data-id": id },
     h("div", { class: "t-head" }, h("b", { testid: "toast-title" }, title), tag ? h("span", { class: "chip local" }, tag) : null, close), body, links);
   tid("toasts").appendChild(el);
@@ -27,7 +27,7 @@ export function toast(title, { status = "pending", text = "", tag = "" } = {}) {
       const shown = txs.length > 3 ? [txs[txs.length - 1]] : txs;
       links.replaceChildren(...shown.map((t) => h("a", { class: "link mono", href: explorerUrl("tx", t.txHash), testid: "toast-tx" }, `${t.label || "tx"} ${shortHex(t.txHash)} ↗`)),
         txs.length > 3 ? h("span", { class: "d" }, `${txs.length} transactions in total`) : "");
-      if (st === "ok") setTimeout(() => el.remove(), 6000);
+      if (st === "ok" || st === "rejected") setTimeout(() => el.remove(), 6000);   // failures stay until closed
     },
     close() { el.remove(); },
   };
@@ -35,7 +35,7 @@ export function toast(title, { status = "pending", text = "", tag = "" } = {}) {
 }
 
 // A confirmation dialog: resolves true (confirm) or false (cancel). lines: [label, value] pairs or strings.
-export function confirmDialog({ title, lines = [], confirm = "Confirm in MetaMask", note = "", testid = "confirm" }) {
+export function confirmDialog({ title, lines = [], confirm = "Confirm in MetaMask", note = "", testid = "confirm", danger = false }) {
   return new Promise((resolve) => {
     const done = (v) => { wrap.remove(); resolve(v); };
     const wrap = h("div", { class: "modal-wrap", testid: `${testid}-dialog` },
@@ -45,8 +45,9 @@ export function confirmDialog({ title, lines = [], confirm = "Confirm in MetaMas
         note ? h("p", { class: "d" }, note) : null,
         h("div", { class: "row end" },
           h("button", { testid: `${testid}-cancel`, onclick: () => done(false) }, "Cancel"),
-          h("button", { class: "pri", testid: `${testid}-ok`, onclick: () => done(true) }, confirm))));
+          h("button", { class: danger ? "danger" : "pri", testid: `${testid}-ok`, onclick: () => done(true) }, confirm))));
     document.body.appendChild(wrap);
-    wrap.querySelector(".pri").focus();
+    // A destructive dialog starts on Cancel; the others on the confirm button.
+    wrap.querySelector(danger ? `[data-testid="${testid}-cancel"]` : `[data-testid="${testid}-ok"]`).focus();
   });
 }

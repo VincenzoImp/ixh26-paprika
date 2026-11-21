@@ -694,7 +694,7 @@ export function archivedWallets(storage) {
  * evidence = a text, which is published first (publishEvidence) and then hashed.
  * Returns { txHashes, transactions, commitment, salt, evidenceHash, evidenceUrl, warning (string or null) }.
  */
-export async function commitAccusation(ctx, role, { photoHash, keyId, evidence, evidenceHash }) {
+export async function commitAccusation(ctx, role, { photoHash, keyId, evidence, evidenceHash, salt: givenSalt, beforeSign }) {
   const claimant = addressOf(ctx, role);
   if (evidenceHash !== undefined && evidenceHash !== null) {
     if (!/^0x[0-9a-fA-F]{64}$/.test(String(evidenceHash))) throw new Error("evidenceHash must be 0x + 64 hex characters (from publishEvidence)");
@@ -715,13 +715,16 @@ export async function commitAccusation(ctx, role, { photoHash, keyId, evidence, 
     : null;
   if (!evidenceHash) evidenceHash = (await publishEvidence(ctx, { bytes: utf8(String(evidence)), contentType: "text/plain; charset=utf-8" })).evidenceHash;
   evidenceHash = evidenceHash.toLowerCase();
-  const salt = ethers.hexlify(ethers.randomBytes(32));
+  const salt = givenSalt || ethers.hexlify(ethers.randomBytes(32));
   // abi.encode (NOT encodePacked): each value padded to 32 bytes, the address first.
   const commitment = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
     ["address", "bytes32", "bytes32", "bytes32", "bytes32"], [claimant, photoHash, keyId, evidenceHash, salt]));
   const txHashes = [];
   const transactions = [];
   await ensureFunds(ctx, role, txHashes, transactions);
+  // The caller can store the secret BEFORE the wallet is asked to sign (a reload or crash during the signature
+  // must not lose the salt of a commitment that may still land on chain).
+  if (beforeSign) await beforeSign({ claimant, photoHash, keyId, evidenceHash, salt, commitment });
   const r = await send(ctx, role, ctx.contracts.paprika, "commitClaim", [commitment], "Paprika.commitClaim");
   txHashes.push(r.hash);
   transactions.push({ label: "Paprika.commitClaim", txHash: r.hash });

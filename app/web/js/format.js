@@ -37,9 +37,9 @@ export function labelOf(address) {
   const names = { [ad.paprika]: "Paprika", [ad.oo]: "UMA Optimistic Oracle V3", [ad.store]: "UMA Store", [ad.currency]: "WETH",
     [ad.voting]: "UMA VotingV2", [ad.votingToken]: "UMA voting token" };
   for (const [k, v] of Object.entries(names)) if (k && k.toLowerCase() === a) return v;
-  if (S.ctx.accounts?.operator && S.ctx.accounts.operator.toLowerCase() === a) return "Local faucet / operator";
+  if (S.ctx.accounts?.operator && S.ctx.accounts.operator.toLowerCase() === a) return "Deployer account (settles votes; anyone can)";
   const vi = (S.ctx.accounts?.voters || []).findIndex((v) => v.toLowerCase() === a);
-  if (vi >= 0) return `Simulated UMA voter ${vi + 1}`;
+  if (vi >= 0) return `Local UMA voter ${vi + 1}`;
   const acc = S.deployment?.accounts || {};
   if (acc.alice && acc.alice.toLowerCase() === a) return "Alice";
   if (acc.bob && acc.bob.toLowerCase() === a) return "Bob";
@@ -50,10 +50,10 @@ export function labelOf(address) {
 
 // Copies a value and shows a short "Copied" mark on the button.
 function copyButton(value, testid) {
-  return h("button", { class: "copy", title: "Copy", testid, onclick: (e) => {
+  return h("button", { class: "copy", title: "Copy", "aria-label": "Copy", testid, onclick: (e) => {
     e.preventDefault(); e.stopPropagation();
     navigator.clipboard?.writeText(value).catch(() => {});
-    const b = e.currentTarget; b.textContent = "✓"; setTimeout(() => (b.textContent = "⧉"), 900);
+    const b = e.currentTarget; b.textContent = "Copied"; b.classList.add("copied"); setTimeout(() => { b.textContent = "⧉"; b.classList.remove("copied"); }, 2000);
   } }, "⧉");
 }
 

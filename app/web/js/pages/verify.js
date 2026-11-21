@@ -56,14 +56,14 @@ export function render(root) {
   const main = V.records?.length ? mainRecord(V.records) : null;
   mount(root,
     h("h1", {}, "Verify a photo"),
-    h("p", { class: "sub" }, "Check a file against Paprika. No wallet, no transaction."),
+    h("p", { class: "sub" }, "See whether a registered device signed this exact file, with money at stake that anyone can challenge. No wallet needed."),
     h("div", { class: "verify-grid" },
       h("div", {}, drop,
         h("div", { class: "row" },
           V.bytes ? h("button", { testid: "btn-verify-choose-file", onclick: () => input.click() }, "Choose another file") : null,
           last ? h("button", { testid: "btn-verify-last", onclick: () => verifyBytes(last.bytes, last.type, last.name) }, "Verify my last photo") : null),
         V.name ? h("div", { class: "d", testid: "verify-file-name" }, `${V.name} · ${size(V.bytes.length)}`) : null,
-        V.error ? h("div", { class: "err", testid: "verify-error" }, V.error) : null,
+        V.error ? h("div", { class: "t-bad", testid: "verify-error" }, V.error) : null,
         V.warning ? h("div", { class: "hint", testid: "verify-warning" }, V.warning) : null),
       V.records ? h("div", { class: "stack" },
         verdictCard(main, { testid: "verify-status" }),
@@ -76,8 +76,13 @@ export function render(root) {
             const out = await changeOnePixel(V.bytes, V.type);
             await verifyBytes(out.bytes, out.type, `${V.name.replace(/ · one pixel changed.*$/, "")} · one pixel changed`, V.hash);
           } }, "Tamper test: change one pixel") : null),
-        h("div", { class: "d mono", testid: "verify-hash" }, `SHA-256 ${V.hash}`)) : h("div", { class: "empty" }, "The verdict appears here.")),
-    h("div", { class: "card" }, h("h2", {}, "Recent records ", h("a", { class: "link small", href: "#/explorer" }, "Explorer →")), recentTable()));
+        V.prevHash ? null : h("div", { class: "d mono", testid: "verify-hash" }, `SHA-256 ${V.hash}`)) : recentCard()),
+    V.records ? recentCard() : null);
+}
+
+// The "Recent records" card.
+function recentCard() {
+  return h("div", { class: "card" }, h("h2", {}, "Recent records ", h("a", { class: "link small", href: "#/explorer" }, "Explorer →")), recentTable());
 }
 
 // The five newest records of the chain.

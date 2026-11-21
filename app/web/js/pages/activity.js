@@ -10,6 +10,12 @@ import { act } from "../actions.js";
 import { paprikaEvents } from "../api.js";
 
 let tab = "records";
+
+// What the accuser wins when a fake is proven: B − f×B (plus the bond back).
+function winText() {
+  const B = BigInt(S.ctx.params.bond);
+  return `+${tok(B - (B * BigInt(Math.round(Number(S.ctx.params.feeShare) * 1e9))) / 1000000000n)}`;
+}
 let events = [];
 let loadedAt = -1;
 
@@ -38,7 +44,7 @@ export function render(root) {
     body = accs.length ? h("table", { testid: "accusations-table" },
       h("tr", {}, h("th", {}, "Photo"), h("th", {}, "State"), h("th", {}, "Opened")),
       accs.map((a) => h("tr", { testid: "my-accusation-row" }, h("td", {}, hashLink(a.photoHash, "record")),
-        h("td", {}, a.open ? h("span", { class: "chip p" }, "waiting for UMA vote") : h("span", { class: `chip ${a.fakeProven ? "m" : "r"}` }, a.fakeProven ? "fake proven · you won" : "rejected · bond lost")),
+        h("td", {}, a.open ? h("span", { class: "chip p" }, "waiting for UMA vote") : h("span", { class: `chip ${a.fakeProven ? "r" : "n"}` }, a.fakeProven ? `fake proven · you won ${winText()}` : `rejected · you lost ${tok(S.ctx.params.bond)}`)),
         h("td", {}, blockLink(a.blockNumber)))))
       : h("div", { class: "empty" }, h("b", {}, "No accusations."), " Open a record and press Accuse.");
   } else {
@@ -51,6 +57,6 @@ export function render(root) {
     h("div", { class: "rec-head" }, h("h1", {}, "My activity"),
       h("div", { class: "row" }, h("span", {}, "Claimable ", h("b", { testid: "deposits-credit" }, tok(S.account.credit))),
         h("button", { class: S.account.credit > 0n ? "pri" : "", testid: "btn-deposits-withdraw", disabled: !(S.account.credit > 0n) || S.busy,
-          onclick: () => act("Claim credit", () => S.lib.withdrawCredit(S.ctx, "photographer"), { step: { key: "claim" } }) }, "Claim"))),
+          onclick: () => act("Claim credit", () => S.lib.withdrawCredit(S.ctx, "photographer"), { step: { key: "claim" } }) }, "Claim to wallet"))),
     tabs, h("div", { class: "card" }, body));
 }

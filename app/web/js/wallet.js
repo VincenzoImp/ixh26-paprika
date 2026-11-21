@@ -109,22 +109,23 @@ export async function refreshAccount() {
 // True once the account has WETH for a deposit and Paprika may take it (then attest and commit need one signature).
 export const prepared = () => !!S.account && S.account.allowance >= big(S.ctx.params.bond) && S.account.weth >= big(S.ctx.params.bond);
 
-// How much ETH "Prepare account" wraps: what is missing for three deposits or bonds.
+// How much ETH "Prepare account" wraps: what is missing for five deposits or bonds.
+const PREPARE_COUNT = 5;
 function prepareAmount() {
-  const B = big(S.ctx.params.bond);
-  return 3n * B > S.account.weth ? 3n * B - S.account.weth : 0n;
+  const B = big(S.ctx.params.bond) * BigInt(PREPARE_COUNT);
+  return B > S.account.weth ? B - S.account.weth : 0n;
 }
 
 // "Prepare account": wrap ETH into WETH and approve Paprika once (max allowance), stated with amounts first.
 export async function prepareAccount() {
   const amount = prepareAmount();
   const needApprove = S.account.allowance < big(S.ctx.params.bond) * 1000n;
-  const ok = await confirmDialog({ title: "Prepare this account", testid: "prepare",
+  const ok = await confirmDialog({ title: "Prepare this account", testid: "prepare", confirm: "Prepare in MetaMask",
     lines: [["Wrap", amount ? `${eth(amount)} into ${tok(amount)} (WETH is ETH as a token; you can unwrap it any time)` : "nothing (enough WETH already)"],
       ["Approve", needApprove ? "Paprika may take WETH from this account for deposits and bonds (once, no limit)" : "already done"],
       ["Signatures", `${(amount ? 1 : 0) + (needApprove ? 1 : 0)} in MetaMask now; then one per attest or accusation`]] });
   if (!ok) return;
-  await act("Prepare account", () => S.lib.prepareAccount(S.ctx, { photos: 3, role: "photographer" }), { step: { key: "prepare" } });
+  await act("Prepare account", () => S.lib.prepareAccount(S.ctx, { photos: PREPARE_COUNT, role: "photographer" }), { step: { key: "prepare" } });
 }
 
 // ------------------------------------------------------------------ device key of this browser
@@ -165,7 +166,10 @@ export async function exportDevice() {
 // Imports a device key from a JSON file exported earlier.
 export async function importDeviceFile(file) {
   const text = await file.text();
-  S.device = await S.dev.importDevice(text);
+  let dev;
+  try { const j = JSON.parse(text); if (!(j.jwk || j).kty) throw new Error("no key"); dev = await S.dev.importDevice(j); }
+  catch { throw new Error("This is not a Paprika device-key file (export one from the account menu first)."); }
+  S.device = dev;
   await saveDevice();
   await refreshDevice();
   emit("change");
@@ -173,7 +177,7 @@ export async function importDeviceFile(file) {
 
 // Revokes the device key after a typed confirmation (no money moves).
 export async function revoke() {
-  const ok = await confirmDialog({ title: "Revoke this device key?", testid: "revoke", confirm: "Revoke in MetaMask",
+  const ok = await confirmDialog({ title: "Revoke this device key?", testid: "revoke", confirm: "Revoke in MetaMask", danger: true,
     lines: ["The key signs its own revocation. It can never attest again. Earlier records keep their deposits. No money moves."] });
   if (!ok) return;
   await act("Revoke device key", () => S.lib.revokeKey(S.ctx, "photographer", S.device), { step: { key: "revoke" } });
@@ -194,19 +198,26 @@ export function renderAccount() {
   const a = S.account;
   const name = labelOf(a.address);
   const button = h("button", { class: "acct", testid: "account-button", onclick: () => toggleMenu() },
-    h("span", { class: "dot-id", style: `background:${idColour(a.address)}` }),
+    h("span", { class: "dot-id", "aria-hidden": "true", style: `background:${idColour(a.address)}` }),
     h("span", { testid: "account-name" }, name && name !== "You" ? name : ""),
     h("span", { class: "mono", testid: "account-address" }, `${a.address.slice(0, 6)}…${a.address.slice(-4)}`),
     h("span", { class: "d", testid: "account-eth" }, eth(a.eth)),
     a.credit > 0n ? h("span", { class: "badge", testid: "account-claim-badge", title: "Claimable credit" }, tok(a.credit)) : null, " ▾");
   const parts = [button];
-  if (wrongChain()) parts.unshift(h("button", { class: "warn", testid: "btn-switch-chain", onclick: () => act("Switch network", switchChain) }, "Switch to Paprika local"));
+  if (wrongChain()) parts.unshift(h("button", { class: "warn", testid: "btn-switch-chain", onclick: () => act("Switch network", switchChain) }, "Wrong network · Switch to Paprika local"));
   mount(box, parts);
   if (menuOpen) mount(tid("account-menu-slot"), menu());
 }
 
 let menuOpen = false;
-function toggleMenu() { menuOpen = !menuOpen; tid("account-menu-slot").classList.toggle("hidden", !menuOpen); renderAccount(); }
+function toggleMenu() { setMenu(!menuOpen); }
+// Opens or closes the account menu.
+export function setMenu(open) { menuOpen = open; tid("account-menu-slot")?.classList.toggle("hidden", !menuOpen); renderAccount(); }
+// The menu closes when the page changes or on a click outside it.
+addEventListener("hashchange", () => { if (menuOpen) setMenu(false); });
+document.addEventListener("click", (e) => {
+  if (menuOpen && !e.target.closest('[data-testid="account-menu-slot"]') && !e.target.closest('[data-testid="account-button"]') && !e.target.closest(".modal-wrap")) setMenu(false);
+});
 
 // A colour derived from the address, so the same account looks the same everywhere.
 export function idColour(address) {
@@ -224,11 +235,11 @@ function menu() {
     h("div", { class: "m-row" }, addrLink(a.address, { testid: "menu-address" })),
     h("div", { class: "m-row d" }, `MetaMask · ${S.network.name}`),
     h("div", { class: "m-row" }, h("span", { testid: "menu-eth" }, eth(a.eth)), h("span", { testid: "menu-weth" }, tok(a.weth))),
-    prepared() ? h("div", { class: "m-row ok", testid: "menu-prepared" }, "✓ Account prepared: one signature per attest or accusation")
+    prepared() ? h("div", { class: "m-row t-ok", testid: "menu-prepared" }, "✓ Account prepared: one signature per attest or accusation")
       : h("div", { class: "m-row" }, h("span", { class: "d" }, "Wrap ETH and approve Paprika once, so each action needs one signature."),
         h("button", { testid: "btn-prepare", onclick: () => prepareAccount() }, "Prepare account")),
-    h("div", { class: "m-row" }, h("span", {}, "Claimable ", h("b", { testid: "menu-credit" }, tok(a.credit))),
-      h("button", { testid: "btn-claim", disabled: !(a.credit > 0n), onclick: () => act("Claim credit", () => S.lib.withdrawCredit(S.ctx, "photographer"), { step: { key: "claim" } }) }, "Claim")),
+    a.credit > 0n ? h("div", { class: "m-row" }, h("span", {}, "Claimable ", h("b", { testid: "menu-credit" }, tok(a.credit)), h("span", { class: "d" }, " (refunds and winnings wait here until you claim)")),
+      h("button", { class: "pri", testid: "btn-claim", onclick: () => act("Claim credit", () => S.lib.withdrawCredit(S.ctx, "photographer"), { step: { key: "claim" } }) }, "Claim")) : null,
     h("div", { class: "m-sec" }, h("b", {}, "Device key of this browser"),
       S.device ? h("div", { class: "m-row" }, hashLink(S.device.keyId, "device", { testid: "menu-device-key" }),
         h("span", { class: `chip ${dev.status === "active" ? "m" : dev.status === "flagged" ? "r" : ""}`, testid: "device-status", "data-status": dev.status },
@@ -237,6 +248,6 @@ function menu() {
         !S.device || dev.status !== "active" ? h("button", { testid: "btn-register", onclick: () => createAndRegister() }, dev.status === "flagged" ? "New key & register (free)" : "Create & register (free)") : null,
         S.device ? h("button", { testid: "btn-export-device", onclick: () => exportDevice() }, "Export") : null,
         h("button", { testid: "btn-import-device", onclick: () => fileIn.click() }, "Import"), fileIn),
-      dev.status === "active" ? h("div", { class: "row" }, h("button", { class: "warn", testid: "btn-revoke", onclick: () => revoke() }, "Revoke key…")) : null),
+      dev.status === "active" ? h("div", { class: "row" }, h("button", { class: "danger sm", testid: "btn-revoke", onclick: () => revoke() }, "Revoke key…")) : null),
     h("div", { class: "m-row" }, h("button", { class: "link", testid: "btn-disconnect", onclick: () => { menuOpen = false; disconnect(); } }, "Disconnect")));
 }

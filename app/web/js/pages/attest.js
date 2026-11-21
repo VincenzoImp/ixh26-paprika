@@ -54,10 +54,12 @@ async function attest() {
   const B = S.ctx.params.bond;
   const p = S.ctx.params;
   const sigs = prepared() ? "1 signature in MetaMask" : "up to 3 signatures in MetaMask (wrap ETH, approve WETH, attest) · prepare the account once to need only 1";
-  const ok = await confirmDialog({ title: "Attest this photo", testid: "confirm-attest",
+  const fB = (B * BigInt(Math.round(Number(p.feeShare) * 1e9))) / 1000000000n;
+  const ok = await confirmDialog({ title: "Attest this photo", testid: "confirm-attest", confirm: "Attest in MetaMask",
     lines: [["Photo", hashLink(A.photo.hash, "hash")], ["You lock", `${tok(B)} deposit`],
       ["You get it back", `after ${dur(Number(p.photoWindow) + Number(p.revealWindow))} (challenge + reveal period), unless UMA's voters find it fake`],
-      ["If proven fake", `you lose ${tok(B)}; the accuser receives part of it`], ["Signatures", sigs]] });
+      ["If proven fake", `you lose ${tok(B)}: ${tok(B - fB)} to the accuser, ${tok(fB)} to UMA as its fee`],
+      ["Device key", "this browser's device key signs the photo hash with a recent block hash"], ["Signatures", sigs]] });
   if (!ok) return;
   const { bytes, type, name, hash } = A.photo;
   const res = await act("Attest photo", async () => {
@@ -84,9 +86,9 @@ export function render(root) {
     v.muted = true; v.srcObject = A.stream;
     preview.appendChild(v);
   } else if (A.photo) showImage(preview, A.photo.bytes, A.photo.type);
-  else preview.appendChild(h("b", { testid: "capture-placeholder" }, "Take a photo, or choose a file"));
-  preview.appendChild(h("button", { class: "mirrorbtn", testid: "toggle-mirror", title: "Mirror the preview only: the attested file is always the true camera image",
-    onclick: () => { A.mirror = !A.mirror; emit("change"); } }, "⇋"));
+  else preview.appendChild(h("span", { class: "ph", testid: "capture-placeholder" }, "No photo yet"));
+  if (A.stream) preview.appendChild(h("button", { class: "mirrorbtn", testid: "toggle-mirror", title: "Mirror the preview only: the attested file is always the true camera image",
+    onclick: () => { A.mirror = !A.mirror; emit("change"); } }, "⇋ Mirror"));
 
   const p = S.ctx.params;
   const why = blocker();
@@ -101,10 +103,10 @@ export function render(root) {
     h("div", { class: "attest-grid" },
       h("div", {}, preview,
         h("div", { class: "row center" }, camBtn,
-          h("span", { class: "d" }, "or ", h("button", { class: "link", testid: "btn-choose-file", onclick: () => fileIn.click() }, "choose a file"),
+          h("span", { class: "d" }, "or ", h("button", { class: "link", testid: "btn-choose-file", onclick: () => fileIn.click() }, "use a file instead"),
             isLocal() ? [" · ", h("button", { class: "link", testid: "btn-sample-image", onclick: async () => loadPhoto(await sampleImage(), "image/jpeg", "sample.jpg") }, "use a sample image (local)")] : null),
           fileIn),
-        A.error ? h("div", { class: "err", testid: "capture-error" }, A.error) : null,
+        A.error ? h("div", { class: "t-bad", testid: "capture-error" }, A.error) : null,
         A.photo && !/^image\//.test(A.photo.type || "") ? h("div", { class: "hint", testid: "capture-warning" }, `This file does not look like an image (${A.photo.type || "unknown type"}). It can still be attested.`) : null),
       h("div", { class: "card summary", testid: "attest-summary" },
         h("h2", {}, "Summary"),
@@ -120,7 +122,7 @@ export function render(root) {
           : [
             noKey && S.account && !accountBlocker() ? h("div", { class: "refusal", testid: "attest-refusal" },
               h("span", { testid: "attest-why" }, S.deviceInfo?.status === "flagged" ? "This device key is flagged; it can never attest again." : "This browser has no registered device key yet."),
-              h("button", { class: "pri", testid: "btn-new-key-attest", onclick: () => createAndRegister() }, S.deviceInfo?.status === "flagged" ? "New key & register (free)" : "Create & register device key (free)")) : null,
+              h("button", { class: "pri", testid: "btn-new-key-attest", onclick: () => createAndRegister() }, S.deviceInfo?.status === "flagged" ? "Register a new device key (free)" : "Create & register a device key (free)")) : null,
             S.account && !prepared() && !accountBlocker() ? h("div", { class: "d", testid: "attest-prepare-hint" }, "Tip: ", h("button", { class: "link", testid: "btn-prepare-inline", onclick: () => prepareAccount() }, "prepare the account"), " once so that each attest needs one signature.") : null,
             h("button", { class: "pri big", testid: "btn-attest", disabled: !A.photo || !!why || S.busy, onclick: attest }, "Attest photo"),
             A.photo && why && !(noKey && S.account && !accountBlocker()) ? h("div", { class: "why", testid: "attest-blocked" }, why) : null,
