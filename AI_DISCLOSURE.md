@@ -14,7 +14,7 @@ This is the declaration for this repository.
 
 | Area (slide 13) | How the tools were used | Where |
 |---|---|---|
-| Solution design and code generation | The tools turned the team's protocol idea and constraints into the contract rules. They wrote the contract, its tests, the scripts that deploy UMA's contracts on a local chain, and the demo app. They ran the tests and attacked the contract to find flaws | `contract/`, `app/` |
+| Solution design and code generation | The tools turned the team's protocol idea and constraints into the contract rules. They wrote the contract, its tests, the scripts that deploy UMA's oracle and voting contracts on a local chain and run UMA's vote, and the demo app. They ran the tests and attacked the contract to find flaws | `contract/`, `app/` |
 | Documentation | The tools wrote the protocol specification, the design rationale, the limits, the demo guide, the README and these declarations | `README.md`, `docs/`, `AI_DISCLOSURE.md`, `THIRD_PARTY.md` |
 | Pitch preparation | The tools drafted the deck, the speaker notes and the answers to expected questions | `slides/` |
 

@@ -29,7 +29,7 @@ cd app && npm install && npm start
 cd app && npm run demo:cli
 ```
 
-The demo, step by step, and what in it is real or simulated: [docs/demo.md](docs/demo.md).
+The demo, step by step, and how the local chain differs from a public network: [docs/demo.md](docs/demo.md).
 
 ## Repository map
 

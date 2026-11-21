@@ -1,22 +1,33 @@
 # Paprika: the demo
 
-The demo runs the whole protocol on a local Ethereum chain, with UMA's contracts deployed on the same chain.
+The demo runs the whole protocol on a local Ethereum chain. Every contract on that chain comes from published code.
 Terms and symbols are defined in [protocol.md](protocol.md).
 
-## What is real and what is simulated
+## What runs
 
-| Part | Real or simulated | Detail |
-|---|---|---|
-| Paprika contract | Real | [`Paprika.sol`](../contract/contracts/Paprika.sol), deployed unchanged |
-| UMA Optimistic Oracle V3, Finder, Store, AddressWhitelist, IdentifierWhitelist | Real | UMA's compiled contracts from the npm package `@uma/contracts-node`, deployed by [`contract/lib/deploy-uma.js`](../contract/lib/deploy-uma.js). Nothing from UMA is recompiled |
-| Bond custody, dispute, fee to UMA's Store, payouts, callbacks | Real | UMA's own code does this. The measured split is `2 × B − f × B` to the winner and `f × B` to the Store |
-| P-256 signatures | Real | The device library signs with WebCrypto. The chain checks with its P-256 precompile (Hardhat, hardfork `osaka`) |
-| Photo hash | Real | SHA-256 of the file bytes |
-| Tokens, deposits, bonds, credits | Real transfers | The token is UMA's test token `TestnetERC20`. Anyone can mint it. It has no value |
-| The device | Simulated | A software key in the browser or in Node. No camera sensor and no secure hardware |
-| UMA token-holder vote | Simulated | UMA's `MockOracleAncillary` replaces the vote. The operator enters the outcome with `pushPrice`, then calls `settleAssertion` |
-| The passage of time | Simulated | The demo moves the chain clock with `evm_increaseTime`, so the challenge period ends in seconds |
-| The chain | Local | One Hardhat node, chain id 31337. Accounts are Hardhat's default test accounts. No real network is used |
+| Part | What it is |
+|---|---|
+| Paprika | [`Paprika.sol`](../contract/contracts/Paprika.sol), deployed unchanged |
+| UMA's Optimistic Oracle V3 | `OptimisticOracleV3`, `Finder`, `Store`, `AddressWhitelist`, `IdentifierWhitelist`, `Registry`: UMA's compiled contracts from the npm package `@uma/contracts-node`. Nothing from UMA is recompiled |
+| UMA's vote | `VotingV2` and the UMA voting token, from the same package. Voters stake the voting token, commit a hidden vote, then reveal it. Then any account calls `settleAssertion` |
+| Money | WETH (wrapped ETH, an ERC-20 token): UMA's copy of `WETH9`. The accounts hold ETH and wrap it when they pay a deposit or a bond. They unwrap it after a withdrawal |
+| Payouts | UMA's own code holds the bond and the deposit, pays `2 × B − f × B` to the winner and sends `f × B` to UMA's Store |
+| Signatures | The device library signs with WebCrypto. The chain checks with its P-256 precompile (Hardhat, hardfork `osaka`) |
+| Photo hash | SHA-256 of the file bytes |
+
+[`contract/lib/deploy-uma-dvm.js`](../contract/lib/deploy-uma-dvm.js) deploys UMA's contracts.
+[`contract/lib/vote.js`](../contract/lib/vote.js) runs a vote.
+
+## What is not like a public network
+
+- **The voters are our demo accounts.** Three accounts (Hardhat accounts 3, 4 and 5) hold and stake all the voting
+  tokens. So they decide every vote. The person who runs the demo chooses how they vote.
+- **Time is advanced by hand.** The local chain moves its clock forward to reach each vote phase and the end of the
+  challenge period. A vote phase lasts `PHASE_LENGTH` seconds; on a real network UMA returns results
+  ["within 48-72 hours"](https://docs.uma.xyz/developers/resolving-disputes).
+- **The device key is a software key**, in the browser or in Node. No camera sensor and no secure hardware are involved.
+- **The chain is one local Hardhat node**, chain id 31337. The ETH is Hardhat's test ETH and has no value.
+  The deployer holds the roles that UMA's governance holds on a public network.
 
 ## Requirements
 
@@ -31,7 +42,7 @@ npm install
 npx hardhat test
 ```
 
-The tests run Paprika against UMA's contracts on an in-process chain. They print one `CASE` line per case.
+The tests run Paprika with UMA's oracle and UMA's vote on an in-process chain. They print one `CASE` line per case.
 The case table with measured values is [`contract/output/cases.md`](../contract/output/cases.md).
 
 ## Start the demo
@@ -41,7 +52,7 @@ One command starts everything (scripts in [`app/scripts/`](../app/scripts/), lis
 ```bash
 cd app
 npm install
-npm start        # local chain, deployment of UMA's contracts, the test token and Paprika, web app
+npm start        # local chain, deployment of UMA's contracts, WETH9 and Paprika, web app
                  # prints http://127.0.0.1:5173/ ; Ctrl-C stops everything
 ```
 
@@ -60,8 +71,28 @@ npm run stop         # stops a chain or web server left running
 
 The chain lives in memory. After a restart it starts from block 0, so deploy again.
 
-The deployment reads the parameters from environment variables: `BOND`, `FINAL_FEE`, `PHOTO_WINDOW`, `REVEAL_WINDOW`,
-`LIVENESS` and `MINT`. [`app/README.md`](../app/README.md) lists them with their defaults.
+The deployment reads the parameters from environment variables: `BOND`, `FINAL_FEE`, `PHASE_LENGTH`, `PHOTO_WINDOW`,
+`REVEAL_WINDOW`, `LIVENESS` and `STAKE`. [`app/README.md`](../app/README.md) lists them with their defaults.
+`RPC_PORT` and `WEB_PORT` change the ports, so two instances can run side by side.
+
+### Run the demo from another computer
+
+The web app serves the page, the library and a JSON-RPC relay to the local chain on one port (`/rpc`).
+So another computer needs only that port.
+
+- **With the camera.** Browsers allow the camera only on `localhost` or over HTTPS. From a computer on the same
+  private network, for example a Mac, open an SSH tunnel, then open `http://localhost:5173`:
+
+  ```bash
+  ssh -L 5173:127.0.0.1:5173 <this-machine>
+  ```
+
+- **Without the camera.** Start the web server on all interfaces, then open `http://<this-machine>:5173`.
+  The photo comes from a file or the sample image.
+
+  ```bash
+  cd app && HOST=0.0.0.0 node server.js     # after npm run chain and npm run deploy
+  ```
 
 ### The demo in a terminal
 
@@ -72,46 +103,65 @@ cd app
 npm run demo:cli     # same as: node cli.js demo
 ```
 
-It runs every step of the click path below, checks each result and exits with code 1 on any mismatch.
+It runs the 13 steps below, checks each result and exits with code 1 on any mismatch.
 The last run is in [`app/output/cli-demo.txt`](../app/output/cli-demo.txt).
+
+| Step | What it does |
+|---|---|
+| 0 | Wallets: the roles hold ETH; WETH is wrapped when a payment needs it |
+| 1 | Device: register the key, free |
+| 2 | Capture: sign and attest a photo, deposit `B` |
+| 3 | Verify the photo |
+| 4 | One pixel changed: no record |
+| 5 | Accuse: commit, bond `B`; only a hash goes on the chain |
+| 6 | Reveal: assertion at UMA, disputed at once |
+| 7 | UMA vote "evidence does not prove it": commit phase, reveal phase, settle |
+| 8 | Advance time past the challenge period, then refund |
+| 9 | Activity log: every transaction with its block and hash |
+| 10 | Optional: a second photo, UMA vote "evidence proves the fake" |
+| 11 | Optional: revoke the key; no money moves |
+| 12 | Unwrap: WETH back to ETH |
+
 `node cli.js help` lists the single-step commands (`register`, `attest <file>`, `verify <file>`, `accuse-commit`,
-`accuse-reveal`, `vote <true|false>`, `refund <file>`, `withdraw <role>`, `revoke`, `advance <seconds>`, `balances`).
+`accuse-reveal`, `vote <true|false>`, `refund <file>`, `withdraw <role>`, `unwrap <role>`, `revoke`,
+`advance <seconds>`, `balances`).
 
 ## Roles in the demo
 
 | Role | Account | Does |
 |---|---|---|
-| Operator | Hardhat account 0 | Deploys the contracts. Enters the simulated vote |
+| Operator | Hardhat account 0 | Deploys the contracts. Calls `settleAssertion` after a vote |
 | Photographer | Hardhat account 1 | Registers the device, attests, refunds, revokes |
 | Accuser | Hardhat account 2 | Commits and reveals accusations |
+| Voters | Hardhat accounts 3, 4, 5 | Stake UMA voting tokens. Commit and reveal votes in `VotingV2` |
 
 ## Click path
 
-The web app has six tabs: Device, Capture, Verify, Accuse, Deposits and Revoke key.
-The header shows the chain, the contract addresses, the parameters read from the contract
-(`B`, `T_photo`, `T_reveal`, `f`) and the token balances of the photographer, the accuser and UMA's Store.
-An activity log lists every transaction of the session.
+The web app has three tabs, one per actor: Photographer, Verifier and Accuser.
+The header shows the parameters read from the contract (`B`, `T_photo`, `T_reveal`, `f`) and the WETH balances.
+"What just happened" explains the last action, with its transactions.
 
-| Step | Click | What to show |
+| Step | Tab and click | What to show |
 |---|---|---|
-| 1 | Device → "1 · Generate key" → "2 · Register (free)" | The device signs a proof of possession. Registration is free. No manufacturer or authority approves the key |
-| 2 | Capture → "Take photo" (or "Use a sample image") → "Sign & submit this photo" | The device reads a recent block hash first, then signs photo hash and block hash. The photographer's balance drops by `B`. The record shows blocks `a` and `r` |
-| 3 | "Verify this photo →" | State Attested, deposit locked, challenge period open. Read the sentence: "a registered key signed this exact file between block `a` and block `r`, with a deposit at stake" |
-| 4 | Verify → "Change one pixel and verify again" | No record: the photo hash differs |
-| 5 | Accuse → enter evidence → "1 · Commit (lock B)" | Only a hash goes on the chain, with bond `B`. Nobody can tell which photo is accused |
-| 6 | "2 · Reveal" | The contract asserts the accusation at UMA's OOv3 and disputes it at once with the deposit. Every accusation goes to a vote |
-| 7 | "Evidence does not prove it" | Simulated vote, then settlement. Accuser `−B`. Depositor `+B − f × B`. UMA's Store `+f × B`. The challenge period is extended |
-| 8 | "Advance time by one challenge period" → Deposits → Refund | Demo control on the local chain: the clock moves past `accusableUntil + T_reveal`. The refund succeeds. The record stays, as Refunded |
-| 9 | Activity log | Each step is a transaction with a hash on the local chain |
+| 1 | Photographer → "Register the device" | The device signs a proof of possession. Registration is free. No manufacturer or authority approves the key |
+| 2 | Photographer → "Camera" → "Take photo" (or "Sample image") → "Sign & attest this photo" | The device reads a recent block hash first, then signs photo hash and block hash. ETH is wrapped into WETH and `B` is locked. The record shows blocks `a` and `r` |
+| 3 | Verifier → "Last attested photo" | State Attested, deposit locked, challenge period open. Read the sentence: "a registered key signed this exact file between block `a` and block `r`, with a deposit at stake" |
+| 4 | Verifier → "Change one pixel and verify again" | No record: the photo hash differs |
+| 5 | Accuser → enter evidence → "Commit (lock bond B)" | Only a hash goes on the chain, with bond `B`. Nobody can tell which photo is accused |
+| 6 | Accuser → "Reveal and send to UMA" | The contract asserts the accusation at UMA's OOv3 and disputes it at once with the deposit. Every accusation goes to a vote |
+| 7 | Accuser → "Voters find it does not" | The three voters commit, then reveal; then the assertion is settled. The app shows each phase. Accuser `−B`. Depositor `+B − f × B`. UMA's Store `+f × B`. The challenge period is extended |
+| 8 | Photographer → "Advance time past the challenge period" → My photos → "Refund" | The local clock moves past `accusableUntil + T_reveal`. The refund succeeds. The record stays, as Refunded |
+| 9 | "What just happened" | Each step is a transaction with a hash on the local chain |
 
 Optional steps:
 
-| Step | Click | What to show |
+| Step | Tab and click | What to show |
 |---|---|---|
-| A | Accuse another photo → "Evidence proves the fake" | Accuser `+B − f × B`. Record Fake. Device Flagged (FakeProven). Its other records stay listed, with `recordedBeforeFlag` |
-| B | Revoke key → "Revoke key" (on a device that is still Active) | Device Flagged (KeyRevoked). No money moves. A new capture from that key fails |
+| A | Accuser → accuse another photo → "Voters find the evidence proves the fake" | Accuser `+B − f × B`. Record Fake. Device Flagged (FakeProven). Its other records stay listed, with `recordedBeforeFlag` |
+| B | Photographer → "Revoke this device key" (on a device that is still Active) | Device Flagged (KeyRevoked). No money moves. A new capture from that key fails |
 
-Credits reach a wallet only with "Withdraw credit" (Accuse or Deposits tab).
+Credits reach a wallet only with "Withdraw credit" (Photographer) or "Withdraw (Accuser)".
 
-Say plainly during the demo: the device key is software, and the UMA vote is simulated by entering its outcome.
-The contracts, the signatures, the deposits and the payouts are real, on a local chain.
+Say plainly during the demo: the voters are our demo accounts, time is advanced by hand on the local chain, and the
+device key is a software key. The contracts, the signatures, the vote, the deposits and the payouts are real
+transactions on a local chain.

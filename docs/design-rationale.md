@@ -106,7 +106,8 @@ later and within `T_reveal`. The commitment includes the accuser's address.
 
 **Cost.** Two transactions and at least one block of delay. An unrevealed commitment loses `B` to the burn address.
 The bond is burned because the target is hidden: no depositor is known to receive it.
-A forger that already holds its own commitment can still reveal first. See [limits.md](limits.md).
+A forger that already holds its own commitment can still reveal first. The honest accuser then gets its bond
+back but no reward. See [limits.md](limits.md).
 
 ## 9. The contract disputes each accusation at once
 
@@ -134,8 +135,8 @@ would win. With the burden on the accusation, an accusation without public evide
 
 ## 11. One open accusation per photo, and the extension of the challenge period
 
-**Rule.** A reveal fails while the record is Accused. When the vote rejects an accusation, `accusableUntil` grows by
-the time the record spent Accused.
+**Rule.** A reveal that arrives while the record is Accused opens no accusation. Its commitment is closed and its bond
+is credited back. When the vote rejects an accusation, `accusableUntil` grows by the time the record spent Accused.
 
 **Attack stopped.**
 
@@ -144,8 +145,13 @@ the time the record spent Accused.
    Nobody else can accuse the record meanwhile. The challenge period runs out, and the forger takes the deposit back.
    With the extension, each such round costs the forger `f × B` and gains it no time.
 
+3. The waiting accuser does not lose its bond to a vote that outlasts its `T_reveal`.
+   It gets the bond back and can commit again after the vote, inside the extended challenge period.
+
 **Cost.** False accusations delay an honest refund by the vote time of each one.
 Each costs the griefer `B` and pays the depositor `B − f × B`.
+A forger that holds its own earlier commitment can get its accusation in first. The honest accuser then loses
+only the reward, not the bond.
 
 ## 12. Flags do not erase records
 

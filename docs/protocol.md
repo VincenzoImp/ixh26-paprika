@@ -52,8 +52,9 @@ A record does not prove:
 | Credit | An amount that the contract owes to an account. The account withdraws it with `withdrawCredit` |
 | UMA | The UMA protocol. Its Optimistic Oracle V3 (OOv3) receives the accusation. Its token-holder vote decides it |
 
-All amounts are in one ERC-20 token. UMA must accept this token as bond currency.
-An ERC-20 token is the standard fungible token interface on Ethereum.
+All amounts are in one token: WETH (wrapped ETH, an ERC-20 token). An ERC-20 token is the standard fungible token
+interface on Ethereum. WETH holds ETH one to one. UMA must accept the token as bond currency.
+The token is a deployment parameter; this document and the demo use WETH.
 
 ## Actors
 
@@ -61,8 +62,8 @@ An ERC-20 token is the standard fungible token interface on Ethereum.
 |---|---|---|
 | Device | Holds a P-256 private key. Signs registration, captures and revocation | Read access to a recent block hash |
 | Registrant | Sends the registration of a key. Any account | Only gas |
-| Depositor | Sends a signed capture and locks `B`. Often a relayer, not the device | `B` in the token, approved to the contract |
-| Accuser | Commits and reveals an accusation, with evidence | `B` in the token, approved to the contract |
+| Depositor | Sends a signed capture and locks `B`. Often a relayer, not the device | `B` in WETH, approved to the contract |
+| Accuser | Commits and reveals an accusation, with evidence | `B` in WETH, approved to the contract |
 | UMA | OOv3 holds both stakes. The UMA token holders vote on the accusation | Nothing from Paprika beyond the claim |
 | Verifier | Hashes a file and reads the contract. Any party | Read access to any node of the chain |
 
@@ -78,7 +79,7 @@ The deployer sets the parameters once, in the constructor. No function changes t
 | `T_photo` | `PHOTO_WINDOW` | Seconds from the record to the end of its challenge period. Time under accusation is added to it |
 | `T_reveal` | `REVEAL_WINDOW` | Seconds after a commitment during which its accuser can reveal it |
 | `f` | `burnedBondPercentage / 1e18`, read from UMA | The share of the loser's stake that UMA keeps as its fee. UMA sets it. Paprika reads it at each settlement |
-| - | `oo`, `currency` | The OOv3 address and the token |
+| - | `oo`, `currency` | The OOv3 address and the token (WETH) |
 | - | `LIVENESS` | Passed to UMA. It has no effect: Paprika disputes every accusation at once |
 | - | `identifier` | UMA's default identifier, read at deployment |
 
@@ -157,10 +158,11 @@ Nobody can read the target photo from the commitment.
   1. The commitment computed from the sender and the arguments exists and is live.
   2. The current block is later than the commitment block.
   3. `now ≤ commitment time + T_reveal`.
-  4. The record exists, and it is not Refunded and not Accused.
+  4. The record exists, and it is not Refunded.
   5. The commitment block is at or after the record block `r`, and the commitment time is at or before
      `accusableUntil`.
-- **Changes, if the record is Fake:** the commitment is closed. No accusation opens.
+- **Changes, if the record is Fake or Accused:** the commitment is closed. No accusation opens.
+  The open accusation, if any, does not change. The accuser can commit again later.
   **Money:** credit `B` back to the accuser.
 - **Changes, if the record is Attested:** the record becomes Accused. The contract then:
   1. asserts at OOv3 the claim below, with the accuser's bond `B`;
@@ -261,7 +263,7 @@ Its records keep their states. Each can still be accused or refunded on its own 
 stateDiagram-v2
     [*] --> Live: commitClaim (bond B locked)
     Live --> Revealed: revealClaim on an Attested record (accusation opens)
-    Live --> Returned: revealClaim on a Fake record (bond credited back)
+    Live --> Returned: revealClaim on a Fake or Accused record (bond credited back)
     Live --> Forfeited: forfeitCommit after T_reveal (bond burned)
 ```
 
@@ -286,7 +288,8 @@ Amounts are net changes. `B` is the deposit and the bond. `f × B` is UMA's fee.
 | An account sees a reveal pending and tries to accuse first | Fails: a reveal needs a commitment from an earlier block | Nobody |
 | An accuser accuses a record that does not exist, is Refunded, or was committed outside the challenge period | The reveal fails. The commitment can then be forfeited | Accuser: `−B` (burned) |
 | An accuser reveals against a record already Fake | No new accusation | Accuser: 0 (bond credited back) |
-| A second accuser reveals while an accusation is open | The reveal fails with "accusation open". The commitment stays valid until `T_reveal` ends | Second accuser: 0 if it can reveal later; `−B` if its commitment expires first |
+| A second accuser reveals while an accusation is open | No new accusation. The commitment is closed. The open accusation does not change. The second accuser can commit again after the vote | Second accuser: 0 (bond credited back) |
+| A forger that holds its own earlier commitment reveals first when an honest reveal appears | The forger's accusation opens. The honest reveal returns the bond | Honest accuser: 0, and no reward; it can commit again after the vote. Forger, both accounts together: `−f×B` |
 | The holder of a stolen key revokes it | Device Flagged (KeyRevoked). New records are impossible. Old records stay | Nobody |
 | A verifier checks a record of a flagged device | `verify` shows the flag, its block, its reason and `recordedBeforeFlag` | Nobody |
 | A depositor cannot receive tokens | Settlements and refunds still succeed. Only its own `withdrawCredit` fails | Nobody else |

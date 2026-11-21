@@ -39,7 +39,7 @@ Nobody else is trusted. There is no manufacturer, no certificate authority, no c
 | Exact-file matching | The record matches one exact file. A resized, recompressed or cropped copy has a different photo hash and no record |
 | A photographed screen | A device that photographs a fake image on a screen produces a normal record |
 | The vote takes days and can err | Every accusation goes to a vote. Each vote takes days on a real network. A wrong vote affects one record and one key |
-| A blocked accuser can lose its bond | A forger that holds its own commitment can reveal first when an honest reveal appears. The honest reveal then fails with "accusation open". If the vote outlasts the honest commitment's `T_reveal`, that commitment expires and loses `B`. Each such block costs the forger `f × B` |
+| A forger can get its accusation in first | A forger that holds its own earlier commitment can reveal first when an honest reveal appears. The honest accuser then gets its bond back, but no reward. The forger loses `f × B`, as in a self-accusation. If the forger's accusation is rejected, the honest accuser can commit again inside the extended challenge period |
 | Evidence lives off the chain | The chain stores only the evidence hash. The accuser must publish the evidence where voters can find it |
 | Open lists | Any account with a free key can attest a well-known file, at a refundable `B` each. `attestersOf` then lists every such key, and the verifier must judge each key |
 | The contract cannot be patched | There is no owner and no upgrade. A fix needs a new deployment, and records do not move to it |
