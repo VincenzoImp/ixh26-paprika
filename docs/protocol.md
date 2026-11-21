@@ -185,6 +185,7 @@ A commitment that is not revealed within `T_reveal` can be forfeited by any acco
 
 UMA's vote decides. Any account then calls `settleAssertion` at OOv3. OOv3 pays the contract
 `2 × B − f × B` and sends `f × B` to UMA's Store. Then OOv3 calls `assertionResolvedCallback` on the contract.
+If the vote does not resolve in too many rounds, UMA deletes the request and the record stays Accused (see [limits.md](limits.md)).
 
 - **Checks:** the caller is OOv3. The assertion is an open accusation of this contract; otherwise nothing happens.
 - **Fake proven (vote true):**

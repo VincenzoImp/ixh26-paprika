@@ -72,27 +72,28 @@ npm run stop         # stops a chain or web server left running
 The chain lives in memory. After a restart it starts from block 0, so deploy again.
 
 The deployment reads the parameters from environment variables: `BOND`, `FINAL_FEE`, `PHASE_LENGTH`, `PHOTO_WINDOW`,
-`REVEAL_WINDOW`, `LIVENESS` and `STAKE`. [`app/README.md`](../app/README.md) lists them with their defaults.
+`REVEAL_WINDOW`, `LIVENESS`, `STAKE` and `MAX_ROLLS`. [`app/README.md`](../app/README.md) lists them with their defaults.
+`MAX_ROLLS` is the number of voting rounds after which UMA deletes an unresolved vote request. Its default is the
+largest possible value, so a jump of the local clock never deletes a request.
 `RPC_PORT` and `WEB_PORT` change the ports, so two instances can run side by side.
 
 ### Run the demo from another computer
 
-The web app serves the page, the library and a JSON-RPC relay to the local chain on one port (`/rpc`).
-So another computer needs only that port.
+The web app serves the page, the library, the deployment JSON and a JSON-RPC relay to the local chain (`/rpc`)
+on one port. So another computer needs only that port.
 
-- **With the camera.** Browsers allow the camera only on `localhost` or over HTTPS. From a computer on the same
-  private network, for example a Mac, open an SSH tunnel, then open `http://localhost:5173`:
+The page must be opened on `localhost` (or over HTTPS). Browsers allow WebCrypto, which makes the device key and the
+SHA-256, and the camera only there. On a plain network address the page shows an error and does not work.
 
-  ```bash
-  ssh -L 5173:127.0.0.1:5173 <this-machine>
-  ```
+From a computer on the same private network, for example a Mac, open an SSH tunnel, then open `http://localhost:5173`:
 
-- **Without the camera.** Start the web server on all interfaces, then open `http://<this-machine>:5173`.
-  The photo comes from a file or the sample image.
+```bash
+ssh -L 5173:127.0.0.1:5173 <this-machine>
+```
 
-  ```bash
-  cd app && HOST=0.0.0.0 node server.js     # after npm run chain and npm run deploy
-  ```
+The server listens on `127.0.0.1` by default, and the tunnel needs nothing more. `HOST` changes the address it listens
+on. Do not expose it: anyone who reaches `/rpc` can act as any demo account. `npm start` and `npm run web` print a
+warning when `HOST` is not a local address.
 
 ### The demo in a terminal
 
@@ -104,7 +105,7 @@ npm run demo:cli     # same as: node cli.js demo
 ```
 
 It runs the 13 steps below, checks each result and exits with code 1 on any mismatch.
-The last run is in [`app/output/cli-demo.txt`](../app/output/cli-demo.txt).
+A saved run is in [`app/output/cli-demo.txt`](../app/output/cli-demo.txt).
 
 | Step | What it does |
 |---|---|
@@ -125,6 +126,20 @@ The last run is in [`app/output/cli-demo.txt`](../app/output/cli-demo.txt).
 `node cli.js help` lists the single-step commands (`register`, `attest <file>`, `verify <file>`, `accuse-commit`,
 `accuse-reveal`, `vote <true|false>`, `refund <file>`, `withdraw <role>`, `unwrap <role>`, `revoke`,
 `advance <seconds>`, `balances`).
+
+## Checks before any money moves
+
+The library (used by the web app and the command-line tool) checks the chain before it wraps ETH or sends a payment.
+
+| Action | Refused before any transaction | What happens instead |
+|---|---|---|
+| Attest | An empty photo; a key that is not registered or is flagged; a file that this key already attested | A clear message. No ETH is wrapped |
+| Commit an accusation | Empty evidence; a photo with no record; a refunded photo; a photo already proven fake; a challenge period that is over | A clear message. No bond is locked |
+| Reveal while another accusation is open on the same photo | Not refused: the reveal is sent | The contract opens no accusation and credits the bond back |
+| Advance time (web button, `node cli.js advance`) | While an accusation is open | Vote first. `node cli.js advance <seconds> --force` jumps anyway |
+
+Advance time is refused during an open accusation because a long clock jump makes UMA roll the vote request through
+many voting rounds. On a public network, too many rolls make UMA delete the request (see [limits.md](limits.md)).
 
 ## Roles in the demo
 

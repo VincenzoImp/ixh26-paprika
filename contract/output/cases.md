@@ -87,8 +87,8 @@ because keys, salts and hashes are random and the zero bytes in calldata change.
   `getPrice` reverts, so `OOv3.settleAssertion` reverts for good: the record stays Accused, both bonds stay in OOv3,
   and refund is impossible. Only UMA governance could unblock it (a registered contract re-requesting the same price).
   UMA mainnet uses `maxRolls` = 4 (with daily phases: about 8 days without a resolution). This deployment uses the
-  uint32 maximum, so a jump of the local clock can never delete a request (case 9). See
-  [`uma-vote/README.md`](../../uma-vote/README.md) for the quorum test.
+  uint32 maximum, so a jump of the local clock can never delete a request (case 9). A missed quorum is not
+  tested here: the three demo voters hold all the stake.
 - **Griefing delays the refund by the vote time of each false accusation.** Each costs the griefer `BOND`.
 - **`attestersOf` lists grow without limit.** Anyone with a free key can attach records to a famous hash, at a
   refundable `BOND` each.
