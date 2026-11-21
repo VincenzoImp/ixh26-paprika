@@ -58,7 +58,7 @@ async function attest() {
   const ok = await confirmDialog({ title: "Attest this photo", testid: "confirm-attest", confirm: "Attest in MetaMask",
     lines: [["Photo", hashLink(A.photo.hash, "hash")], ["You lock", `${tok(B)} deposit`],
       ["You get it back", `after ${dur(Number(p.photoWindow) + Number(p.revealWindow))} (challenge + reveal period), unless UMA's voters find it fake`],
-      ["If proven fake", `you lose ${tok(B)}: ${tok(B - fB)} to the accuser, ${tok(fB)} to UMA as its fee`],
+      ["If proven fake", `you lose ${tok(B)}: ${tok(B - fB)} to the challenger, ${tok(fB)} to UMA as its fee`],
       ["Device key", "this browser's device key signs the photo hash with a recent block hash"], ["Signatures", sigs]] });
   if (!ok) return;
   const { bytes, type, name, hash } = A.photo;

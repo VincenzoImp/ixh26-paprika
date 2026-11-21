@@ -13,7 +13,7 @@ export const WHY = {
   "too early": "Too early: a refund needs the challenge period plus the reveal period; a reveal needs one block after the commit.",
   "too late": "The reveal period is over: this commitment can no longer be revealed.",
   refunded: "The deposit of this photo was already refunded: nothing is at stake.",
-  "accusation open": "This photo already has an open accusation; one at a time.",
+  "accusation open": "This photo already has an open challenge; one at a time.",
   "outside window": "The commitment was not made inside the photo's challenge period.",
   "no record": "There is no record for this photo and device.",
   "no commit": "No live commitment matches this reveal.",

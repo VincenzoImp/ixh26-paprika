@@ -104,7 +104,7 @@ try {
   await shot("local-network-tools");
   await t("local-tools-close").click();
   await click("btn-vote-not-fake-inline");
-  expect(/Accusation rejected/.test(await text("settle-outcome")), "outcome not proven");
+  expect(/Challenge rejected/.test(await text("settle-outcome")), "outcome not proven");
   await shot("outcome-not-proven", "record-accusations");
   await t("protocol-toggle").check();
   await shot("protocol-view-drawer");

@@ -30,8 +30,9 @@ ids with a stand-in for MetaMask (`e2e/fake-metamask.mjs`).
 ## Verify (`#/verify`, home)
 
 `verify-dropzone`, `btn-verify-choose-file`, `input-verify-file`, `btn-verify-last`, `verify-file-name`,
-`verify-error` (empty file), `verify-warning` (non-image, several files), `verify-status` (`data-state` = `no-record`
-/ `attested` / `accused` / `unchallenged` / `fake` / `flagged-fake-proven` / `flagged-key-revoked`; `data-record-state`),
+`verify-error` (empty file), `verify-warning` (non-image, several files), `verify-status` (`data-state` = `no-record` "Not attested" / `attested` "Attested · open to challenge" / `accused`
+"Challenged · UMA vote pending" / `unchallenged` "Confirmed" or "Confirmed · challenge rejected" (mint) / `fake` "Proven fake" /
+`flagged-fake-proven`, `flagged-key-revoked` "Device flagged"; `data-record-state`),
 `verify-status-seal`, `verify-status-title`, `verify-status-detail`, `record-scope`, `verify-honest-sentence`,
 `verify-attesters`, `verify-hash-compare`, `btn-open-record`, `btn-change-pixel` ("Tamper test"),
 `verify-hash`, `recent-records`, `recent-row` (many), `recent-empty`.
@@ -87,3 +88,11 @@ Accuse panel: `accuse-panel`, `accuse-stepper`, `accuse-step-1` … `accuse-step
   `settle-money` (three cells: accuser, depositor, UMA fee); accuse panel `commit-pending`, `btn-discard-pending`,
   `commit-error` ("Add the evidence first…"), `vote-in-progress`; stepper labels "1 Commit" … "4 Settled".
 - Menu: `btn-claim` shown only when the credit is above 0; My activity's claim is "Claim to wallet".
+
+## Wording (team decision)
+
+User-facing "accuse/accusation" became "challenge" (buttons, headings, toasts, history, My activity: "My challenges").
+Test ids keep their old names (`btn-accuse`, `accuse-panel`, `record-accusations`, `my-accusation-row`, …) and the
+machine `data-state` values are unchanged. State chips: "open · N left" (sky), "challenged" (lemon), "proven fake"
+(rose), "confirmed" (mint), "device flagged" (lemon). Lifecycle: Attested → Challenge period → Confirmed → Deposit
+returned; challenged: Attested → Challenged → Proven fake (or back to the first track when rejected).

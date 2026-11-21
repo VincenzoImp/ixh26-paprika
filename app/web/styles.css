@@ -207,3 +207,4 @@ button.link{min-height:32px}
 .modal{max-width:600px}
 .empty-state{border-bottom-width:var(--bw);text-align:center;padding:var(--s6)}
 .copy{min-height:32px}
+.verdict.ok{background:var(--ok-bg)}

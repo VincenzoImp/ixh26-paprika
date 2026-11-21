@@ -123,7 +123,7 @@ export async function prepareAccount() {
   const ok = await confirmDialog({ title: "Prepare this account", testid: "prepare", confirm: "Prepare in MetaMask",
     lines: [["Wrap", amount ? `${eth(amount)} into ${tok(amount)} (WETH is ETH as a token; you can unwrap it any time)` : "nothing (enough WETH already)"],
       ["Approve", needApprove ? "Paprika may take WETH from this account for deposits and bonds (once, no limit)" : "already done"],
-      ["Signatures", `${(amount ? 1 : 0) + (needApprove ? 1 : 0)} in MetaMask now; then one per attest or accusation`]] });
+      ["Signatures", `${(amount ? 1 : 0) + (needApprove ? 1 : 0)} in MetaMask now; then one per attest or challenge`]] });
   if (!ok) return;
   await act("Prepare account", () => S.lib.prepareAccount(S.ctx, { photos: PREPARE_COUNT, role: "photographer" }), { step: { key: "prepare" } });
 }
@@ -235,7 +235,7 @@ function menu() {
     h("div", { class: "m-row" }, addrLink(a.address, { testid: "menu-address" })),
     h("div", { class: "m-row d" }, `MetaMask · ${S.network.name}`),
     h("div", { class: "m-row" }, h("span", { testid: "menu-eth" }, eth(a.eth)), h("span", { testid: "menu-weth" }, tok(a.weth))),
-    prepared() ? h("div", { class: "m-row t-ok", testid: "menu-prepared" }, "✓ Account prepared: one signature per attest or accusation")
+    prepared() ? h("div", { class: "m-row t-ok", testid: "menu-prepared" }, "✓ Account prepared: one signature per attest or challenge")
       : h("div", { class: "m-row" }, h("span", { class: "d" }, "Wrap ETH and approve Paprika once, so each action needs one signature."),
         h("button", { testid: "btn-prepare", onclick: () => prepareAccount() }, "Prepare account")),
     a.credit > 0n ? h("div", { class: "m-row" }, h("span", {}, "Claimable ", h("b", { testid: "menu-credit" }, tok(a.credit)), h("span", { class: "d" }, " (refunds and winnings wait here until you claim)")),

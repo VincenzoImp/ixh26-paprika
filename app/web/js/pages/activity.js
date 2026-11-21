@@ -23,14 +23,14 @@ let loadedAt = -1;
 export function render(root) {
   if (!S.account) {
     mount(root, h("h1", {}, "My activity"), h("div", { class: "card empty", testid: "activity-empty" },
-      h("b", {}, "Connect MetaMask to see your records and accusations."), h("p", { class: "d" }, "Verifying a photo needs no wallet.")));
+      h("b", {}, "Connect MetaMask to see your records and challenges."), h("p", { class: "d" }, "Verifying a photo needs no wallet.")));
     return;
   }
   if (loadedAt !== S.chain.blockNumber) { loadedAt = S.chain.blockNumber; paprikaEvents().then((e) => { events = e; render(root); }); }
   const me = S.account.address;
   const records = S.records.filter((r) => same(r.depositor, me)).reverse();
   const accs = S.accusations.filter((a) => same(a.claimant, me)).reverse();
-  const tabs = h("div", { class: "tabs" }, [["records", `My records (${records.length})`], ["accusations", `My accusations (${accs.length})`], ["txs", "Transactions"]]
+  const tabs = h("div", { class: "tabs" }, [["records", `My records (${records.length})`], ["accusations", `My challenges (${accs.length})`], ["txs", "Transactions"]]
     .map(([k, n]) => h("button", { class: tab === k ? "on" : "", testid: `activity-tab-${k}`, onclick: () => { tab = k; render(root); } }, n)));
   let body;
   if (tab === "records") {
@@ -46,7 +46,7 @@ export function render(root) {
       accs.map((a) => h("tr", { testid: "my-accusation-row" }, h("td", {}, hashLink(a.photoHash, "record")),
         h("td", {}, a.open ? h("span", { class: "chip p" }, "waiting for UMA vote") : h("span", { class: `chip ${a.fakeProven ? "r" : "n"}` }, a.fakeProven ? `fake proven · you won ${winText()}` : `rejected · you lost ${tok(S.ctx.params.bond)}`)),
         h("td", {}, blockLink(a.blockNumber)))))
-      : h("div", { class: "empty" }, h("b", {}, "No accusations."), " Open a record and press Accuse.");
+      : h("div", { class: "empty" }, h("b", {}, "No challenges."), " Open a record and press Challenge.");
   } else {
     const mineTx = events.filter((e) => [e.args?.depositor, e.args?.claimant, e.args?.account, e.args?.owner].some((x) => x && same(x, me)));
     body = mineTx.length ? h("table", { testid: "my-transactions" }, h("tr", {}, h("th", {}, "Event"), h("th", {}, "Block"), h("th", {}, "Transaction")),

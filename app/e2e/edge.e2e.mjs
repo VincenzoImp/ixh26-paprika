@@ -122,7 +122,7 @@ async function edge() {
   await go(`#/record/${R}`);
   await click("btn-skip-wait");
   await t("account-button").click(); await clickConfirm("btn-revoke", "revoke"); await t("account-button").click();
-  await check("m-2: revoked key + challenge over: the verdict offers no accusation", !/can still be accused/i.test(await text("record-verdict-detail")));
+  await check("m-2: revoked key + challenge over: the verdict offers no accusation", !/can still be (accused|challenged)/i.test(await text("record-verdict-detail")));
 
   // ---- S-3: a second npm start leaves the running deployment untouched; S-4: stop with a port prefix
   const before = (await (await fetch(`${inst.base}/deployment.json`)).json()).addresses.paprika;

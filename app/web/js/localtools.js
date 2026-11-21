@@ -14,11 +14,11 @@ export const isLocal = () => !!S.network?.local;
 
 // Why the clock cannot move now ("" if it can): never while an accusation waits for its vote.
 export function skipBlocker() {
-  if (S.accusations.some((a) => a.open) || S.records.some((r) => stateOf(r) === "accused")) return "Not while an accusation waits for its UMA vote: resolve the vote first.";
+  if (S.accusations.some((a) => a.open) || S.records.some((r) => stateOf(r) === "accused")) return "Not while a challenge waits for its UMA vote: resolve the vote first.";
   // A commitment of this browser that is not revealed yet: skipping time would end its reveal period and burn the bond.
   const rw = Number(S.ctx.params.revealWindow);
   if (Object.values(S.mine || {}).some((m) => m.commitment && !m.assertionId && !m.noAssertion && !m.forfeited && (m.pending || S.chain.timestamp + 1 <= Number(m.committedAt) + rw)))
-    return "Not while an accusation is committed but not revealed: reveal it first, or skipping would make it expire.";
+    return "Not while a challenge is committed but not revealed: reveal it first, or skipping would make it expire.";
   return "";
 }
 
@@ -42,7 +42,7 @@ export async function resolveVote(assertionId, fakeProven) {
     try {
       await S.lib.umaVote(S.ctx, assertionId, fakeProven, { onPhase: (ph) => { S.votePhase.phases.push(String(ph.phase)); emit("change"); } });
     } catch (e) {
-      if (e?.code === "VOTE_IN_PROGRESS" || /in progress|already running/i.test(e?.message || "")) throw new Error("A vote on this accusation is already running (another window or the CLI). Wait a few seconds; the outcome appears here.");
+      if (e?.code === "VOTE_IN_PROGRESS" || /in progress|already running/i.test(e?.message || "")) throw new Error("A vote on this challenge is already running (another window or the CLI). Wait a few seconds; the outcome appears here.");
       throw e;
     }
   }, { local: true, step: { key: "vote" }, after: async () => {

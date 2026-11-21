@@ -160,7 +160,7 @@ async function story() {
   await go(`#/record/${photo1}`);
   await mm.use("bob"); await page.waitForTimeout(800); await idle();
   await eq("switch: header shows Bob", await text("account-name"), "Bob");
-  await check("switch: the record page offers Bob 'Accuse'", await t("btn-accuse").isVisible());
+  await check("switch: the record page offers Bob 'Challenge'", await t("btn-accuse").isVisible());
   await go("#/activity");
   await check("switch: Bob's activity has no records", await t("deposits-empty").isVisible());
 
@@ -216,7 +216,7 @@ async function story() {
   await eq("vote not proven: Bob lost B (wallet + credit, chain)", after.bob + after.cBob - before.bob - before.cBob, -B);
   await eq("vote not proven: Alice credit +B − fB (chain)", after.cAlice - before.cAlice, B - fB);
   await eq("vote not proven: Store +fB (chain)", after.store - before.store, fB);
-  await check("vote not proven: outcome in words on the record", /Accusation rejected/.test(await text("settle-outcome")));
+  await check("vote not proven: outcome in words on the record", /Challenge rejected/.test(await text("settle-outcome")));
   await check("vote not proven: the challenge period was extended (chain)", BigInt((await recordOf(photo1)).accusableUntil) > until0);
 
   // ---- Alice: claim, skip wait, refund
@@ -237,7 +237,7 @@ async function story() {
   await eq("refund: chain record refunded", (await recordOf(photo1)).state, "refunded");
   await eq("refund: Alice credit +B (chain)", (await money()).cAlice - f0.cAlice, B);
   await eq("refund: verdict says what happened", await t("record-verdict").getAttribute("data-state"), "unchallenged");
-  await check("refund: verdict says 'Not proven fake · deposit refunded'", /Not proven fake · deposit refunded/.test(await text("record-verdict-title")));
+  await check("refund: verdict says 'Confirmed · challenge rejected' and the deposit was returned", /Confirmed · challenge rejected/.test(await text("record-verdict-title")) && /Deposit returned to the photographer/.test(await text("record-verdict-detail")));
   await check("B4: a refunded record offers no accusation, with the reason", !(await t("btn-accuse").isVisible().catch(() => false)) && (await t("record-action-why").isVisible()));
   await t("account-button").click();
   await click("btn-claim");

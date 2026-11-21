@@ -64,7 +64,7 @@ async function commit(rec) {
   R.formError = "";
   const B = big(S.ctx.params.bond);
   const fB = (B * BigInt(Math.round(Number(S.ctx.params.feeShare) * 1e9))) / 1000000000n;
-  const ok = await confirmDialog({ title: "Commit this accusation", testid: "confirm-commit", confirm: "Commit in MetaMask",
+  const ok = await confirmDialog({ title: "Commit this challenge", testid: "confirm-commit", confirm: "Commit in MetaMask",
     lines: [["Photo", hashLink(rec.photoHash, "hash")], ["Bond", `${tok(B)} locked now`],
       ["If the evidence proves it", `you get your ${tok(B)} bond back plus ${tok(B - fB)}; UMA keeps ${tok(fB)}`],
       ["If it does not", `you lose ${tok(B)}`],
@@ -72,7 +72,7 @@ async function commit(rec) {
       ["Signatures", prepared() ? "1 in MetaMask" : "up to 3 in MetaMask (wrap, approve, commit)"]] });
   if (!ok) return;
   const who = S.account.address;   // the committing account: its secret stays with it, whatever happens next
-  await act("Commit accusation", async () => {
+  await act("Commit challenge", async () => {
     const [published, before] = await Promise.all([publishEvidence(file || text), snapshot(rec.photoHash, rec.keyId)]);
     const base = { photoHash: toHex(rec.photoHash), keyId: toHex(rec.keyId), evidenceUrl: published.url, before };
     // The secret is made here and stored BEFORE anything is signed (also before a wrap or an approval).
@@ -139,7 +139,7 @@ export function render(root, { photoHash, key, accuse }) {
   const link = `${location.origin}${location.pathname}#/record/${rec.photoHash}${R.records.length > 1 ? `?key=${rec.keyId}` : ""}`;
 
   // Who may accuse this record now ("" = this account can).
-  const accuseWhy = notAccusable(rec) || (iAmDepositor ? "You attested this photo: another account must accuse it." : "");
+  const accuseWhy = notAccusable(rec) || (iAmDepositor ? "You attested this photo: another account must challenge it." : "");
   const panelOpen = (accuse && !accuseWhy && S.account) || (m && !m.forfeited && (m.pending || liveCommit(m) || isDeadCommit(m) || m.assertionId || m.noAssertion));
 
   // The one contextual action.
@@ -152,7 +152,7 @@ export function render(root, { photoHash, key, accuse }) {
       onclick: () => act("Refund deposit", () => S.lib.refund(S.ctx, "photographer", { photoHash: rec.photoHash, keyId: rec.keyId }),
         { step: { key: "refund" }, okText: `${tok(S.ctx.params.bond)} added to your claimable balance. Claim it from the account menu.` }) }, "Refund deposit");
   } else if (!accuseWhy && !panelOpen) {
-    action = h("a", { class: "btn pri big", testid: "btn-accuse", href: `#/record/${rec.photoHash}/accuse${R.records.length > 1 ? `?key=${rec.keyId}` : ""}` }, "Accuse");
+    action = h("a", { class: "btn pri big", testid: "btn-accuse", href: `#/record/${rec.photoHash}/accuse${R.records.length > 1 ? `?key=${rec.keyId}` : ""}` }, "Challenge");
   } else if (!panelOpen) actionWhy = accuseWhy;
   if (blocked && action) actionWhy = blocked;
 
@@ -176,9 +176,9 @@ export function render(root, { photoHash, key, accuse }) {
           h("dt", {}, "Device key"), h("dd", {}, hashLink(rec.keyId, "device"), " · ", deviceText(rec)),
           h("dt", {}, "Signed"), h("dd", {}, "between block ", blockLink(rec.anchorBlock), " and ", blockLink(rec.recordedBlock), h("span", { class: "d" }, " (the device signed a block hash it could not know earlier)")),
           h("dt", {}, "Depositor"), h("dd", { testid: "record-depositor" }, addrLink(rec.depositor)),
-          h("dt", {}, "Deposit"), h("dd", {}, st === "fake" ? "lost to the accuser" : st === "refunded" ? "refunded to the depositor's claimable balance" : `${tok(S.ctx.params.bond)} locked`),
+          h("dt", {}, "Deposit"), h("dd", {}, st === "fake" ? "lost to the challenger" : st === "refunded" ? "returned to the photographer (claimable)" : `${tok(S.ctx.params.bond)} locked`),
           h("dt", {}, "Challenge period"), h("dd", {}, challengeText(rec)),
-          h("dt", {}, "Accusations"), h("dd", { testid: "record-accusation-count" }, mineLine || (acc.total ? `${acc.total} (${acc.rejected} rejected, ${acc.proven} proven${acc.open ? ", 1 open" : ""})` : "none")),
+          h("dt", {}, "Challenges"), h("dd", { testid: "record-accusation-count" }, mineLine || (acc.total ? `${acc.total} (${acc.rejected} rejected, ${acc.proven} proven${acc.open ? ", 1 open" : ""})` : "none")),
           R.records.length > 1 ? [h("dt", {}, "Other keys"), h("dd", {}, R.records.filter((r) => r !== rec).map((r) => h("a", { class: "link mono", href: `#/record/${r.photoHash}?key=${r.keyId}` }, `${r.keyId.slice(0, 10)}… `)))] : null),
         S.files[rec.photoHash] ? h("button", { testid: "btn-download", onclick: () => { const f = S.files[rec.photoHash]; download(f.bytes, `paprika-${rec.photoHash.slice(2, 10)}.${extOf(f)}`, f.type); } }, "Download the attested file") : null),
       h("div", { class: "card" }, h("h2", {}, "History"), history(rec))));
@@ -195,13 +195,13 @@ function challengeText(rec) {
   const now = S.chain.timestamp;
   const end = Number(rec.accusableUntil);
   const ext = accusationsOf(rec).rejected;
-  return [end > now ? ["ends ", rel(end)] : ["ended ", rel(end)], ext ? ` · extended by ${ext} rejected accusation${ext > 1 ? "s" : ""}` : "", " · refundable from ", rel(rec.refundableAt)];
+  return [end > now ? ["ends ", rel(end)] : ["ended ", rel(end)], ext ? ` · extended by ${ext} rejected challenge${ext > 1 ? "s" : ""}` : "", " · refundable from ", rel(rec.refundableAt)];
 }
 
 // The record's history: every Paprika event about it, with explorer links.
 function history(rec) {
   const rows = R.events.filter((e) => !e.args.keyId || same(e.args.keyId, rec.keyId));
-  const words = { Attested: "Attested", Refunded: "Refunded to the depositor's claimable balance", AccusationOpened: "Accused · sent to UMA vote" };
+  const words = { Attested: "Attested", Refunded: "Deposit returned to the photographer (claimable)", AccusationOpened: "Challenged · sent to UMA vote" };
   const resolved = accusationsOf(rec).list.filter((a) => !a.open).map((a) => ({ name: "AccusationResolved", blockNumber: a.resolvedBlock, txHash: a.resolvedTx, fake: a.fakeProven }));
   const all = [...rows.filter((e) => e.name !== "AccusationResolved"), ...resolved].sort((a, b) => a.blockNumber - b.blockNumber);
   return h("ol", { class: "history", testid: "record-history" }, all.map((e) => h("li", { testid: "history-row" },
@@ -214,7 +214,7 @@ function history(rec) {
 function outcomes(rec) {
   const B = big(S.ctx.params.bond);
   const fB = (B * BigInt(Math.round(Number(S.ctx.params.feeShare) * 1e9))) / 1000000000n;
-  return h("div", { class: "card", testid: "record-accusations" }, h("h2", {}, "Accusations"),
+  return h("div", { class: "card", testid: "record-accusations" }, h("h2", {}, "Challenges"),
     accusationsOf(rec).list.map((a) => h("div", { class: "acc-row", testid: "accusation-row", "data-open": a.open ? "1" : "0" },
       a.open ? h("div", { testid: "accusation-open" }, "Waiting for UMA's vote · 48-72 h on mainnet",
           S.votePhase && same(S.votePhase.assertionId, a.assertionId) && S.votePhase.phases.length ? ` · ${S.votePhase.phases.join(" ✓ · ")} ✓` : "",
@@ -222,10 +222,10 @@ function outcomes(rec) {
             localChip("Resolve vote (local): Fake proven", () => resolveVote(a.assertionId, true), { testid: "btn-vote-fake-inline" }),
             localChip("Resolve vote (local): Not proven", () => resolveVote(a.assertionId, false), { testid: "btn-vote-not-fake-inline" })))
         : h("div", { class: "outcome", testid: "settle-outcome", "data-outcome": a.fakeProven ? "fake-proven" : "not-proven" },
-          h("div", {}, h("span", { class: `chip ${a.fakeProven ? "r" : "n"}` }, a.fakeProven ? "Fake proven" : "Accusation rejected"), " ",
-            a.fakeProven ? "The device key is flagged." : "The challenge period was extended by the time under accusation."),
+          h("div", {}, h("span", { class: `chip ${a.fakeProven ? "r" : "n"}` }, a.fakeProven ? "Fake proven" : "Challenge rejected"), " ",
+            a.fakeProven ? "The device key is flagged." : "The challenge period was extended by the time under challenge."),
           h("div", { class: "money", testid: "settle-money" },
-            h("div", {}, h("span", {}, "Accuser ", addrLink(a.claimant, { copy: false })), h("b", {}, signedTok(a.fakeProven ? B - fB : -B))),
+            h("div", {}, h("span", {}, "Challenger ", addrLink(a.claimant, { copy: false })), h("b", {}, signedTok(a.fakeProven ? B - fB : -B))),
             h("div", {}, h("span", {}, "Depositor"), h("b", {}, signedTok(a.fakeProven ? -B : B - fB))),
             h("div", {}, h("span", {}, "UMA fee"), h("b", {}, tok(fB)))),
           h("div", { class: "d" }, "Credits are claimable from the account menu.")),
@@ -253,9 +253,9 @@ function accusePanel(rec, m) {
   if (step === 3) {   // settled: one line, the detail is in the Accusations card
     return h("div", { class: "card accuse", testid: "accuse-panel" },
       h("div", { testid: m.noAssertion ? "reveal-status" : "accuse-done" }, m.noAssertion
-        ? `Bond returned: this photo was already accused or decided, so your accusation did not open. ${tok(S.ctx.params.bond)} is in your claimable balance.`
-        : `Your accusation: ${decided.fakeProven ? "proven" : "rejected"} · see the outcome below.`),
-      !notAccusable(rec) && !same(S.account?.address, rec.depositor) ? h("button", { class: "link", testid: "btn-accuse-new", onclick: () => { setMineFor(S.account.address, rec, null); location.hash = `#/record/${rec.photoHash}/accuse`; emit("change"); } }, "Start a new accusation") : null);
+        ? `Bond returned: this photo was already challenged or decided, so your challenge did not open. ${tok(S.ctx.params.bond)} is in your claimable balance.`
+        : `Your challenge: ${decided.fakeProven ? "proven" : "rejected"} · see the outcome below.`),
+      !notAccusable(rec) && !same(S.account?.address, rec.depositor) ? h("button", { class: "link", testid: "btn-accuse-new", onclick: () => { setMineFor(S.account.address, rec, null); location.hash = `#/record/${rec.photoHash}/accuse`; emit("change"); } }, "Start a new challenge") : null);
   }
   const stepper = h("ol", { class: "stepper", testid: "accuse-stepper" }, ["1 Commit", "2 Reveal", "3 UMA vote", "4 Settled"].map((n, i) =>
     h("li", { class: i < step ? "done" : i === step ? "cur" : "", testid: `accuse-step-${i + 1}` }, n)));
@@ -264,13 +264,13 @@ function accusePanel(rec, m) {
     const why = accountBlocker(true);
     const fileIn = h("input", { type: "file", class: "hidden", testid: "input-evidence-file", onchange: (e) => { R.form.file = e.target.files[0] || null; R.formError = ""; emit("change"); } });
     body = [
-      h("p", { class: "callout", testid: "uma-question" }, "UMA's voters say FAKE only on public, checkable evidence: the accuser must prove it."),
+      h("p", { class: "callout", testid: "uma-question" }, "UMA's voters say FAKE only on public, checkable evidence: the challenger must prove it."),
       h("label", { class: "f", for: "ev" }, "Evidence"),
       h("textarea", { id: "ev", testid: "input-evidence", placeholder: "Link to public evidence, or a short text", value: R.form.text, oninput: (e) => { R.form.text = e.target.value; } }),
       h("div", { class: "row" }, h("button", { testid: "btn-evidence-file", onclick: () => fileIn.click() }, R.form.file ? `File: ${R.form.file.name}` : "…or attach a file"), fileIn,
         S.network?.local ? h("button", { class: "link", testid: "btn-evidence-example", onclick: () => { R.form.text = "The same image was published at https://example.org/listing before this record's anchor block."; emit("change"); } }, "use example (local)") : null),
       h("p", { class: "d" }, `The evidence is published for the voters; only its SHA-256 goes on chain. Bond ${tok(S.ctx.params.bond)}: you lose it if the evidence does not prove the fake.`),
-      h("button", { class: "pri", testid: "btn-commit", disabled: !!why || S.busy, onclick: () => commit(rec) }, "Commit accusation"),
+      h("button", { class: "pri", testid: "btn-commit", disabled: !!why || S.busy, onclick: () => commit(rec) }, "Commit challenge"),
       why ? h("div", { class: "why", testid: "commit-why" }, why) : null,
       R.formError ? h("div", { class: "t-bad", testid: "commit-error" }, R.formError) : null];
   } else if (step === 1) {
@@ -290,9 +290,9 @@ function accusePanel(rec, m) {
         h("div", { class: "d" }, "Commitment ", hashLink(m.commitment, "hash"), m.commitTx ? [" · transaction ", hashLink(m.commitTx, "tx", { copy: false })] : null)];
     }
   } else {
-    body = [h("div", { testid: "vote-in-progress" }, "UMA vote in progress (see Accusations below).")];
+    body = [h("div", { testid: "vote-in-progress" }, "UMA vote in progress (see Challenges below).")];
   }
-  return h("div", { class: "card accuse", testid: "accuse-panel" }, h("h2", {}, "Accuse this photo"), stepper, body);
+  return h("div", { class: "card accuse", testid: "accuse-panel" }, h("h2", {}, "Challenge this photo"), stepper, body);
 }
 
 // File extension for a download.

@@ -32,9 +32,9 @@ export function accusationsOf(rec) {
 // Why a record cannot be accused now ("" if it can).
 export function notAccusable(rec) {
   const st = stateOf(rec);
-  if (st === "refunded") return "The deposit was refunded: nothing is at stake any more.";
+  if (st === "refunded") return "The deposit was returned: nothing is at stake any more.";
   if (st === "fake") return "Already proven fake.";
-  if (st === "accused") return "An accusation is open; one at a time.";
+  if (st === "accused") return "A challenge is open; one at a time.";
   if (!accusableNow(rec)) return "The challenge period is over.";
   return "";
 }
@@ -45,30 +45,27 @@ export function verdictOf(rec) {
   const dev = deviceOf(rec);
   const acc = accusationsOf(rec);
   const B = tok(S.ctx.params.bond);
-  const hist = acc.rejected ? `${acc.rejected} accusation${acc.rejected > 1 ? "s" : ""} rejected` : "never accused";
+  const left = dur(Number(rec.accusableUntil) - S.chain.timestamp);
   if (st === "fake") return { cls: "bad", seal: "✕", state: "fake", title: "Proven fake",
     detail: `UMA's voters found the evidence proves this photo is not a genuine capture by this key. The depositor lost ${B}. The record stays, marked. Device key ${String(rec.keyId).slice(0, 6)}…${String(rec.keyId).slice(-4)} is now flagged: it can no longer attest.` };
-  if (st === "accused") return { cls: "flag", seal: "!", state: "accused", title: "Under accusation",
-    detail: "An accusation was sent to UMA's vote. UMA holds both stakes until the vote." };
+  if (st === "accused") return { cls: "flag", seal: "!", state: "accused", title: "Challenged · UMA vote pending",
+    detail: "UMA's voters decide. UMA holds both stakes until the vote." };
   if (dev.status === "flagged" && st !== "refunded") {
-    const still = challengeOver(rec) ? "Its challenge period is over." : `It can still be accused for ${dur(Number(rec.accusableUntil) - S.chain.timestamp)}.`;
-    if (dev.reason === "key revoked") return { cls: "flag", seal: "!", state: "flagged-key-revoked", title: `Not judged · its key was revoked at block ${dev.flaggedAtBlock}`,
-      detail: `The key holder declared the key compromised; a thief may have made this record. ${still}` };
-    return { cls: "flag", seal: "!", state: "flagged-fake-proven", title: "Not judged · its key is flagged",
-      detail: `Another photo of this key was proven fake at block ${dev.flaggedAtBlock}. ${still}` };
+    const still = challengeOver(rec) ? "Its challenge period is over." : `It can still be challenged for ${left}.`;
+    const why = dev.reason === "key revoked" ? `The key holder revoked this key at block ${dev.flaggedAtBlock}.` : `Another photo of this device was proven fake at block ${dev.flaggedAtBlock}.`;
+    return { cls: "flag", seal: "!", state: dev.reason === "key revoked" ? "flagged-key-revoked" : "flagged-fake-proven", title: "Device flagged", detail: `${why} ${still}` };
   }
-  const notProof = "Nobody proved it fake within the challenge period. This is not proof that it is real.";
-  const what = acc.rejected ? "Not proven fake" : "Never accused";
-  if (st === "refunded") return { cls: "closed", seal: "○", state: "unchallenged", title: `${what} · deposit refunded`, detail: `${notProof} The deposit went to the depositor's claimable balance.` };
-  if (challengeOver(rec)) return { cls: "closed", seal: "○", state: "unchallenged", title: `${what} · challenge period over`, detail: `${notProof} The depositor can now refund the deposit.` };
-  return { cls: "open", seal: "◷", state: "attested", title: "Signed and staked · open to challenge",
-    detail: `${B} at stake · anyone can accuse it for ${dur(Number(rec.accusableUntil) - S.chain.timestamp)}.` };
+  const title = acc.rejected ? "Confirmed · challenge rejected" : "Confirmed";
+  const base = "No one proved it fake within the challenge period.";
+  if (st === "refunded") return { cls: "ok", seal: "✓", state: "unchallenged", title, detail: `${base} Deposit returned to the photographer.` };
+  if (challengeOver(rec)) return { cls: "ok", seal: "✓", state: "unchallenged", title, detail: `${base} Deposit refundable.` };
+  return { cls: "open", seal: "◷", state: "attested", title: "Attested · open to challenge", detail: `${B} at stake · anyone can challenge it for ${left}.` };
 }
 
 // The large verdict card (projector-legible). With no record: the grey "no record" verdict.
 export function verdictCard(rec, { testid = "verify-status", extra = null, action = null } = {}) {
-  const v = rec ? verdictOf(rec) : { cls: "none", seal: "∅", state: "no-record", title: "No record for this exact file",
-    detail: "No registered key signed this exact file. A resized or recompressed copy also has no record: \"no record\" does not mean \"fake\"." };
+  const v = rec ? verdictOf(rec) : { cls: "none", seal: "∅", state: "no-record", title: "Not attested",
+    detail: "No record for this exact file. A resized or recompressed copy also has no record: \"no record\" does not mean \"fake\"." };
   const card = h("div", { class: `verdict ${v.cls}`, testid, "data-state": v.state, "data-record-state": rec ? stateOf(rec) : "none" },
     h("div", { class: "seal", testid: `${testid}-seal` }, v.seal),
     h("div", {}, h("div", { class: "bigt", testid: `${testid}-title` }, v.title), h("div", { class: "vd", testid: `${testid}-detail` }, v.detail), extra),
@@ -83,20 +80,29 @@ export function scopeLines(rec) {
       `a registered device signed this exact file between block ${rec.anchorBlock} and block ${rec.recordedBlock}, and a deposit was at stake.`));
 }
 
-// The lifecycle of a record: Attested → Challenge period → Refundable → Refunded, or Accused → Proven fake / Not proven.
+// The lifecycle of a record: Attested → Challenge period → Confirmed → Deposit returned, or Attested → Challenged → Proven fake / Confirmed.
 export function lifecycle(rec) {
   const st = stateOf(rec);
   const acc = accusationsOf(rec);
   const end = exactTime(rec.accusableUntil).slice(11, 16);
-  const ext = acc.rejected ? ` · extended by ${acc.rejected} rejected accusation${acc.rejected > 1 ? "s" : ""}` : "";
-  const cpSub = st === "fake" ? "closed by accusation" : st === "accused" ? "paused · UMA vote" : challengeOver(rec) ? `ended ${end}${ext}` : `ends ${end}${ext}`;
-  const list = st === "fake"
-    ? [["Attested", `#${rec.recordedBlock}`], ["Challenge period", cpSub], ["Accused", "UMA vote"], ["Proven fake", "device key flagged"]]
-    : [["Attested", `#${rec.recordedBlock}`], ["Challenge period", cpSub], ["Refundable", `from ${exactTime(rec.refundableAt).slice(11, 16)}`], ["Refunded", "to the claimable balance"]];
-  const cur = st === "fake" ? "Proven fake" : st === "refunded" ? "Refunded" : st === "accused" ? "Challenge period" : challengeOver(rec) ? "Refundable" : "Challenge period";
+  const ext = acc.rejected ? ` · extended by ${acc.rejected} rejected challenge${acc.rejected > 1 ? "s" : ""}` : "";
+  let list, cur;
+  if (st === "fake") { list = [["Attested", `#${rec.recordedBlock}`], ["Challenged", "UMA vote"], ["Proven fake", "device key flagged"]]; cur = "Proven fake"; }
+  else if (st === "accused") { list = [["Attested", `#${rec.recordedBlock}`], ["Challenged", "UMA vote pending"], ["Proven fake or Confirmed", ""]]; cur = "Challenged"; }
+  else {
+    list = [["Attested", `#${rec.recordedBlock}`], ["Challenge period", challengeOver(rec) ? `ended ${end}${ext}` : `ends ${end}${ext}`],
+      ["Confirmed", acc.rejected ? "challenge rejected" : ""], ["Deposit returned", st === "refunded" ? "" : `refundable from ${exactTime(rec.refundableAt).slice(11, 16)}`]];
+    cur = st === "refunded" ? "Deposit returned" : challengeOver(rec) ? "Confirmed" : "Challenge period";
+  }
   const curIdx = list.findIndex(([n]) => n === cur);
-  const final = st === "fake" || st === "refunded";   // a finished lifecycle ends on a done (or rose) step, not a current one
-  const cls = (i) => (final ? (st === "fake" && i === list.length - 1 ? "bad" : "done") : i < curIdx ? "done" : i === curIdx ? "cur" : "");
+  // Steps up to the current one are done; a confirmed or returned step is mint, a proven fake rose.
+  const cls = (i) => {
+    const n = list[i][0];
+    if (i > curIdx) return "";
+    if (n === "Proven fake") return "bad";
+    if (i < curIdx || n === "Confirmed" || n === "Deposit returned") return "done";
+    return "cur";
+  };
   return h("ol", { class: "lifecycle", testid: "record-lifecycle", "data-current": cur },
     list.map(([n, sub], i) => h("li", { class: cls(i), "data-step": n },
       h("span", {}, n), sub ? h("small", {}, sub) : null)));
@@ -105,12 +111,13 @@ export function lifecycle(rec) {
 // A short record row label: photo hash link + state chip.
 export function stateChip(rec) {
   const st = stateOf(rec);
-  const acc = accusationsOf(rec);
-  const [label, cls] = st === "fake" ? ["proven fake", "r"] : st === "accused" ? ["under accusation", "p"]
-    : st === "refunded" ? [acc.rejected ? "not proven fake · refunded" : "refunded", "n"]
-    : refundable(rec) ? [acc.rejected ? "not proven fake · refundable" : "refundable", "n"]
-    : challengeOver(rec) ? ["challenge over", "n"] : [`open · ${dur(Number(rec.accusableUntil) - S.chain.timestamp)} left`, "s"];
-  return h("span", { class: `chip ${cls}`, testid: "record-state-chip", title: `challenge until ${exactTime(rec.accusableUntil)} · refundable from ${exactTime(rec.refundableAt)}` }, label);
+  const dev = deviceOf(rec);
+  const deposit = st === "refunded" ? "deposit returned" : refundable(rec) ? "deposit refundable" : st === "fake" ? "deposit lost" : "deposit locked";
+  const [label, cls] = st === "fake" ? ["proven fake", "r"] : st === "accused" ? ["challenged", "p"]
+    : dev.status === "flagged" && st !== "refunded" && !challengeOver(rec) ? ["device flagged", "p"]
+    : st === "refunded" || challengeOver(rec) ? ["confirmed", "m"]
+    : [`open · ${dur(Number(rec.accusableUntil) - S.chain.timestamp)} left`, "s"];
+  return h("span", { class: `chip ${cls}`, testid: "record-state-chip", title: `${deposit} · challenge until ${exactTime(rec.accusableUntil)} · refundable from ${exactTime(rec.refundableAt)}` }, label);
 }
 
 export { hashLink };
