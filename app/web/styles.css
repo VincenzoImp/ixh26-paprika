@@ -24,7 +24,7 @@ header{display:flex;align-items:center;gap:20px;padding:10px 24px;background:#ff
 nav{display:flex;gap:4px}
 nav a{padding:7px 14px;border-radius:8px;font-weight:700;color:var(--ink);text-decoration:none;border:2px solid transparent}
 nav a.on{border-color:var(--ink);background:var(--paper)}
-.pv{margin-left:auto;font-size:14px;display:flex;gap:6px;align-items:center;cursor:pointer}
+.pv{margin-left:auto;font-size:14px;display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap}
 .netpill{font-size:13px;font-weight:700;border:2px solid var(--ink);border-radius:999px;padding:3px 10px;color:#17703f;background:#fff;white-space:nowrap}
 .netpill.down{color:#b3261e}
 .account{display:flex;gap:8px;align-items:center}

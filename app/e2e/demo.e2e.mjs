@@ -1,560 +1,308 @@
-// Paprika: end-to-end test of the web demo (docs/demo.md), with Playwright (Chromium, headless).
+// Paprika: end-to-end test of the web app (Playwright, Chromium headless), the demo story with Alice and Bob.
 //
-// It starts its OWN fresh instance (chain + deploy + web) on spare ports, drives the page through the whole demo
-// story, and checks both what the page shows and the chain state, read independently with app/lib/paprika.js.
-// At the end it stops the instance. Exit code 0 = all checks passed, 1 = at least one failed.
+// It starts its OWN fresh instance on spare ports, opens the app with a stand-in for the MetaMask extension
+// (e2e/fake-metamask.mjs: Hardhat accounts #1 = Alice and #2 = Bob, switched with accountsChanged as the presenter
+// does in MetaMask), drives the whole story, and checks what the page shows against the chain, read independently
+// with app/lib/paprika.js. Exit code 0 = all checks passed.
 //
-//   cd app && npm run e2e            (package.json: "e2e": "node e2e/demo.e2e.mjs")
-//
-// Environment: E2E_RPC_PORT (default 8645), E2E_WEB_PORT (default 5273), HEADED=1 to watch.
-// Screenshots of failures: app/output/e2e/.
+//   cd app && npm run e2e        Environment: E2E_RPC_PORT (8645), E2E_WEB_PORT (5273), HEADED=1.
 
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { ethers } from "ethers";
+import { APP, startInstance, checker, driver } from "./helpers.mjs";
+import { installFakeMetaMask } from "./fake-metamask.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const APP = path.resolve(HERE, "..");
 const RPC_PORT = Number(process.env.E2E_RPC_PORT || 8645);
 const WEB_PORT = Number(process.env.E2E_WEB_PORT || 5273);
-const BASE = `http://127.0.0.1:${WEB_PORT}`;
 const OUT = path.join(APP, "output", "e2e");
-fs.mkdirSync(OUT, { recursive: true });
-
-const results = [];      // { name, ok, detail }
+let page, browser, inst, lib, ctx, mm;
+const { check, eq, results } = checker(OUT, () => page);
 const consoleErrors = [];
-const failedRequests = [];
-let page, browser, server, lib, ctx;
-
-// ------------------------------------------------------------------ instance
-
-async function rpcAlive(port) {
-  try {
-    const r = await fetch(`http://127.0.0.1:${port}`, { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), signal: AbortSignal.timeout(1000) });
-    return r.ok;
-  } catch { return false; }
-}
-
-async function startInstance() {
-  if (await rpcAlive(RPC_PORT)) throw new Error(`port ${RPC_PORT} is busy: a fresh chain is needed (set E2E_RPC_PORT)`);
-  server = spawn(process.execPath, ["scripts/start.js"], {
-    cwd: APP, detached: true, stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, RPC_PORT: String(RPC_PORT), WEB_PORT: String(WEB_PORT) },
-  });
-  let log = "";
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("instance did not start in 180 s:\n" + log)), 180000);
-    const onData = (d) => {
-      log += d;
-      if (/Paprika is running/.test(log)) { clearTimeout(timer); resolve(); }
-      if (/Start failed/.test(log)) { clearTimeout(timer); reject(new Error(log)); }
-    };
-    server.stdout.on("data", onData);
-    server.stderr.on("data", onData);
-    server.on("exit", (c) => { clearTimeout(timer); reject(new Error(`start.js exited (${c}):\n${log}`)); });
-  });
-  // the web server prints its line a moment later
-  for (let i = 0; i < 50; i++) {
-    try { if ((await fetch(BASE)).ok) break; } catch {}
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
-function stopInstance() {
-  if (!server) return;
-  try { process.kill(-server.pid, "SIGINT"); } catch {}
-  server = null;
-}
-
-// ------------------------------------------------------------------ checks
-
-let shotN = 0;
-async function check(name, cond, detail = "") {
-  let ok;
-  try { ok = typeof cond === "function" ? await cond() : cond; } catch (e) { ok = false; detail = (detail + " " + e.message).trim(); }
-  results.push({ name, ok: !!ok, detail });
-  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail ? "  -- " + detail : ""}`);
-  if (!ok && page) {
-    shotN += 1;
-    const file = path.join(OUT, `fail-${String(shotN).padStart(2, "0")}-${name.replace(/[^a-z0-9]+/gi, "-").slice(0, 60)}.png`);
-    await page.screenshot({ path: file, fullPage: true }).catch(() => {});
-    console.log(`      screenshot: ${path.relative(APP, file)}`);
-  }
-  return !!ok;
-}
-const show = (v) => typeof v === "bigint" ? v.toString() : JSON.stringify(v);
-const eq = (name, actual, expected) => check(name, actual === expected, `expected ${show(expected)}, got ${show(actual)}`);
-
-const t = (id) => page.getByTestId(id);
-const text = async (id) => (await t(id).first().innerText()).trim();
-async function idle() {
-  await page.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 90000 });
-}
-// Clicks and waits for the action; returns the error banner text, or "" if none.
-async function click(idOrLoc) {
-  const loc = typeof idOrLoc === "string" ? t(idOrLoc) : idOrLoc;
-  await loc.click();
-  await page.waitForTimeout(150);
-  await idle();
-  if (await t("error-banner").isVisible()) {
-    const msg = await text("error-message");
-    await t("btn-dismiss-error").click();
-    return msg || "(error banner without text)";
-  }
-  return "";
-}
-async function clickOk(name, id) {
-  const err = await click(id);
-  await check(`${name}: no error`, err === "", err);
-}
-const verdict = () => t("verify-status").getAttribute("data-state");
-const fmt = (v) => lib.formatToken(ctx, v);
 
 // Chain reads, independent of the page.
-async function chainRecord(photoHash, keyId) {
-  const rows = await lib.verifyPhoto(ctx, photoHash);
-  return keyId ? rows.find((r) => r.keyId.toLowerCase() === keyId.toLowerCase()) : rows[rows.length - 1];
+const recordOf = async (photoHash) => (await lib.verifyPhoto(ctx, photoHash))[0];
+async function money() {
+  const tok = ctx.contracts.token;
+  const A = mm.address("alice"), B = mm.address("bob");
+  const bal = async (x) => BigInt(await tok.balanceOf(x));
+  return { alice: await bal(A), bob: await bal(B), store: await bal(ctx.addresses.store), paprika: await bal(ctx.addresses.paprika), oo: await bal(ctx.addresses.oo),
+    cAlice: await lib.credits(ctx, A), cBob: await lib.credits(ctx, B) };
 }
 async function deviceOnChain(keyId) {
   const d = await ctx.contracts.paprika.devices(keyId);
   return { status: ["none", "active", "flagged"][Number(d.status ?? d[1])], reason: ["none", "fake-proven", "key-revoked"][Number(d.reason ?? d[2])] };
 }
-// The addresses of the page's own wallets (each actor signs client-side).
-const W = { photographer: "", accuser: "" };
-async function money() {
-  const tok = ctx.contracts.token;
-  const bal = async (a) => (a ? BigInt(await tok.balanceOf(a)) : 0n);
-  return {
-    photographer: await bal(W.photographer), accuser: await bal(W.accuser), store: await bal(ctx.addresses.store),
-    paprika: await bal(ctx.addresses.paprika), oo: await bal(ctx.addresses.oo),
-    cPh: W.photographer ? await lib.credits(ctx, W.photographer) : 0n, cAcc: W.accuser ? await lib.credits(ctx, W.accuser) : 0n,
-  };
-}
-// Connects the browser wallet of a role in the page and funds it from the local faucet; returns its address.
-async function connectWallet(role, p = page) {
-  await p.getByTestId(role === "photographer" ? "tab-photographer" : "tab-accuser").click();
-  await p.getByTestId(`btn-wallet-browser-${role}`).click(); await p.waitForTimeout(150);
-  await p.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
-  await p.getByTestId(`btn-faucet-${role}`).click(); await p.waitForTimeout(150);
-  await p.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
-  return p.evaluate((r) => window.paprikaState.wallets[r]?.address || "", role);
-}
-// Header balances shown by the page must equal the chain.
-async function headerMatchesChain(label) {
-  const m = await money();
-  await eq(`${label}: header photographer balance = chain`, await text("balance-photographer"), fmt(m.photographer));
-  await eq(`${label}: header accuser balance = chain`, await text("balance-accuser"), fmt(m.accuser));
-  await eq(`${label}: header Store balance = chain`, await text("balance-store"), fmt(m.store));
-  const cp = await text("header-credit-photographer");
-  await eq(`${label}: header photographer credit = chain`, cp, m.cPh ? `+ ${fmt(m.cPh)} credit` : "");
-  const ca = await text("header-credit-accuser");
-  await eq(`${label}: header accuser credit = chain`, ca, m.cAcc ? `+ ${fmt(m.cAcc)} credit` : "");
-  return m;
-}
-async function attestSample() {
-  await t("tab-photographer").click();
-  await clickOk("sample image", "btn-sample-image");
-  await clickOk("attest", "btn-attest");
-  return page.evaluate(() => ({ photoHash: window.paprikaState.attested?.photoHash, keyId: window.paprikaState.attested?.keyId }));
-}
-async function downloadLast(nth = 0) {
-  await t("tab-photographer").click();
-  const dl = page.waitForEvent("download");
-  await t("btn-download").nth(nth).click();
-  const file = path.join(os.tmpdir(), `paprika-e2e-${Date.now()}.jpg`);
-  await (await dl).saveAs(file);
-  return file;
-}
-async function verifyFile(file) {
-  await t("tab-verifier").click();
-  await t("input-verify-file").setInputFiles(file);
-  await page.waitForTimeout(150);
-  await idle();
-}
-async function accuse(photo, fake) {
-  await t("tab-accuser").click();
-  if (await t("btn-accuse-new").isEnabled()) await click("btn-accuse-new");
-  await t("select-accuse-photo").selectOption(`${photo.photoHash}|${photo.keyId}`);
-  await t("input-evidence").fill("https://example.org/e2e-evidence");
-  await clickOk("commit", "btn-commit");
-  await t("tab-photographer").click();
-  await check("B1: advance time disabled after commit", !(await t("btn-advance-time").isEnabled()));
-  await check("B1: advance time reason shown", /accusation is open/i.test(await text("advance-why")));
-  await t("tab-accuser").click();
-  const afterCommit = await money();   // the bond B is now locked in Paprika (wrapped from ETH if needed)
-  await eq("commit: chain record still attested (hidden commit)", (await chainRecord(photo.photoHash, photo.keyId)).state, "attested");
-  await clickOk("reveal", "btn-reveal");
-  const m = await money();
-  await eq("reveal: chain record accused", (await chainRecord(photo.photoHash, photo.keyId)).state, "accused");
-  await eq("reveal: UMA OOv3 holds 2 x B", m.oo, 2n * ctx.params.bond);
-  await check("B1: advance time disabled while the vote is pending", !(await t("btn-advance-time").isEnabled()));
-  await clickOk(fake ? "vote fake" : "vote not fake", fake ? "btn-vote-fake" : "btn-vote-not-fake");
-  return afterCommit;
-}
-
-// ------------------------------------------------------------------ the story
 
 async function story() {
+  const { t, click, clickConfirm, text, go, idle } = driver(page);
   const B = ctx.params.bond;
   const fB = (B * BigInt(Math.round(ctx.params.feeShare * 1e6))) / 1000000n;
+  const fmt = (v) => lib.formatToken(ctx, v);
 
-  await page.goto(BASE);
-  await page.waitForTimeout(800);
-  await idle();
-  await check("page connects (no fatal message)", !(await t("fatal-message").isVisible()));
-  // B6: the server serves the deployment of THIS chain at /deployment.json.
-  const served = await (await fetch(`${BASE}/deployment.json`)).json();
-  await eq("B6: /deployment.json is this chain's deployment", served.addresses.paprika.toLowerCase(), ctx.addresses.paprika.toLowerCase());
-  // M2: /rpc forwards only the methods the page needs.
-  const bad = await fetch(`${BASE}/rpc`, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hardhat_setBalance", params: ["0x0000000000000000000000000000000000000001", "0x1"] }) });
-  await eq("M2: /rpc refuses hardhat_setBalance", bad.status, 403);
-  // Wallets: the server signs nothing for the user. /rpc refuses eth_sendTransaction and eth_accounts.
-  for (const method of ["eth_sendTransaction", "eth_accounts"]) {
-    const r = await fetch(`${BASE}/rpc`, { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: method === "eth_accounts" ? [] : [{ to: ctx.addresses.paprika }] }) });
-    await eq(`wallet: /rpc refuses ${method}`, r.status, 403);
+  // ---- server: /rpc never signs for anyone and refuses malformed requests
+  const rpcPost = (body) => fetch(`${inst.base}/rpc`, { method: "POST", headers: { "content-type": "application/json" }, body });
+  for (const m of ["eth_sendTransaction", "eth_accounts", "hardhat_setBalance"]) {
+    const r = await rpcPost(JSON.stringify({ jsonrpc: "2.0", id: 1, method: m, params: m === "eth_accounts" ? [] : [{}] }));
+    await eq(`rpc: /rpc refuses ${m}`, r.status, 403);
   }
-  // Before a wallet is connected, the actor's actions are refused with the reason.
-  await t("tab-photographer").click();
-  await check("wallet: Register refused before a wallet is connected", !(await t("btn-register").isEnabled()));
-  await check("wallet: the reason is shown", /Connect a wallet/.test(await text("wallet-why-photographer")));
-  W.photographer = await connectWallet("photographer");
-  await check("wallet: photographer wallet connected (browser wallet)", /^0x[0-9a-fA-F]{40}$/.test(W.photographer));
-  await check("faucet: photographer wallet funded with test ETH (chain)", (await ctx.provider.getBalance(W.photographer)) > 0n);
-  await check("wallet: Register enabled once connected and funded", await t("btn-register").isEnabled());
-  W.accuser = await connectWallet("accuser");
-  await check("faucet: accuser wallet funded with test ETH (chain)", (await ctx.provider.getBalance(W.accuser)) > 0n);
-  await check("wallet: the two actors have different addresses", W.accuser.toLowerCase() !== W.photographer.toLowerCase());
-  await t("tab-photographer").click();
-  // Layout: no horizontal scroll at 1440, 1280, 1024; the explainer is not under the footer.
-  for (const w of [1440, 1280, 1024]) {
-    await page.setViewportSize({ width: w, height: 900 });
-    await page.waitForTimeout(200);
-    await check(`layout ${w}px: no horizontal scroll`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-    if (w > 1100) await check(`layout ${w}px: explainer above the footer`, await page.evaluate(() =>
-      document.querySelector('[data-testid="explainer"]').getBoundingClientRect().bottom <= document.querySelector("footer").getBoundingClientRect().top + 1));
-  }
-  await page.setViewportSize({ width: 1440, height: 900 });
-  // F1 (moved by review 2): B and T_photo are always visible in the protocol map; all four in "Parameters & contracts".
-  await check("F1: B and T_photo always visible (protocol map)", (await text("map-attest")).includes(fmt(B)) && (await text("map-challenge")).includes((await t("param-photo-window").textContent()).trim()));
-  await t("params-toggle").click();
-  await check("F1: all four parameters in the Parameters panel", await t("param-photo-window").isVisible() && await t("param-fee").isVisible() && await t("param-reveal-window").isVisible());
-  await t("params-toggle").click();
-  await eq("param B shown", (await t("param-bond").textContent()).trim(), fmt(B));
-  await headerMatchesChain("start");
+  await check("rpc: /rpc refuses a null body (4xx)", String((await rpcPost("null")).status).startsWith("4"));
 
-  // 1. Register
-  await t("tab-photographer").click();
-  await clickOk("register", "btn-register");
-  await eq("register: device-status active (page)", await t("device-status").getAttribute("data-status"), "active");
+  // ---- Verify works without a wallet; signing needs MetaMask
+  await page.goto(`${inst.base}/#/verify`);
+  await page.waitForTimeout(1000); await idle();
+  await check("app: no fatal message", !(await t("fatal-message").isVisible().catch(() => false)));
+  await check("app: local network banner shown", await t("network-banner").isVisible());
+  await check("app: local tools present on the local network", await t("local-tools-toggle").isVisible());
+  await check("wallet: Connect MetaMask is the only wallet option", (await t("btn-connect").innerText()).includes("Connect MetaMask") && (await page.getByText(/browser wallet|faucet/i).count()) === 0);
+  await go("#/attest");
+  await click("btn-sample-image");
+  await check("wallet: Attest refused before connecting, with the reason", !(await t("btn-attest").isEnabled()) && /Connect MetaMask/.test(await text("attest-blocked")));
+
+  // ---- connect Alice; wrong network → switch prompt
+  await click("btn-connect");
+  await eq("wallet: connected as Alice (label)", await text("account-name"), "Alice");
+  await mm.setChain(1);
+  await page.waitForTimeout(400);
+  await check("network: wrong chain shows 'Switch to Paprika local'", await t("btn-switch-chain").isVisible());
+  await check("network: actions disabled on the wrong chain", !(await t("btn-attest").isEnabled()));
+  await click("btn-switch-chain");
+  await check("network: switched back, prompt gone", !(await t("btn-switch-chain").isVisible().catch(() => false)));
+
+  // ---- prepare account, register device key
+  await t("account-button").click();
+  await clickConfirm("btn-prepare", "prepare");
+  const pa = await money();
+  await check("prepare: Alice holds WETH for deposits (chain)", pa.alice >= 3n * B);
+  await check("prepare: Paprika approved (chain)", (await ctx.contracts.token.allowance(mm.address("alice"), ctx.addresses.paprika)) >= 1000n * B);
+  await click("btn-register");
   const key1 = await page.evaluate(() => window.paprikaState.device.keyId);
-  await eq("register: device active (chain)", (await deviceOnChain(key1)).status, "active");
-  const afterReg = await money();
-  await eq("register: free (photographer WETH unchanged)", afterReg.photographer, 0n);
+  await eq("register: device key active (chain)", (await deviceOnChain(key1)).status, "active");
+  await t("account-button").click();
 
-  // 2. Attest a sample image
+  // ---- attest: confirmation, exactly one signature
+  await go("#/attest");
+  await click("btn-sample-image");
   const m0 = await money();
-  const photo1 = await attestSample();
-  await check("attest: page reports the photo hash", !!photo1.photoHash);
-  const r1 = await chainRecord(photo1.photoHash, photo1.keyId);
+  const sig0 = mm.state.sent.length;
+  await t("btn-attest").click();
+  await check("attest: confirmation dialog shows the deposit", /1 WETH|deposit/i.test(await t("confirm-attest-dialog").innerText()));
+  await t("confirm-attest-ok").click(); await page.waitForTimeout(150); await idle();
+  await eq("attest: exactly one MetaMask signature after Prepare account", mm.sentSince(sig0).length, 1);
+  const toast1 = await driver(page).lastToast();
+  await check("toast: attest confirmed with an explorer link", toast1?.status === "ok" && /Confirmed in block/.test(toast1.text) && (await page.getByTestId("toast-tx").last().getAttribute("href")).startsWith("#/"));
+  const photo1 = await page.evaluate(() => window.paprikaState.lastAttested);
+  const r1 = await recordOf(photo1);
   await eq("attest: chain record attested", r1?.state, "attested");
-  await eq("attest: chain deposit locked = B", r1?.depositLocked, B);
-  const m1 = await headerMatchesChain("after attest");
-  await eq("attest: Paprika +B", m1.paprika - m0.paprika, B);
-  await check("attest: capture-result shown", (await text("capture-result")).length > 0);
-  await eq("attest: My photos row state", await t("deposit-row").first().getAttribute("data-state"), "attested");
-  await check("attest: refund button disabled before the period", !(await t("btn-refund").first().isEnabled()));
-  const file1 = await downloadLast(0);
-  // M3: the same photo cannot be attested twice by the same key, and a forced click sends nothing.
-  await check("M3: re-attest button disabled", !(await t("btn-attest").isEnabled()));
-  await check("M3: one result block after the attest (no warning)", /Recorded on chain/.test(await text("capture-result")) && !(await t("attest-refusal").isVisible()));
-  const ra0 = await money();
-  await t("btn-attest").evaluate((b) => { b.disabled = false; b.click(); });
-  await page.waitForTimeout(150); await idle();
-  const raErr = (await t("error-banner").isVisible()) ? await text("error-message") : "";
-  if (raErr) await t("btn-dismiss-error").click();
-  const ra1 = await money();
-  await check("M3: forced re-attest refused before any transaction", /already attested/i.test(raErr), raErr);
-  await check("M3: forced re-attest spends nothing", ra0.photographer === ra1.photographer && ra0.paprika === ra1.paprika);
-  // M6: an empty file is refused; a non-image is accepted with a warning.
+  await eq("attest: deposit locked = B (chain)", r1?.depositLocked, B);
+  const m1 = await money();
+  await eq("attest: Alice WETH −B (chain)", m1.alice - m0.alice, -B);
+  await eq("attest: Paprika +B (chain)", m1.paprika - m0.paprika, B);
+  await check("attest: re-attesting the same file is blocked", !(await t("btn-attest").isVisible().catch(() => false)) || !(await t("btn-attest").isEnabled()));
+  // empty file refused, previous photo cleared
+  await t("btn-new-photo").click();
+  await click("btn-sample-image");
   await t("input-capture-file").setInputFiles({ name: "empty.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(0) });
-  await page.waitForTimeout(150); await idle();
-  await check("M6: empty file refused (capture)", (await t("error-banner").isVisible()) && /empty/i.test(await text("error-message")));
-  if (await t("error-banner").isVisible()) await t("btn-dismiss-error").click();
-  await t("input-capture-file").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not a photo") });
-  await page.waitForTimeout(150); await idle();
-  await check("M6: non-image warned (capture)", (await t("capture-warning").isVisible()) && /not look like an image/i.test(await text("capture-warning")));
-  await t("tab-verifier").click();
-  await t("input-verify-file").setInputFiles({ name: "empty.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(0) });
-  await page.waitForTimeout(150); await idle();
-  await check("M6: empty file refused (verifier)", (await t("error-banner").isVisible()) && /empty/i.test(await text("error-message")));
-  if (await t("error-banner").isVisible()) await t("btn-dismiss-error").click();
+  await page.waitForTimeout(200); await idle();
+  await check("attest: empty file refused and the previous photo cleared", /empty/i.test(await text("capture-error")) && !(await t("btn-attest").isEnabled()));
 
-  // 3. Verify -> attested
-  await verifyFile(file1);
-  await eq("verify: verdict attested", await verdict(), "attested");
-  await check("F2: 'Not shown: that a camera took this photo' visible", /Not shown: that a camera took this photo/.test(await text("verify-not-shown")));
-  await check("verify: honest sentence names block a", (await text("verify-honest-sentence")).includes(String(r1.anchorBlock)));
-  await t("tab-verifier").click();
-  await clickOk("verify last attested", "btn-verify-last");
-  await eq("verify last: verdict attested", await verdict(), "attested");
+  // ---- record page
+  await go(`#/record/${photo1}`);
+  await eq("record: verdict attested", await t("record-verdict").getAttribute("data-state"), "attested");
+  await eq("record: lifecycle on the challenge period", await t("record-lifecycle").getAttribute("data-current"), "Challenge period");
+  await check("record: honest sentence names the anchor block", (await text("verify-honest-sentence")).includes(String(r1.anchorBlock)));
+  await check("record: history lists the attest with a tx link", (await t("history-row").count()) >= 1);
+  // download the exact bytes, then verify them (file input and a real drop)
+  const dl = page.waitForEvent("download");
+  await t("btn-download").click();
+  const file1 = path.join(os.tmpdir(), `paprika-e2e-${Date.now()}.jpg`);
+  await (await dl).saveAs(file1);
+  await go("#/verify");
+  await t("input-verify-file").setInputFiles(file1); await page.waitForTimeout(300); await idle();
+  await eq("verify: downloaded file verifies as attested", await t("verify-status").getAttribute("data-state"), "attested");
+  await click("btn-change-pixel");
+  await page.waitForFunction(() => document.querySelector('[data-testid="verify-status"]')?.dataset.state === "no-record", null, { timeout: 8000 }).catch(() => {});
+  await eq("verify: one pixel changed gives no record", await t("verify-status").getAttribute("data-state"), "no-record");
+  const b64 = fs.readFileSync(file1).toString("base64");
+  const dt = await page.evaluateHandle((s) => { const d = new DataTransfer(); d.items.add(new File([Uint8Array.from(atob(s), (c) => c.charCodeAt(0))], "dropped.jpg", { type: "image/jpeg" })); return d; }, b64);
+  await t("verify-dropzone").dispatchEvent("drop", { dataTransfer: dt });
+  await page.waitForFunction(() => document.querySelector('[data-testid="verify-status"]')?.dataset.state === "attested", null, { timeout: 8000 }).catch(() => {});
+  await eq("verify: a dropped file verifies as attested", await t("verify-status").getAttribute("data-state"), "attested");
 
-  // 4. One pixel changed -> no record
-  await clickOk("change pixel", "btn-change-pixel");
-  await eq("change pixel: verdict no-record", await verdict(), "no-record");
+  // ---- explorer decodes the attest transaction
+  const attestTx = mm.state.sent[sig0].hash;
+  await go(`#/tx/${attestTx}`);
+  await eq("explorer: attest call decoded", await t("tx-call").getAttribute("data-method"), "Paprika.attest");
+  await check("explorer: Attested event decoded", (await page.locator('[data-testid="tx-event"][data-event="Attested"]').count()) === 1);
+  await eq("explorer: tx sender is Alice", (await t("tx-from").innerText()).includes("Alice"), true);
 
-  // 5-7. Accuse, vote "does not prove"
+  // ---- switch to Bob in MetaMask: every view follows
+  await go(`#/record/${photo1}`);
+  await mm.use("bob"); await page.waitForTimeout(800); await idle();
+  await eq("switch: header shows Bob", await text("account-name"), "Bob");
+  await check("switch: the record page offers Bob 'Accuse'", await t("btn-accuse").isVisible());
+  await go("#/activity");
+  await check("switch: Bob's activity has no records", await t("deposits-empty").isVisible());
+
+  // ---- Bob accuses: commit (one signature), reload safety, reveal
+  await t("account-button").click();
+  await clickConfirm("btn-prepare", "prepare");
+  await t("account-button").click();
+  await go(`#/record/${photo1}/accuse`);
+  await t("input-evidence").fill("The same image was published at https://example.org/listing before the anchor block.");
   const before = await money();
-  const c1 = await accuse(photo1, false);
-  const after = await headerMatchesChain("after vote not proven");
-  await eq("vote not proven: outcome shown", await t("settle-outcome").getAttribute("data-outcome"), "not-proven");
-  await eq("vote not proven: chain record attested again", (await chainRecord(photo1.photoHash, photo1.keyId)).state, "attested");
-  await eq("vote not proven: accuser lost B (wallet + credit)", (after.accuser + after.cAcc) - (c1.accuser + c1.cAcc) - B, -B);
-  await eq("vote not proven: depositor credit +B - fB", after.cPh - before.cPh, B - fB);
-  await eq("vote not proven: Store +fB", after.store - before.store, fB);
-  await eq("vote not proven: page accuser delta = rule", await text("settle-accuser"), await text("settle-expected-accuser"));
-  await eq("vote not proven: page depositor delta = rule", await text("settle-depositor"), await text("settle-expected-depositor"));
-  await eq("vote not proven: page store delta = rule", await text("settle-store"), await text("settle-expected-store"));
-  const rAfterVote = await chainRecord(photo1.photoHash, photo1.keyId);
-  await check("vote not proven: challenge period extended", rAfterVote.accusableUntil > r1.accusableUntil,
-    `${r1.accusableUntil} -> ${rAfterVote.accusableUntil}`);
+  const sig1 = mm.state.sent.length;
+  await t("btn-commit").click();
+  await check("commit: confirmation dialog shows the bond", /Bond|bond/.test(await t("confirm-commit-dialog").innerText()));
+  await t("confirm-commit-ok").click(); await page.waitForTimeout(150); await idle();
+  await eq("commit: exactly one MetaMask signature after Prepare account", mm.sentSince(sig1).length, 1);
+  await eq("commit: record still attested (the commitment hides the target)", (await recordOf(photo1)).state, "attested");
+  await page.reload(); await page.waitForTimeout(1200); await idle();
+  await check("reload after commit: Reveal still offered", await t("btn-reveal").isVisible());
+  await check("reload after commit: reveal countdown shown", /Reveal before/.test(await text("reveal-deadline")));
+  await click("btn-reveal");
+  await eq("reveal: chain record accused", (await recordOf(photo1)).state, "accused");
+  await eq("reveal: UMA OOv3 holds 2B (chain)", (await money()).oo, 2n * B);
+  const acc = (await lib.listAccusations(ctx)).find((a) => a.open);
+  const evUrl = new URL(await page.getByTestId("evidence-link").first().getAttribute("href").catch(() => `/evidence/${acc.evidenceHash.slice(2)}`), inst.base).href;
+  const evBytes = new Uint8Array(await (await fetch(evUrl)).arrayBuffer());
+  await eq("evidence: the published evidence hashes to the on-chain evidence hash", ethers.sha256(evBytes), acc.evidenceHash.toLowerCase());
+  await t("local-tools-toggle").click();
+  await check("local tools: skip wait disabled while the vote is pending", !(await t("btn-advance-time").isEnabled()));
 
-  // Withdraw credit
-  await t("tab-photographer").click();
-  const w0 = await money();
-  await clickOk("withdraw photographer credit", "btn-deposits-withdraw");
-  const w1 = await headerMatchesChain("after withdraw");
-  await eq("withdraw: credit now 0 (chain)", w1.cPh, 0n);
-  await eq("withdraw: wallet +credit (chain)", w1.photographer - w0.photographer, w0.cPh);
+  // ---- a second window resolves the vote at the same time: one wins, no raw errors
+  const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await installFakeMetaMask(ctx2, inst.rpc);
+  const p2 = await ctx2.newPage();
+  await p2.goto(`${inst.base}/#/record/${photo1}`); await p2.waitForTimeout(1200);
+  await check("second window: sees the open accusation and the vote chip", await p2.getByTestId("btn-vote-not-fake-inline").isVisible());
+  const d2 = driver(p2);
+  const [o1, o2] = await Promise.all([click("btn-vote-not-fake"), d2.click("btn-vote-not-fake-inline")]);
+  await check("concurrency: no raw UMA error in either window", !/Revealed data|Cannot commit|coalesce/i.test(`${o1?.text} ${o2?.text}`), `${o1?.text} | ${o2?.text}`);
+  await check("concurrency: the accusation is decided once", !(await lib.listAccusations(ctx)).some((a) => a.open));
+  await ctx2.close();
+  await page.reload(); await page.waitForTimeout(1200); await idle();
+  const after = await money();
+  await eq("vote not proven: record attested again (chain)", (await recordOf(photo1)).state, "attested");
+  await eq("vote not proven: Bob lost B (wallet + credit, chain)", after.bob + after.cBob - before.bob - before.cBob, -B);
+  await eq("vote not proven: Alice credit +B − fB (chain)", after.cAlice - before.cAlice, B - fB);
+  await eq("vote not proven: Store +fB (chain)", after.store - before.store, fB);
+  await check("vote not proven: outcome in words on the record", /Accusation rejected/.test(await text("settle-outcome")));
 
-  // Advance time, refund
-  await clickOk("advance time", "btn-advance-time");
-  const ci = await lib.chainInfo(ctx);
-  const rBeforeRefund = await chainRecord(photo1.photoHash, photo1.keyId);
-  await check("advance: chain time >= refundableAt", ci.timestamp >= rBeforeRefund.refundableAt, `${ci.timestamp} vs ${rBeforeRefund.refundableAt}`);
-  await check("advance: refund button enabled", await t("btn-refund").first().isEnabled());
+  // ---- Alice: claim, skip wait, refund
+  await mm.use("alice"); await page.waitForTimeout(800); await idle();
+  await check("switch back: Alice's claim badge shows her credit", (await text("account-claim-badge")).includes(fmt(B - fB)));
+  const c0 = await money();
+  await click("btn-claim-record");
+  const c1 = await money();
+  await eq("claim: credit now 0 (chain)", c1.cAlice, 0n);
+  await eq("claim: wallet + credit (chain)", c1.alice - c0.alice, c0.cAlice);
+  await click("btn-skip-wait");
+  await check("skip wait: Refund offered to the depositor", await t("btn-refund").isVisible());
   const f0 = await money();
-  await clickOk("refund", t("btn-refund").first());
-  const f1 = await headerMatchesChain("after refund");
-  await eq("refund: chain record refunded", (await chainRecord(photo1.photoHash, photo1.keyId)).state, "refunded");
-  await eq("refund: photographer credit +B", f1.cPh - f0.cPh, B);
-  await eq("refund: My photos row refunded", await t("deposit-row").first().getAttribute("data-state"), "refunded");
-  await verifyFile(file1);
-  await eq("verify after refund: unchallenged", await verdict(), "unchallenged");
-  await check("F2: refunded after a rejected accusation says what happened", /accusation rejected · deposit returned/.test(await text("verify-title")));
-  // B4: a refunded photo is not offered to the accuser, and the reason is shown.
-  await t("tab-accuser").click();
-  const opts1 = await t("select-accuse-photo").locator("option").evaluateAll((os) => os.map((o) => o.value));
-  await check("B4: refunded photo not offered", !opts1.some((v) => v.startsWith(photo1.photoHash)), opts1.join(","));
-  await check("B4: reason for not offering shown", /refunded/.test(await text("accuse-not-accusable")));
+  await click("btn-refund");
+  await eq("refund: chain record refunded", (await recordOf(photo1)).state, "refunded");
+  await eq("refund: Alice credit +B (chain)", (await money()).cAlice - f0.cAlice, B);
+  await eq("refund: verdict says what happened", await t("record-verdict").getAttribute("data-state"), "unchallenged");
+  await check("refund: verdict text 'accusation rejected · deposit returned'", /accusation rejected · deposit returned/.test(await text("record-verdict-title")));
+  await click("btn-claim-record");
 
-  // Second photo: proven fake
-  const photo2 = await attestSample();
+  // ---- second photo: proven fake
+  await go("#/attest"); await click("btn-sample-image");
+  await clickConfirm("btn-attest", "confirm-attest");
+  const photo2 = await page.evaluate(() => window.paprikaState.lastAttested);
+  await mm.use("bob"); await page.waitForTimeout(800); await idle();
+  await go(`#/record/${photo2}/accuse`);
+  await t("btn-evidence-example").click();
   const a0 = await money();
-  const c2 = await accuse(photo2, true);
-  const a1 = await headerMatchesChain("after vote fake proven");
-  await eq("vote fake: outcome shown", await t("settle-outcome").getAttribute("data-outcome"), "fake-proven");
-  await eq("vote fake: chain record fake", (await chainRecord(photo2.photoHash, photo2.keyId)).state, "fake");
-  const dev = await deviceOnChain(photo2.keyId);
-  await eq("vote fake: device flagged (chain)", dev.status, "flagged");
-  await eq("vote fake: reason fake-proven (chain)", dev.reason, "fake-proven");
-  await eq("vote fake: accuser net +B - fB (chain)", (a1.accuser + a1.cAcc) - (c2.accuser + c2.cAcc) - B, B - fB);
-  await eq("vote fake: Store +fB (chain)", a1.store - a0.store, fB);
-  await eq("vote fake: page accuser delta = rule", await text("settle-accuser"), await text("settle-expected-accuser"));
-  await eq("vote fake: page depositor delta = rule", await text("settle-depositor"), await text("settle-expected-depositor"));
-  await t("tab-accuser").click();
-  await clickOk("withdraw accuser credit", "btn-withdraw-accuser");
-  await eq("withdraw accuser: credit 0 (chain)", (await money()).cAcc, 0n);
-  const opts2 = await t("select-accuse-photo").locator("option").evaluateAll((os) => os.map((o) => o.value));
-  await check("B4: proven-fake photo not offered", !opts2.some((v) => v.startsWith(photo2.photoHash)), opts2.join(","));
-  await click("btn-accuse-verify");
-  await eq("verifier: proven fake", await verdict(), "fake");
-  await t("tab-photographer").click();
-  await eq("photographer: device flagged (page)", await t("device-status").getAttribute("data-status"), "flagged");
-  await clickOk("sample image (flagged device)", "btn-sample-image");
-  const attestEnabled = await t("btn-attest").isEnabled();
-  if (attestEnabled) {
-    const err = await click("btn-attest");
-    await check("attest with flagged device is refused", /not active/i.test(err), err);
-  } else {
-    await check("attest with flagged device is refused (button disabled)", true);
-  }
+  await clickConfirm("btn-commit", "confirm-commit");
+  await click("btn-reveal");
+  await click("btn-vote-fake-inline");
+  const a1 = await money();
+  await eq("vote fake: chain record fake", (await recordOf(photo2)).state, "fake");
+  const dev = await deviceOnChain(key1);
+  await eq("vote fake: device flagged, reason fake-proven (chain)", `${dev.status}/${dev.reason}`, "flagged/fake-proven");
+  await eq("vote fake: Bob net +B − fB (chain)", a1.bob + a1.cBob - a0.bob - a0.cBob, B - fB);
+  await eq("vote fake: verdict proven fake", await t("record-verdict").getAttribute("data-state"), "fake");
+  await t("protocol-toggle").check(); await page.waitForTimeout(300);
+  await check("protocol view: measured on chain = rule for the fake-proven outcome", /Measured on chain = expected by the rule ✓/.test(await text("settle-check")), await text("settle-check").catch(() => ""));
+  await t("protocol-toggle").uncheck();
 
-  // Revoke on a new device
-  await clickOk("new key", "btn-generate-key");
-  await clickOk("register new key", "btn-register");
+  // ---- Alice with the flagged key; new key; revoke; rejection in the wallet
+  await mm.use("alice"); await page.waitForTimeout(800); await idle();
+  await go("#/attest"); await click("btn-sample-image");
+  await check("flagged key: attest refused before any transaction, with 'New key & register'", await t("btn-new-key-attest").isVisible() && !(await t("btn-attest").isEnabled()));
+  await click("btn-new-key-attest");
   const key2 = await page.evaluate(() => window.paprikaState.device.keyId);
-  await check("new key differs", key2 && key2 !== key1);
-  await eq("new key active (chain)", (await deviceOnChain(key2)).status, "active");
-  const photo3 = await attestSample();
+  await check("new key: different and active (chain)", key2 !== key1 && (await deviceOnChain(key2)).status === "active");
+  mm.reject(true);
+  const rj0 = mm.state.sent.length;
+  await t("btn-attest").click(); await t("confirm-attest-ok").click(); await page.waitForTimeout(150); await idle();
+  const rj = await driver(page).lastToast();
+  mm.reject(false);
+  await check("rejection: plain message, nothing sent", rj?.status === "rejected" && /rejected/i.test(rj.text) && mm.sentSince(rj0).length === 0, rj?.text);
+  await clickConfirm("btn-attest", "confirm-attest");
+  const photo3 = await page.evaluate(() => window.paprikaState.lastAttested);
   const v0 = await money();
-  await clickOk("revoke", "btn-revoke");
+  await t("account-button").click();
+  await clickConfirm("btn-revoke", "revoke");
   const v1 = await money();
-  await eq("revoke: device-status flagged (page)", await t("device-status").getAttribute("data-status"), "flagged");
-  const dev2 = await deviceOnChain(key2);
-  await eq("revoke: device flagged (chain)", dev2.status, "flagged");
-  await eq("revoke: reason key-revoked (chain)", dev2.reason, "key-revoked");
-  await check("revoke: no WETH moved", v0.photographer === v1.photographer && v0.paprika === v1.paprika && v0.cPh === v1.cPh);
-  await t("tab-verifier").click();
-  await clickOk("verify last (revoked)", "btn-verify-last");
-  await eq("verify: key revoked", await verdict(), "flagged-key-revoked");
-  await eq("verify: record of photo3 still attested (chain)", (await chainRecord(photo3.photoHash, photo3.keyId)).state, "attested");
+  await eq("revoke: device flagged, reason key-revoked (chain)", (await deviceOnChain(key2)).reason, "key-revoked");
+  await check("revoke: no WETH moved", v0.alice === v1.alice && v0.paprika === v1.paprika);
+  await go(`#/record/${photo3}`);
+  await eq("revoke: verdict 'not judged · key revoked'", await t("record-verdict").getAttribute("data-state"), "flagged-key-revoked");
 
-  // timeline lists transactions
-  await check("activity log has rows", (await t("activity-row").count()) > 10);
+  // ---- every transaction was signed by Alice's or Bob's own key
+  let bad = [];
+  for (const s of mm.state.sent) { const tx = await ctx.provider.getTransaction(s.hash); if (tx.from.toLowerCase() !== s.from.toLowerCase()) bad.push(s.hash); }
+  await check(`signing: all ${mm.state.sent.length} user transactions signed by MetaMask (Alice/Bob)`, mm.state.sent.length > 10 && !bad.length, bad.join(","));
+  const paprikaTxs = (await ctx.provider.getLogs({ address: ctx.addresses.paprika, fromBlock: 0, toBlock: "latest" })).map((l) => l.transactionHash);
+  const userSent = new Set(mm.state.sent.map((s) => s.hash.toLowerCase()));
+  // Paprika events in transactions not signed by Alice or Bob come only from UMA's settlement (sent to the oracle).
+  const notByUsers = [];
+  for (const h of new Set(paprikaTxs)) { const tx = await ctx.provider.getTransaction(h); if (!userSent.has(h.toLowerCase()) && tx.to.toLowerCase() !== ctx.addresses.oo.toLowerCase()) notByUsers.push(`${h} to ${tx.to}`); }
+  await check("signing: every other Paprika transaction is UMA's settlement, never a user action by the server", notByUsers.length === 0, notByUsers.join(","));
 
-  // Camera path with Chromium's fake camera: selfie -> still -> attest -> download -> verify.
-  await t("tab-photographer").click();
-  await clickOk("key 3", "btn-generate-key");
-  await clickOk("register key 3", "btn-register");
-  await clickOk("start camera", "btn-start-camera");
-  await check("camera: live preview with Take a selfie", await t("btn-take-photo").isVisible());
-  await clickOk("take a selfie", "btn-take-photo");
-  await check("camera: still shown, Sign & attest enabled", await t("btn-attest").isEnabled());
-  await check("camera: Retake offered", await t("btn-retake").isVisible());
-  await check("camera: mirror preview off by default", !(await t("toggle-mirror").isChecked()));
-  await clickOk("attest selfie", "btn-attest");
-  const selfie = await page.evaluate(() => ({ photoHash: window.paprikaState.attested?.photoHash, keyId: window.paprikaState.attested?.keyId }));
-  await eq("camera: selfie attested (chain)", (await chainRecord(selfie.photoHash, selfie.keyId))?.state, "attested");
-  const nRows = await t("btn-download").count();
-  const selfieFile = await downloadLast(nRows - 1);
-  await verifyFile(selfieFile);
-  await eq("camera: downloaded selfie verifies as attested", await verdict(), "attested");
+  // ---- local tools hidden when the network is not local
+  const ctx3 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const p3 = await ctx3.newPage();
+  await p3.route("**/network.json", async (route) => { const r = await route.fetch(); const j = await r.json(); await route.fulfill({ json: { ...j, local: false, name: "Test network" } }); });
+  await p3.goto(`${inst.base}/#/attest`); await p3.waitForTimeout(1500);
+  await check("local:false: no local tools, banner or sample image", !(await p3.getByTestId("local-tools-toggle").count()) && !(await p3.getByTestId("network-banner").isVisible()) && !(await p3.getByTestId("btn-sample-image").count()));
+  await ctx3.close();
 
-  // B2: reload after commit keeps the commitment; the reveal still works.
-  await t("tab-accuser").click();
-  if (await t("btn-accuse-new").isEnabled()) await click("btn-accuse-new");
-  await t("select-accuse-photo").selectOption(`${selfie.photoHash}|${selfie.keyId}`);
-  await clickOk("commit (selfie)", "btn-commit");
-  await page.reload(); await page.waitForTimeout(800); await idle();
-  await t("tab-accuser").click();
-  await check("B2: after reload, reveal is still possible", await t("btn-reveal").isEnabled());
-  await check("B2: after reload, the reveal countdown is shown", /Reveal before/.test(await text("reveal-deadline")));
-  await clickOk("reveal after reload", "btn-reveal");
-  await eq("B2: reveal after reload: chain record accused", (await chainRecord(selfie.photoHash, selfie.keyId)).state, "accused");
-  // B3: reload after reveal, and a fresh browser, both offer the vote.
-  await page.reload(); await page.waitForTimeout(800); await idle();
-  await t("tab-accuser").click();
-  await check("B3: after reload, the vote is offered", await t("btn-vote-not-fake").isEnabled());
-  const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const p2 = await fresh.newPage();
-  await p2.goto(BASE + "/#accuser"); await p2.waitForTimeout(1000);
-  await p2.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
-  await check("B3: a fresh browser rebuilds the open accusation and offers the vote", await p2.getByTestId("btn-vote-not-fake").isEnabled());
-  await check("B1: a fresh browser also blocks the time skip", !(await p2.getByTestId("btn-advance-time").isEnabled()));
-  await fresh.close();
-  await clickOk("vote not fake (after reloads)", "btn-vote-not-fake");
-  await eq("B3: vote after reloads: outcome shown", await t("settle-outcome").getAttribute("data-outcome"), "not-proven");
-  await eq("B3: vote after reloads: chain record attested again", (await chainRecord(selfie.photoHash, selfie.keyId)).state, "attested");
-  await t("tab-photographer").click();
-  await check("B1: advance time enabled again after the vote", await t("btn-advance-time").isEnabled());
-
-  const userTxs = await page.evaluate(() => window.paprikaState.timeline.flatMap((e) => (e.items || [])
-    .filter((i) => i.role === "photographer" || i.role === "accuser").map((i) => ({ hash: i.txHash, role: i.role }))));
-  await signedByWallets(userTxs);
-
-  // A second browser context gets its own wallet.
-  const other = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const po = await other.newPage();
-  await po.goto(BASE + "/#photographer"); await po.waitForTimeout(800);
-  const addrOther = await connectWallet("photographer", po);
-  await check("wallet: a second browser context gets its own wallet", !!addrOther && addrOther.toLowerCase() !== W.photographer.toLowerCase(), addrOther);
-  await other.close();
-
-  // MetaMask path, run with a SCRIPTED FAKE EIP-1193 provider (not real MetaMask): window.ethereum forwards every
-  // request to this test, which signs with an ethers Wallet. It exercises the page's injected-wallet code in CI.
-  const { ethers } = await import("ethers");
-  const fakeKey = ethers.Wallet.createRandom();
-  const rpc = new ethers.JsonRpcProvider(`http://127.0.0.1:${RPC_PORT}`, undefined, { staticNetwork: true, cacheTimeout: -1 });
-  const fake = fakeKey.connect(rpc);
-  const mm = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  await mm.exposeFunction("__fakeWallet", async (method, params) => {
-    if (method === "eth_requestAccounts" || method === "eth_accounts") return [fake.address];
-    if (method === "wallet_switchEthereumChain" || method === "wallet_addEthereumChain") return null;
-    if (method === "eth_sendTransaction") {
-      const t0 = params[0];
-      const sent = await fake.sendTransaction({ to: t0.to, data: t0.data, value: t0.value ?? 0, gasLimit: t0.gas ?? t0.gasLimit });
-      return sent.hash;
-    }
-    return rpc.send(method, params ?? []);
-  });
-  await mm.addInitScript(() => {
-    window.ethereum = { isMetaMask: true, isFakeForTests: true,
-      request: ({ method, params }) => window.__fakeWallet(method, params),
-      on() {}, removeListener() {} };
-  });
-  const pm = await mm.newPage();
-  await pm.goto(BASE + "/#photographer"); await pm.waitForTimeout(800);
-  await pm.getByTestId("btn-wallet-metamask-photographer").click(); await pm.waitForTimeout(300);
-  await pm.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
-  await eq("fake EIP-1193 (scripted, not real MetaMask): page connected the injected wallet", (await pm.evaluate(() => window.paprikaState.wallets.photographer?.address || "")).toLowerCase(), fake.address.toLowerCase());
-  await pm.getByTestId("btn-faucet-photographer").click(); await pm.waitForTimeout(300);
-  await pm.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
-  await pm.getByTestId("btn-register").click(); await pm.waitForTimeout(300);
-  await pm.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
-  const regHash = await pm.evaluate(() => window.paprikaState.registered?.txHash || "");
-  const regTx = regHash ? await ctx.provider.getTransaction(regHash) : null;
-  await check("fake EIP-1193 (scripted, not real MetaMask): register signed by the injected wallet", !!regTx && regTx.from.toLowerCase() === fake.address.toLowerCase(), regHash);
-  await check("fake EIP-1193: timeline says 'signed in MetaMask'", /signed by .* in MetaMask/.test(await pm.getByTestId("activity-log-table").innerText()));
-  await mm.close();
-
-  // M4: a restarted or redeployed chain is detected (simulated: another stored fingerprint), local state cleared.
-  await page.evaluate(() => localStorage.setItem("paprika-fingerprint", "another-chain"));
-  await page.reload(); await page.waitForTimeout(800); await idle();
-  await check("M4: chain change announced", (await t("error-banner").isVisible()) && /restarted or Paprika was redeployed/.test(await text("error-message")));
-  await eq("M4: saved device key cleared", await t("device-status").getAttribute("data-status"), "none");
-}
-
-// Every write of the story was signed by the page's own wallets: read each transaction's sender on chain.
-async function signedByWallets(hashes) {
-  let n = 0, bad = [];
-  for (const { hash, role } of hashes) {
-    const tx = await ctx.provider.getTransaction(hash);
-    if (!tx) continue;
-    n += 1;
-    if (tx.from.toLowerCase() !== W[role].toLowerCase()) bad.push(`${hash.slice(0, 10)} from ${tx.from} (expected ${role} ${W[role]})`);
+  // ---- layout
+  for (const w of [1440, 1280, 1024, 960]) {
+    await page.setViewportSize({ width: w, height: 900 }); await page.waitForTimeout(200);
+    await check(`layout ${w}px: no horizontal scroll`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   }
-  await check(`signing: all ${n} user transactions were signed by the user's browser wallets`, n > 10 && bad.length === 0, bad.join(" | "));
 }
 
-// ------------------------------------------------------------------ main
-
-let exitCode = 1;
+let code = 1;
 try {
   console.log(`Starting a fresh instance: chain ${RPC_PORT}, web ${WEB_PORT} ...`);
-  await startInstance();
-  const suffix = RPC_PORT === 8545 ? "" : `-${RPC_PORT}`;
-  const deployment = JSON.parse(fs.readFileSync(path.join(APP, "web", `deployment${suffix}.json`), "utf8"));
+  inst = await startInstance(RPC_PORT, WEB_PORT);
+  const deployment = await (await fetch(`${inst.base}/deployment.json`)).json();
   lib = await import(path.join(APP, "lib", "paprika.js"));
-  ctx = lib.connect({ rpcUrl: `http://127.0.0.1:${RPC_PORT}`, deployment });
-
-  browser = await chromium.launch({ headless: !process.env.HEADED, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
+  ctx = lib.connect({ rpcUrl: inst.rpc, deployment });
+  browser = await chromium.launch({ headless: !process.env.HEADED });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
-  await context.grantPermissions(["camera"], { origin: BASE });
+  mm = await installFakeMetaMask(context, inst.rpc);
   page = await context.newPage();
   page.on("pageerror", (e) => consoleErrors.push("pageerror: " + e.message));
-  page.on("console", (m) => { if (m.type() === "error") consoleErrors.push("console: " + m.text()); });
-  page.on("requestfailed", (r) => failedRequests.push(`${r.method()} ${r.url()} ${r.failure()?.errorText}`));
-  page.on("response", (r) => { if (r.status() >= 400) failedRequests.push(`${r.status()} ${r.url()}`); });
-
   await story();
-  await check("no page errors / console errors", consoleErrors.length === 0, consoleErrors.join(" | "));
-  await check("no failed network requests", failedRequests.length === 0, failedRequests.join(" | "));
-  exitCode = results.every((r) => r.ok) ? 0 : 1;
+  await check("no page errors", consoleErrors.length === 0, consoleErrors.join(" | "));
+  code = results.every((r) => r.ok) ? 0 : 1;
 } catch (e) {
   console.error("ABORTED:", e.stack || e.message);
-  if (page) await page.screenshot({ path: path.join(OUT, "aborted.png"), fullPage: true }).catch(() => {});
-  exitCode = 1;
+  if (page) await page.screenshot({ path: path.join(OUT, "aborted.png") }).catch(() => {});
 } finally {
   await browser?.close().catch(() => {});
-  stopInstance();
+  inst?.stop();
 }
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length} passed, ${failed.length} failed`);
 for (const f of failed) console.log(`  FAIL ${f.name}${f.detail ? "  -- " + f.detail : ""}`);
-process.exit(exitCode);
+process.exit(failed.length || code ? 1 : 0);

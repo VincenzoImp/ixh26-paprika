@@ -92,7 +92,7 @@ export function render(root) {
   const why = blocker();
   const noKey = !S.device || S.deviceInfo?.status !== "active";
   const camBtn = A.stream ? h("button", { class: "pri", testid: "btn-take-photo", onclick: async () => {
-    const bytes = await videoFrame(preview.querySelector("video")); await loadPhoto(bytes, "image/jpeg", "selfie.jpg", true); } }, "Take photo")
+    const bytes = await videoFrame(document.querySelector('[data-testid="camera-video"]')); await loadPhoto(bytes, "image/jpeg", "selfie.jpg", true); } }, "Take photo")
     : h("button", { class: A.photo ? "" : "pri", testid: "btn-start-camera", onclick: startCamera }, A.photo?.fromCamera ? "Retake" : "Start camera");
 
   mount(root,

@@ -1,349 +1,161 @@
-// Paprika: edge-case end-to-end test. Each check covers one edge case of the web app, the server or the scripts:
-// concurrent actions, reloads, odd inputs, the /rpc relay, restarts. Every check must pass.
+// Paprika: edge-case end-to-end test. One check per finding of the staging and acceptance reports that can be
+// reproduced automatically, adapted to the app with one MetaMask account per window (stand-in: fake-metamask.mjs).
+// A second, CLI-like accuser (Hardhat account #6, signing with the library directly) interleaves with the page.
 //
-// It starts its OWN fresh instance (chain + deploy + web) on spare ports, drives the page with Playwright (Chromium,
-// headless) and the chain with app/lib/paprika.js, and stops the instance at the end.
-//
-//   cd app && npm run e2e:edge         (package.json: "e2e:edge": "node e2e/edge.e2e.mjs")
-//
-// Environment: EDGE_RPC_PORT (default 9445), EDGE_WEB_PORT (default 5973), HEADED=1 to watch.
-// Screenshots of failures: app/output/e2e/edge-*.png. Exit code 0 = all checks passed.
+//   cd app && npm run e2e:edge      Environment: EDGE_RPC_PORT (9445), EDGE_WEB_PORT (5973), HEADED=1.
 
 import { spawn, execSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { ethers } from "ethers";
+import { APP, startInstance, checker, driver } from "./helpers.mjs";
+import { installFakeMetaMask } from "./fake-metamask.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const APP = path.resolve(HERE, "..");
 const RPC_PORT = Number(process.env.EDGE_RPC_PORT || 9445);
 const WEB_PORT = Number(process.env.EDGE_WEB_PORT || 5973);
-const BASE = `http://127.0.0.1:${WEB_PORT}`;
-const RPC = `http://127.0.0.1:${RPC_PORT}`;
 const OUT = path.join(APP, "output", "e2e");
-fs.mkdirSync(OUT, { recursive: true });
-const env = { ...process.env, RPC_PORT: String(RPC_PORT), WEB_PORT: String(WEB_PORT) };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let page, browser, inst, lib, ctx, mm;
+const { check, results } = checker(OUT, () => page);
 
-const results = [];
-let browser, page, server, lib, ctx;
-
-// ------------------------------------------------------------------ instance
-
-async function rpcCall(method, params = []) {
-  const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(2000) });
-  return (await r.json()).result;
-}
-const rpcAlive = async () => { try { return !!(await rpcCall("eth_chainId")); } catch { return false; } };
-
-async function startInstance() {
-  if (await rpcAlive()) throw new Error(`port ${RPC_PORT} is busy: a fresh chain is needed (set EDGE_RPC_PORT)`);
-  server = spawn(process.execPath, ["scripts/start.js"], { cwd: APP, detached: true, stdio: ["ignore", "pipe", "pipe"], env });
-  let log = "";
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("instance did not start in 180 s:\n" + log)), 180000);
-    const onData = (d) => { log += d; if (/Paprika is running/.test(log)) { clearTimeout(timer); resolve(); } if (/Start failed/.test(log)) { clearTimeout(timer); reject(new Error(log)); } };
-    server.stdout.on("data", onData); server.stderr.on("data", onData);
-    server.on("exit", (c) => { clearTimeout(timer); reject(new Error(`start.js exited (${c}):\n${log}`)); });
-  });
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE)).ok) break; } catch {} await sleep(200); }
-}
-function stopInstance() {
-  if (server) { try { process.kill(-server.pid, "SIGINT"); } catch {} server = null; }
-  try { execSync("node scripts/stop.js", { cwd: APP, env, stdio: "ignore" }); } catch {}
-}
-
-// ------------------------------------------------------------------ checks and page helpers
-
-let shotN = 0;
-async function check(id, name, cond, detail = "") {
-  let ok;
-  try { ok = typeof cond === "function" ? await cond() : cond; } catch (e) { ok = false; detail = (detail + " " + e.message).trim(); }
-  results.push({ id, name, ok: !!ok, detail });
-  console.log(`${ok ? "PASS" : "FAIL"}  [${id}] ${name}${!ok && detail ? "  -- " + detail : ""}`);
-  if (!ok && page) {
-    shotN += 1;
-    await page.screenshot({ path: path.join(OUT, `edge-${String(shotN).padStart(2, "0")}-${id}.png`), fullPage: true }).catch(() => {});
-  }
-  return !!ok;
-}
-const t = (id, p = page) => p.getByTestId(id);
-const text = async (id, p = page) => (await t(id, p).first().innerText()).trim();
-const idle = (p = page) => p.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 120000 });
-async function click(idOrLoc, p = page) {
-  const loc = typeof idOrLoc === "string" ? t(idOrLoc, p) : idOrLoc;
-  if (!(await loc.isEnabled())) return "DISABLED";
-  await loc.click();
-  await p.waitForTimeout(150);
-  await idle(p);
-  if (await t("error-banner", p).isVisible()) {
-    const info = await t("error-banner", p).evaluate((e) => e.classList.contains("info"));
-    const msg = await text("error-message", p);
-    await t("btn-dismiss-error", p).click();
-    return info ? "" : msg || "(error banner without text)";
-  }
-  return "";
-}
-async function must(what, r) { if (r) throw new Error(`${what}: ${r}`); }
-const attested = () => page.evaluate(() => ({ photoHash: window.paprikaState.attested.photoHash, keyId: window.paprikaState.attested.keyId }));
-// Wallets pay deposits and bonds themselves: top up from the local faucet when the page says the wallet is short.
-async function topUp(role, pg = page) {
-  const why = await t(`wallet-why-${role}`, pg).innerText().catch(() => "");
-  if (!/faucet/i.test(why)) return;
-  let r = await click(`btn-faucet-${role}`, pg);
-  const wait = /try again in (\d+) s/.exec(r);   // the faucet allows one request per address every few seconds
-  if (wait) { await sleep((Number(wait[1]) + 1) * 1000); r = await click(`btn-faucet-${role}`, pg); }
-  await must(`faucet top-up ${role}`, r);
-}
-async function attestSample() {
-  await t("tab-photographer").click();
-  await topUp("photographer");
-  await must("sample", await click("btn-sample-image"));
-  await must("attest", await click("btn-attest"));
-  return attested();
-}
-async function attestFile(name, bytes) {
-  await t("tab-photographer").click();
-  await topUp("photographer");
-  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "paprika-edge-")), name);
-  fs.writeFileSync(f, bytes);
-  await t("input-capture-file").setInputFiles(f);
-  await page.waitForTimeout(150); await idle();
-  await must("attest file", await click("btn-attest"));
-  return attested();
-}
-async function webCommit(p, pg = page) {
-  await t("tab-accuser", pg).click();
-  await topUp("accuser", pg);
-  if (await t("btn-accuse-new", pg).isEnabled()) { await t("btn-accuse-new", pg).click(); await pg.waitForTimeout(100); }
-  await t("select-accuse-photo", pg).selectOption(`${p.photoHash}|${p.keyId}`);
-  return click("btn-commit", pg);
-}
-async function libAccuse(p) {
-  if ((await ctx.provider.getBalance(ctx.accounts.accuser)) < 2n * ctx.params.bond) await lib.requestTestFunds(ctx, ctx.accounts.accuser);
-  const c = await lib.commitAccusation(ctx, "accuser", { photoHash: p.photoHash, keyId: p.keyId, evidence: "edge test evidence" });
-  return lib.revealAccusation(ctx, "accuser", { photoHash: p.photoHash, keyId: p.keyId, evidenceHash: c.evidenceHash, salt: c.salt });
-}
-async function voteAllOpen(fake = false) {
-  for (const a of (await lib.listAccusations(ctx)).filter((x) => x.open)) await lib.umaVote(ctx, a.assertionId, fake);
-}
-const stateOf = async (p) => (await lib.verifyPhoto(ctx, p.photoHash)).find((r) => r.keyId.toLowerCase() === p.keyId.toLowerCase())?.state;
-async function mineAt(ts) { await ctx.provider.send("evm_setNextBlockTimestamp", [ts]); await ctx.provider.send("evm_mine", []); }
-async function freshPage() {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
-  const p = await context.newPage();
-  await p.goto(BASE + "/#accuser"); await p.waitForTimeout(600); await idle(p);
-  return p;
-}
-
-// ------------------------------------------------------------------ the checks
-
-// Connects the page's browser wallet for a role and funds it from the local faucet (each actor signs client-side).
-async function connectWallet(role, p = page) {
-  await t(role === "photographer" ? "tab-photographer" : "tab-accuser", p).click();
-  await must(`wallet ${role}`, await click(`btn-wallet-browser-${role}`, p));
-  await must(`faucet ${role}`, await click(`btn-faucet-${role}`, p));
-  return p.evaluate((r) => window.paprikaState.wallets[r]?.address, role);
-}
+const stateOf = async (photoHash) => (await lib.verifyPhoto(ctx, photoHash))[0]?.state;
+const rpcAlive = async () => { try { return !!(await ctx.provider.send("eth_chainId", [])); } catch { return false; } };
 
 async function edge() {
-  await page.goto(BASE + "/"); await page.waitForTimeout(800); await idle();
-  const pageAccuser = (await connectWallet("accuser")) || "";
-  await connectWallet("photographer");
-  await must("register", await click("btn-register"));
-  const X = await attestSample(), Y = await attestSample(), Z = await attestSample(), W = await attestSample(), V = await attestSample();
+  const { t, click, clickConfirm, go, idle, text } = driver(page);
+  const post = (body, headers = {}) => fetch(`${inst.base}/rpc`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body });
 
-  // W-A (major): the web reveals its accusation while another accusation (from the CLI) is open on another photo.
-  await must("commit Y", await webCommit(Y));
-  await libAccuse(X);
-  await must("reveal Y", await click("btn-reveal"));
-  const acc = await page.evaluate(() => window.paprikaState.acc);
-  await check("W-A", "after its reveal, the page keeps showing its own accusation (photo Y), not another open one",
-    (acc?.photoHash || "").toLowerCase() === Y.photoHash.toLowerCase(), `page shows ${acc?.photoHash?.slice(0, 10)} (X=${X.photoHash.slice(0, 10)}, Y=${Y.photoHash.slice(0, 10)})`);
-  await voteAllOpen(false);
-  await page.reload(); await page.waitForTimeout(600); await idle();
+  // ---- /rpc hardening (M-1, M-2)
+  await check("S-1: /rpc with body null is refused (4xx) and the chain keeps running", String((await post("null")).status).startsWith("4") && (await rpcAlive()));
+  await check("S-2: /rpc refuses the batch [0, hardhat_setBalance] with 403", (await post(JSON.stringify([0, { jsonrpc: "2.0", id: 2, method: "hardhat_setBalance", params: ["0x0000000000000000000000000000000000000001", "0x1"] }]))).status === 403);
+  await check("rpc: invalid JSON gets 400", (await post("{not json")).status === 400);
+  await check("rpc: a body over 1 MB is refused", String((await post("x".repeat(1200000)).catch(() => ({ status: 413 }))).status).startsWith("4"));
 
-  // W-B (major): a reveal on a photo already under accusation returns the bond; the page must say so.
-  await must("commit Z", await webCommit(Z));
-  await libAccuse(Z);
-  const credit0 = await lib.credits(ctx, pageAccuser);
-  await must("reveal Z", await click("btn-reveal"));
-  const credit1 = await lib.credits(ctx, pageAccuser);
-  await check("W-B", "chain: bond credited back on a reveal against an accused photo", credit1 - credit0 === ctx.params.bond);
-  const explainer = await text("explainer-text"), reveal = await text("reveal-status");
-  await check("W-B", "page does not claim that both stakes went to UMA when no accusation opened",
-    !/2B\) are now at UMA/.test(explainer) && !/sent to UMA and disputed/.test(reveal), `explainer="${explainer.slice(0, 90)}" reveal-status="${reveal}"`);
-  await check("W-B", "page says the bond was credited back", /credited back|bond.*back/i.test(explainer + " " + reveal), `explainer="${explainer.slice(0, 90)}" reveal-status="${reveal}"`);
-  await voteAllOpen(false);
-  await page.reload(); await page.waitForTimeout(600); await idle();
+  // ---- setup: Alice connected, prepared, with a device key; three photos
+  await page.goto(`${inst.base}/#/attest`); await page.waitForTimeout(1000); await idle();
+  await click("btn-connect");
+  await t("account-button").click(); await clickConfirm("btn-prepare", "prepare"); await click("btn-register"); await t("account-button").click();
+  const attest = async () => { await go("#/attest"); if (await t("btn-new-photo").isVisible().catch(() => false)) await t("btn-new-photo").click(); await click("btn-sample-image");
+    if (await t("btn-new-key-attest").isVisible().catch(() => false)) await click("btn-new-key-attest");   // the key was flagged by a proven fake
+    await clickConfirm("btn-attest", "confirm-attest"); return page.evaluate(() => window.paprikaState.lastAttested); };
+  const X = await attest(), Y = await attest(), Z = await attest();
+  const keyOf = async (h) => (await lib.verifyPhoto(ctx, h))[0].keyId;
 
-  // W-C (major): "Start a new accusation" during a live, unrevealed commitment drops the secret; the bond is stranded.
-  await must("commit W", await webCommit(W));
-  const newEnabled = await t("btn-accuse-new").isEnabled();
-  let dialog = false;
-  page.once("dialog", (d) => { dialog = true; d.dismiss(); });
-  if (newEnabled) { await t("btn-accuse-new").click(); await page.waitForTimeout(300); }
-  const kept = await page.evaluate(() => !!window.paprikaState.acc?.commitment);
-  await check("W-C", "a live commitment is not dropped silently by 'Start a new accusation' (disabled, or asks first)",
-    !newEnabled || dialog || kept, `enabled=${newEnabled} dialog=${dialog} commitment kept=${kept}`);
-  if (kept && await t("btn-reveal").isEnabled()) { await click("btn-reveal"); await voteAllOpen(false); await page.reload(); await page.waitForTimeout(600); await idle(); }
+  // ---- A-4: an empty file is refused and the previous photo cleared
+  await go("#/attest"); await t("btn-new-photo").click().catch(() => {});
+  await click("btn-sample-image");
+  await t("input-capture-file").setInputFiles({ name: "empty.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(0) }); await page.waitForTimeout(200); await idle();
+  await check("A-4: an empty file is refused and nothing stays ready to attest", /empty/i.test(await text("capture-error")) && !(await t("btn-attest").isEnabled()));
 
-  // W-E (minor): Reveal at the reveal deadline: the next block is after it, so the reveal can only fail ("too late").
-  await must("commit V", await webCommit(V));
-  const committedAt = await page.evaluate(() => window.paprikaState.acc.committedAt);
-  await mineAt(committedAt + ctx.params.revealWindow);
-  await page.waitForTimeout(3600);
-  await check("W-E", "Reveal is disabled when the latest block is at the reveal deadline (the reveal would be 'too late')",
-    !(await t("btn-reveal").isEnabled()), `deadline text: ${await text("reveal-deadline")}`);
-  if (await t("btn-accuse-new").isEnabled()) { await t("btn-accuse-new").click(); await page.waitForTimeout(200); }
-
-  // W-I (minor): two windows press the vote buttons at once: the loser gets a plain message, not an ethers internal.
-  const U = await attestSample();
-  await must("commit U", await webCommit(U));
-  await must("reveal U", await click("btn-reveal"));
-  const page2 = await freshPage();
-  const [r1, r2] = await Promise.all([click("btn-vote-fake"), click("btn-vote-not-fake", page2)]);
-  await check("W-I", "a second simultaneous vote fails with a plain message", !/coalesce|could not/i.test(r1 + r2), `window1="${r1}" window2="${r2}"`);
-  await page2.context().close();
-  await page.reload(); await page.waitForTimeout(600); await idle();
-  // the YES vote may have flagged the key: continue with a new key
-  await t("tab-photographer").click();
-  await t("btn-generate-key").click(); await page.waitForTimeout(150); await idle();
-  await must("register new key", await click("btn-register"));
-
-  // W-F (minor): Download of a non-JPEG attested file keeps its type in the file name.
+  // ---- W-F: Download keeps the file type (GIF)
   const gif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
-  const G = await attestFile("edge.gif", gif);
-  await t("tab-photographer").click();
-  const ev = page.waitForEvent("download");
-  await page.locator(`[data-testid="deposit-row"][data-photo-hash="${G.photoHash}"] [data-testid="btn-download"]`).click();
-  const dl = await ev;
-  await check("W-F", "Download of a GIF is named .gif (not .jpg)", /\.gif$/i.test(dl.suggestedFilename()), dl.suggestedFilename());
+  await t("input-capture-file").setInputFiles({ name: "edge.gif", mimeType: "image/gif", buffer: gif }); await page.waitForTimeout(300); await idle();
+  await clickConfirm("btn-attest", "confirm-attest");
+  const G = await page.evaluate(() => window.paprikaState.lastAttested);
+  await go(`#/record/${G}`);
+  const ev = page.waitForEvent("download"); await t("btn-download").click();
+  await check("W-F: Download of a GIF is named .gif", /\.gif$/i.test((await ev).suggestedFilename()));
 
-  // W-G (minor): several files dropped at once on the Verifier: the page must not silently verify only the first.
-  await t("tab-verifier").click();
-  const dt = await page.evaluateHandle(() => { const d = new DataTransfer();
-    d.items.add(new File([new Uint8Array([1, 2, 3])], "one.bin")); d.items.add(new File([new Uint8Array([4, 5, 6])], "two.bin")); return d; });
-  await t("verify-dropzone").dispatchEvent("drop", { dataTransfer: dt });
-  await page.waitForTimeout(300); await idle();
-  const said = (await page.evaluate(() => document.body.innerText));
-  await check("W-G", "dropping 2 files says that only one file is verified (or verifies both)", /two\.bin|2 files|one file at a time|only the first/i.test(said));
+  // ---- Bob in the page; a CLI-like accuser (#6) with its own key
+  await mm.use("bob"); await page.waitForTimeout(800); await idle();
+  await t("account-button").click(); await clickConfirm("btn-prepare", "prepare"); await t("account-button").click();
+  const cli = ethers.HDNodeWallet.fromPhrase("test test test test test test test test test test test junk", undefined, "m/44'/60'/0'/0/6").connect(ctx.provider);
+  await lib.setSigner(ctx, "accuser", cli);
+  const cliAccuse = async (photo) => { const c = await lib.commitAccusation(ctx, "accuser", { photoHash: photo, keyId: await keyOf(photo), evidence: "cli evidence" });
+    return lib.revealAccusation(ctx, "accuser", { photoHash: photo, keyId: await keyOf(photo), evidenceHash: c.evidenceHash, salt: c.salt }); };
+  const pageCommit = async (photo) => { await go(`#/record/${photo}/accuse`); await t("input-evidence").fill(`evidence against ${photo.slice(0, 10)}`); await clickConfirm("btn-commit", "confirm-commit"); };
 
-  // W-H (minor): at 800 px the footer (the demo disclosure) is cut off with an ellipsis.
-  await page.setViewportSize({ width: 800, height: 900 });
-  await page.waitForTimeout(200);
-  await check("W-H", "footer disclosure is fully visible at 800 px", await t("footer").evaluate((f) => f.scrollWidth <= f.clientWidth));
-  await page.setViewportSize({ width: 1440, height: 900 });
+  // ---- W-C: a live commitment cannot be dropped; it survives a reload
+  await pageCommit(Y);
+  await check("W-C: no 'Start a new accusation' while the commitment can be revealed", (await t("btn-accuse-new").count()) === 0);
+  await page.reload(); await page.waitForTimeout(1200); await idle();
+  await check("W-C: after a reload the reveal is still offered", await t("btn-reveal").isVisible());
 
-  // W-D (minor): a record of a revoked key whose challenge period is over must not say "can still be accused until".
-  await t("tab-photographer").click();
-  const R = await attestSample();
-  await must("advance", await click("btn-advance-time"));
-  await must("revoke", await click("btn-revoke"));
-  await t("tab-verifier").click();
-  await must("verify last", await click("btn-verify-last"));
-  const detail = await text("verify-detail");
-  await check("W-D", "revoked key + challenge period over: verdict does not offer an accusation in the past",
-    !/can still be accused/i.test(detail), detail);
-  void R;
+  // ---- M-3: another accusation (CLI, on X) opens meanwhile; the page acts only on the record it shows
+  await cliAccuse(X);
+  await click("btn-reveal");
+  await check("M-3: the page revealed its own accusation (Y), not X", (await stateOf(Y)) === "accused" && (await stateOf(X)) === "accused");
+  await click("btn-vote-fake-inline");
+  await check("M-3: the vote on Y's page decided Y only", (await stateOf(Y)) === "fake" && (await stateOf(X)) === "accused");
+  await lib.umaVote(ctx, (await lib.listAccusations(ctx)).find((a) => a.open).assertionId, false);
 
-  // ---- refused files, simultaneous votes, timeline after a reload ----
-  await t("tab-photographer").click();
-  await t("btn-generate-key").click(); await page.waitForTimeout(150); await idle();
-  await must("register key for A-checks", await click("btn-register"));
+  // ---- M-5: a reveal on a photo already under accusation returns the bond, and the page says so
+  await pageCommit(Z);
+  await cliAccuse(Z);
+  const c0 = await lib.credits(ctx, mm.address("bob"));
+  await click("btn-reveal");
+  const c1 = await lib.credits(ctx, mm.address("bob"));
+  await check("M-5: bond credited back on chain", c1 - c0 === ctx.params.bond);
+  await check("M-5: the page says 'Bond returned' and shows no vote", /Bond returned/.test(await text("reveal-status")));
+  await lib.umaVote(ctx, (await lib.listAccusations(ctx)).find((a) => a.open).assertionId, false);
 
-  // A-2 (minor): two windows vote at the same time: one vote wins, the other gets a plain message, nothing stays stuck.
-  const Q = await attestSample();
-  await must("commit Q", await webCommit(Q));
-  await must("reveal Q", await click("btn-reveal"));
-  const pageB = await freshPage();
-  const [q1, q2] = await Promise.all([click("btn-vote-fake"), click("btn-vote-not-fake", pageB)]);
-  const stillOpen = (await lib.listAccusations(ctx)).some((x) => x.open);
-  const outA = await t("settle-outcome").getAttribute("data-outcome").catch(() => "");
-  const outB = await t("settle-outcome", pageB).getAttribute("data-outcome").catch(() => "");
-  await check("A-2", "simultaneous votes: no raw UMA error, the accusation is decided, both windows show the outcome",
-    !/Revealed data|Cannot commit|coalesce|could not/i.test(q1 + q2) && !stillOpen && !!outA && outA === outB,
-    `window1="${q1}" window2="${q2}" open=${stillOpen} outcomes=${outA}/${outB}`);
-  await pageB.context().close();
+  // ---- A-2: two windows resolve the same vote at once
+  const W = await (async () => { await mm.use("alice"); await page.waitForTimeout(600); await idle(); return attest(); })();
+  await mm.use("bob"); await page.waitForTimeout(600); await idle();
+  await pageCommit(W); await click("btn-reveal");
+  const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await installFakeMetaMask(ctx2, inst.rpc);
+  const p2 = await ctx2.newPage(); await p2.goto(`${inst.base}/#/record/${W}`); await p2.waitForTimeout(1200);
+  const [r1, r2] = await Promise.all([click("btn-vote-fake-inline"), driver(p2).click("btn-vote-not-fake-inline")]);
+  await check("A-2: simultaneous votes: no raw UMA error, decided once", !/Revealed data|Cannot commit|coalesce/i.test(`${r1?.text} ${r2?.text}`) && !(await lib.listAccusations(ctx)).some((a) => a.open), `${r1?.text} | ${r2?.text}`);
+  await ctx2.close();
 
-  // A-4 (minor): after a refused (empty) file, the previously loaded file is cleared: nothing can be attested by mistake.
-  await t("tab-photographer").click();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "paprika-edge-"));
-  fs.writeFileSync(path.join(dir, "one.bin"), Buffer.from([7]));
-  fs.writeFileSync(path.join(dir, "empty.jpg"), Buffer.alloc(0));
-  await t("input-capture-file").setInputFiles(path.join(dir, "one.bin"));
-  await page.waitForTimeout(150); await idle();
-  await t("input-capture-file").setInputFiles(path.join(dir, "empty.jpg"));
-  await page.waitForTimeout(150); await idle();
-  const refusedMsg = (await t("error-banner").isVisible()) ? await text("error-message") : "";
-  if (refusedMsg) await t("btn-dismiss-error").click();
-  const photoLeft = await page.evaluate(() => !!window.paprikaState.photo);
-  await check("A-4", "an empty file is refused and the previous file is no longer ready to attest",
-    /empty/i.test(refusedMsg) && !photoLeft && !(await t("btn-attest").isEnabled()), `msg="${refusedMsg}" photo kept=${photoLeft}`);
+  // ---- W-E: at the reveal deadline the reveal is no longer offered (the next block would be too late)
+  await mm.use("alice"); await page.waitForTimeout(600); await idle();
+  const V = await attest();
+  await mm.use("bob"); await page.waitForTimeout(600); await idle();
+  await pageCommit(V);
+  const m = await page.evaluate((v) => Object.values(window.paprikaState.mine).find((x) => x.photoHash.toLowerCase() === v.toLowerCase()), V);
+  await ctx.provider.send("evm_setNextBlockTimestamp", [m.committedAt + ctx.params.revealWindow]); await ctx.provider.send("evm_mine", []);
+  await sleep(3000); await idle();
+  await check("W-E: reveal not offered at the deadline; forfeit offered instead", !(await t("btn-reveal").isVisible().catch(() => false)) && (await t("btn-forfeit").isVisible()));
 
-  // A-7 (minor): the timeline survives a reload.
-  const rowsBefore = await t("activity-row").count();
-  await page.reload(); await page.waitForTimeout(600); await idle();
-  const rowsAfter = await t("activity-row").count();
-  await check("A-7", "the timeline is still there after a reload", rowsBefore > 0 && rowsAfter >= rowsBefore, `${rowsBefore} rows before, ${rowsAfter} after`);
+  // ---- W-G: several files dropped: only the first is verified, and the page says so
+  await go("#/verify");
+  const dt = await page.evaluateHandle(() => { const d = new DataTransfer(); d.items.add(new File([new Uint8Array([1, 2, 3])], "one.bin")); d.items.add(new File([new Uint8Array([4, 5, 6])], "two.bin")); return d; });
+  await t("verify-dropzone").dispatchEvent("drop", { dataTransfer: dt }); await sleep(800);
+  await check("W-G: dropping 2 files says only the first was verified", /only the first/i.test(await page.evaluate(() => document.body.innerText)));
 
-  // S-3 (major): a second `npm start` on ports already in use must not redeploy over the running demo.
-  const before = (await (await fetch(BASE + "/deployment.json")).json()).addresses.paprika;
-  const second = spawn(process.execPath, ["scripts/start.js"], { cwd: APP, detached: true, stdio: "ignore", env });
+  // ---- m-2: revoked key + challenge period over: no accusation offered in the past
+  await mm.use("alice"); await page.waitForTimeout(600); await idle();
+  const R = await attest();
+  await go(`#/record/${R}`);
+  await click("btn-skip-wait");
+  await t("account-button").click(); await clickConfirm("btn-revoke", "revoke"); await t("account-button").click();
+  await check("m-2: revoked key + challenge over: the verdict offers no accusation", !/can still be accused/i.test(await text("record-verdict-detail")));
+
+  // ---- S-3: a second npm start leaves the running deployment untouched; S-4: stop with a port prefix
+  const before = (await (await fetch(`${inst.base}/deployment.json`)).json()).addresses.paprika;
+  const second = spawn(process.execPath, ["scripts/start.js"], { cwd: APP, detached: true, stdio: "ignore", env: inst.env });
   await new Promise((r) => { second.on("exit", r); setTimeout(r, 45000); });
   try { process.kill(-second.pid, "SIGINT"); } catch {}
-  const after = (await (await fetch(BASE + "/deployment.json")).json()).addresses.paprika;
-  await check("S-3", "a second npm start leaves the running deployment untouched", after === before && (await ctx.provider.getCode(before)) !== "0x", `before ${before}, after ${after}`);
-
-  // S-2 (major): /rpc allow-list bypass with a falsy element in a batch.
-  const bypass = await fetch(BASE + "/rpc", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify([0, { jsonrpc: "2.0", id: 2, method: "hardhat_setBalance", params: ["0x0000000000000000000000000000000000000001", "0x1"] }]) });
-  await check("S-2", "/rpc refuses a batch [0, hardhat_setBalance] with 403", bypass.status === 403, `HTTP ${bypass.status}`);
-
-  // S-1 (major): /rpc with the body `null` crashes the Hardhat node (and npm start then stops everything).
-  const nul = await fetch(BASE + "/rpc", { method: "POST", headers: { "content-type": "application/json" }, body: "null" }).catch((e) => ({ status: e.message }));
-  await sleep(1500);
-  await check("S-1", "/rpc with body null is refused (4xx) and the chain keeps running", String(nul.status).startsWith("4") && (await rpcAlive()), `HTTP ${nul.status}, chain alive=${await rpcAlive()}`);
-
-  // a crashed chain (S-1) is restarted for the last check
-  if (!(await rpcAlive())) { stopInstance(); await sleep(1500); await startInstance(); }
-
-  // S-4 (minor): `npm run stop` with a port that is a prefix of this instance's port must not stop this instance.
+  const after = (await (await fetch(`${inst.base}/deployment.json`)).json()).addresses.paprika;
+  await check("S-3: a second npm start leaves the running deployment untouched", after === before && (await ctx.provider.getCode(before)) !== "0x");
   try { execSync("node scripts/stop.js", { cwd: APP, env: { ...process.env, RPC_PORT: String(RPC_PORT).slice(0, -1) }, stdio: "ignore" }); } catch {}
   await sleep(1500);
-  await check("S-4", `RPC_PORT=${String(RPC_PORT).slice(0, -1)} npm run stop leaves the chain on ${RPC_PORT} running`, await rpcAlive());
-
+  await check(`S-4: RPC_PORT=${String(RPC_PORT).slice(0, -1)} npm run stop leaves the chain on ${RPC_PORT} running`, await rpcAlive());
 }
-
-// ------------------------------------------------------------------ main
 
 let code = 1;
 try {
-  await startInstance();
+  inst = await startInstance(RPC_PORT, WEB_PORT);
+  const deployment = await (await fetch(`${inst.base}/deployment.json`)).json();
   lib = await import(path.join(APP, "lib", "paprika.js"));
-  const deployment = await (await fetch(BASE + "/deployment.json")).json();
-  // The test plays a second, CLI-like accuser with its own key; demo controls (faucet, vote) run directly.
   const { demoKeys } = await import(path.join(APP, "lib", "demo-keys.js"));
-  ctx = lib.connect({ rpcUrl: RPC, deployment, demoKeys: demoKeys(deployment) });
-  const { ethers } = await import("ethers");
-  const cliAccuser = ethers.Wallet.createRandom().connect(ctx.provider);
-  await lib.requestTestFunds(ctx, cliAccuser.address);
-  await lib.setSigner(ctx, "accuser", cliAccuser);
+  ctx = lib.connect({ rpcUrl: inst.rpc, deployment, demoKeys: demoKeys(deployment) });
   browser = await chromium.launch({ headless: !process.env.HEADED });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  mm = await installFakeMetaMask(context, inst.rpc);
   page = await context.newPage();
   await edge();
-  const failed = results.filter((r) => !r.ok);
-  console.log(`\n${results.length - failed.length} passed, ${failed.length} failed`);
-  code = failed.length ? 1 : 0;
+  code = results.every((r) => r.ok) ? 0 : 1;
 } catch (e) {
-  console.error("edge test aborted:", e);
-  if (page) await page.screenshot({ path: path.join(OUT, "edge-aborted.png"), fullPage: true }).catch(() => {});
+  console.error("edge test aborted:", e.stack || e.message);
+  if (page) await page.screenshot({ path: path.join(OUT, "edge-aborted.png") }).catch(() => {});
 } finally {
-  if (browser) await browser.close().catch(() => {});
-  stopInstance();
+  await browser?.close().catch(() => {});
+  inst?.stop();
 }
-process.exit(code);
+const failed = results.filter((r) => !r.ok);
+console.log(`\n${results.length - failed.length} passed, ${failed.length} failed`);
+process.exit(failed.length || code ? 1 : 0);

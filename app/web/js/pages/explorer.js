@@ -22,7 +22,8 @@ function useData(key, loader) {
 }
 
 // A value of a decoded argument: hashes and addresses become links.
-function argValue(v) {
+function argValue(v, name = "") {
+  if (typeof v === "bigint" && /amount|bond|wad|value|payout/i.test(name)) return h("span", { title: `${v} wei` }, tok(v));
   if (typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v)) return addrLink(v, { copy: false });
   if (typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v)) return hashLink(v, "hash", { copy: false });
   if (typeof v === "bigint") return v.toString();
@@ -85,10 +86,10 @@ function txPage(hash) {
       h("dt", {}, "Value"), h("dd", {}, eth(tx.value)),
       h("dt", {}, "Gas used"), h("dd", {}, receipt ? receipt.gasUsed.toString() : "—"),
       h("dt", {}, "Call"), h("dd", { testid: "tx-call", "data-method": call ? `${call.contract}.${call.method}` : "" },
-        call ? h("div", {}, h("b", {}, `${call.contract}.${call.method}`), h("ul", { class: "args" }, call.args.map(([n, v]) => h("li", {}, h("span", { class: "d" }, `${n} `), argValue(v))))) : h("span", { class: "mono" }, tx.data?.slice(0, 66) || "—")),
+        call ? h("div", {}, h("b", {}, `${call.contract}.${call.method}`), h("ul", { class: "args" }, call.args.map(([n, v]) => h("li", {}, h("span", { class: "d" }, `${n} `), argValue(v, n))))) : h("span", { class: "mono" }, tx.data?.slice(0, 66) || "—")),
       h("dt", {}, "Events"), h("dd", { testid: "tx-events" }, logs.length ? h("ul", { class: "args" }, logs.map((l) => h("li", { testid: "tx-event", "data-event": l.name },
         h("b", {}, `${l.contract.startsWith("0x") ? labelOf(l.contract) || shortHex(l.contract) : l.contract}.${l.name}`), " ",
-        l.args.map(([n, v]) => h("span", { class: "evarg" }, h("span", { class: "d" }, `${n} `), argValue(v), " "))))) : "none")),
+        l.args.map(([n, v]) => h("span", { class: "evarg" }, h("span", { class: "d" }, `${n} `), argValue(v, n), " "))))) : "none")),
     photo ? h("a", { class: "btn", href: `#/record/${toHex(photo)}`, testid: "tx-open-record" }, "Open record →") : null);
 }
 

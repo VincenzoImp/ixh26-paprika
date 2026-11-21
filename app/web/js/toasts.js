@@ -23,7 +23,10 @@ export function toast(title, { status = "pending", text = "", tag = "" } = {}) {
       el.className = `toast ${st}`;
       el.dataset.status = st;
       if (txt != null) body.textContent = txt;
-      links.replaceChildren(...txs.map((t) => h("a", { class: "link mono", href: explorerUrl("tx", t.txHash), testid: "toast-tx" }, `${t.label || "tx"} ${shortHex(t.txHash)} ↗`)));
+      // At most three links; a long action (e.g. the UMA vote, 7 transactions) shows the last one and a count.
+      const shown = txs.length > 3 ? [txs[txs.length - 1]] : txs;
+      links.replaceChildren(...shown.map((t) => h("a", { class: "link mono", href: explorerUrl("tx", t.txHash), testid: "toast-tx" }, `${t.label || "tx"} ${shortHex(t.txHash)} ↗`)),
+        txs.length > 3 ? h("span", { class: "d" }, `${txs.length} transactions in total`) : "");
       if (st === "ok") setTimeout(() => el.remove(), 6000);
     },
     close() { el.remove(); },
