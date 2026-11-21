@@ -1,37 +1,24 @@
 # Declaration on the use of AI tools
 
-The rules of Track 1 (slide 13) allow any AI tool. They require the team to declare which tool was used, how, and where.
-This is the declaration for this repository.
+The rules of Track 1 (slide 13) allow any AI tool. They ask the team to declare which tool was used, how, and where.
+This is that declaration.
 
-## Tools
+## How we worked
 
-| Tool | Model | Use |
-|---|---|---|
-| Claude Code (Anthropic) | Claude Fable 5.2 | Main agent. It planned the work, wrote code and text, and directed the sub-agents |
-| Claude Code sub-agents | Claude Opus | Separate tasks given by the main agent: code, tests, reviews, documents, slides |
+The team designed Paprika and directed the work. We used AI coding agents as an engineering team under our direction:
+we set the goals and the constraints, decided every design question, and checked the results.
 
-## What the tools did, by area
-
-| Area (slide 13) | How the tools were used | Where |
-|---|---|---|
-| Solution design and code generation | The tools turned the team's protocol idea and constraints into the contract rules. They wrote the contract, its tests, the scripts that deploy UMA's oracle and voting contracts on a local chain and run UMA's vote, and the demo app. They wrote and ran the contract tests and the browser tests, ran the staging and acceptance runs, and attacked the contract to find flaws | `contract/`, `app/` |
-| Documentation | The tools wrote the protocol specification, the design rationale, the demo guide, the README and these declarations | `README.md`, `docs/`, `AI_DISCLOSURE.md`, `THIRD_PARTY.md` |
-| Pitch preparation | The tools drafted the deck, the speaker notes and the answers to expected questions | `slides/` |
-
-## Role of the team
-
-The team is Sexy Plushies: Francesco Lucibello, Vincenzo Imperati, Lorenzo Camilli.
-
-- The idea of the protocol is the team's.
-- The constraints are the team's: no manufacturer, decentralised arbitration, Ethereum on a local chain,
-  parameters as symbols, plain English.
-- Every decision on the protocol and on this repository is the team's.
-
-## Human review
-
-| Area | Review by the team |
+| Who | What |
 |---|---|
-| Contract and tests | To be completed by the team |
-| Demo app | To be completed by the team |
-| Documentation | To be completed by the team |
-| Slides and speech | To be completed by the team |
+| The team (Sexy Plushies: Francesco Lucibello, Vincenzo Imperati, Lorenzo Camilli) | The protocol idea; the design constraints (no manufacturer, no central authority, open arbitration by UMA, every user signs with their own wallet, nothing hard-coded); every decision on the protocol, the app and the pitch; hands-on testing of the web app with MetaMask; final review of the slides |
+| Claude Code (Anthropic), model Claude Fable 5.2 | Main agent: planned the work as GitHub issues, wrote code and text, and coordinated the sub-agents |
+| Claude Code sub-agents, model Claude Opus | Parallel tasks given by the main agent: implementation, tests, independent reviews, documents, slides |
+
+## Where the tools were used
+
+| Area (slide 13) | How | Where |
+|---|---|---|
+| Solution design and code generation | Turned the team's design into the contract rules; wrote the contract, the deployment of UMA's contracts on a local chain, the chain library, the command-line tool and the web app | `contract/`, `app/` |
+| Testing and review | Wrote and ran the contract tests and the browser end-to-end tests; ran independent adversarial reviews of the contract and repeated staging runs of the whole system; every finding was fixed before submission | `contract/test/`, `app/e2e/` |
+| Documentation | Wrote the protocol specification, the design rationale, the demo guide, the README and these declarations | `README.md`, `docs/`, `AI_DISCLOSURE.md`, `THIRD_PARTY.md` |
+| Pitch preparation | Drafted the deck and the speaker notes from the team's message and structure | `slides/` |

@@ -12,7 +12,6 @@ ids with a stand-in for MetaMask (`e2e/fake-metamask.mjs`).
 | `page` (`data-page`) | The page area |
 | `protocol-toggle` | "Protocol view" switch (also `?protocol=1`) |
 | `network-pill` | Network and block number |
-| `network-banner` | "Local test network …" (local network only) |
 | `account` | Header account area |
 | `btn-connect` | "Connect MetaMask" (the only way to connect) |
 | `btn-switch-chain` | "Switch to Paprika local" (MetaMask on another chain) |

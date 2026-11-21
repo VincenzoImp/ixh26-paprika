@@ -36,7 +36,7 @@ nav a{padding:7px 14px;border-radius:8px;font-weight:700;color:var(--ink);text-d
 nav a.on{border-color:var(--ink);background:var(--paper)}
 .hdr-right{margin-left:auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .pv{font-size:14px;display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap;min-height:32px}
-.netpill{font-size:13px;font-weight:700;border:2px solid var(--ink);border-radius:999px;padding:3px 10px;color:#17703f;background:#fff;white-space:nowrap}
+.netpill{font:700 13px/1.2 inherit;font-family:inherit;cursor:pointer;font-weight:700;border:2px solid var(--ink);border-radius:999px;padding:3px 10px;color:#17703f;background:#fff;white-space:nowrap}
 .netpill.down{color:#b3261e}
 .account{display:flex;gap:8px;align-items:center}
 .acct{display:flex;gap:8px;align-items:center;font-weight:700}

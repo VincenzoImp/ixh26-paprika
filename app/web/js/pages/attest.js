@@ -12,7 +12,7 @@ import { accountBlocker, prepared, createAndRegister, prepareAccount } from "../
 import { isLocal } from "../localtools.js";
 
 // Page state: the loaded photo, the camera stream, the last result.
-const A = { photo: null, stream: null, mirror: false, error: "", done: null };
+const A = { photo: null, stream: null, mirror: true, error: "", done: null };
 
 // Stops the camera.
 function stopCamera() { if (A.stream) for (const t of A.stream.getTracks()) t.stop(); A.stream = null; }

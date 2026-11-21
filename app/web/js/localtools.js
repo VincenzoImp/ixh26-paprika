@@ -58,13 +58,12 @@ export function localChip(label, onclick, { testid, disabled = "" } = {}) {
 }
 
 let open = false;
-// Draws the local tools: a button in the header and, when open, a bar in the page flow under the banner (it never
+// Draws the local tools: opened from the network badge in the header and, when open, a bar in the page flow under the banner (it never
 // covers content). Only the chain clock lives here; the vote chips sit next to the vote they resolve.
 export function renderTools() {
-  const btn = tid("local-tools-toggle"), el = tid("local-tools");
+  const btn = tid("network-pill"), el = tid("local-tools");
   if (!btn || !el) return;
   const show = isLocal() && !!S.ctx;
-  btn.classList.toggle("hidden", !show);
   if (!show || !open) { el.classList.add("hidden"); btn.classList.toggle("on", false); return; }
   btn.classList.toggle("on", true);
   el.classList.remove("hidden");

@@ -105,7 +105,6 @@ async function main() {
     return fatal(`Can't reach network ${S.network?.name || "Paprika local"}`, errText(e), "cd app\nnpm start");
   }
   document.body.classList.toggle("is-local", !!S.network.local);
-  tid("network-banner").classList.toggle("hidden", !S.network.local);
   S.mine = load("mine", {});
   await loadDevice();
   listen();
@@ -120,7 +119,7 @@ async function main() {
     try { await refresh(); } catch (e) { console.warn(e); }
     draw();
   });
-  tid("local-tools-toggle").addEventListener("click", toggleTools);
+  tid("network-pill").addEventListener("click", () => { if (S.network?.local) toggleTools(); });
   on("drawer-refresh", renderDrawer);
   addEventListener("hashchange", draw);
   draw();

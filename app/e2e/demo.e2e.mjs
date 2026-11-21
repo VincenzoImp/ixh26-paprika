@@ -54,8 +54,8 @@ async function story() {
   await page.goto(`${inst.base}/#/verify`);
   await page.waitForTimeout(1000); await idle();
   await check("app: no fatal message", !(await t("fatal-message").isVisible().catch(() => false)));
-  await check("app: local network banner shown", await t("network-banner").isVisible());
-  await check("app: local tools present on the local network", await t("local-tools-toggle").isVisible());
+  await check("app: no separate local banner (the network badge names the network)", (await t("network-banner").count()) === 0);
+  await check("app: local tools present on the local network", await t("network-pill").isVisible());
   await check("wallet: Connect MetaMask is the only wallet option", (await t("btn-connect").innerText()).includes("Connect MetaMask") && (await page.getByText(/browser wallet|faucet/i).count()) === 0);
   await go("#/attest");
   await click("btn-sample-image");
@@ -177,7 +177,7 @@ async function story() {
   await t("confirm-commit-ok").click(); await page.waitForTimeout(150); await idle();
   await eq("toast: commit confirmed", (await driver(page).lastToast())?.status, "ok");
   await check("commit: Details say the accusation is committed and hidden", /committed by you \(hidden until you reveal\)/.test(await text("record-accusation-count")));
-  await t("local-tools-toggle").click();
+  await t("network-pill").click();
   await check("B1: skip wait disabled while the commitment is unrevealed, with the reason", !(await t("btn-advance-time").isEnabled()) && (await t("advance-why").isVisible()));
   await t("local-tools-close").click();
   await eq("commit: exactly one MetaMask signature after Prepare account", mm.sentSince(sig1).length, 1);
@@ -193,7 +193,7 @@ async function story() {
   const evUrl = new URL(await page.getByTestId("evidence-link").first().getAttribute("href").catch(() => `/evidence/${acc.evidenceHash.slice(2)}`), inst.base).href;
   const evBytes = new Uint8Array(await (await fetch(evUrl)).arrayBuffer());
   await eq("evidence: the published evidence hashes to the on-chain evidence hash", ethers.sha256(evBytes), acc.evidenceHash.toLowerCase());
-  await t("local-tools-toggle").click();
+  await t("network-pill").click();
   await check("local tools: skip wait disabled while the vote is pending", !(await t("btn-advance-time").isEnabled()));
 
   // ---- a second window resolves the vote at the same time: one wins, no raw errors
@@ -312,7 +312,7 @@ async function story() {
   await p3.route("**/network.json", async (route) => { const r = await route.fetch(); const j = await r.json(); await route.fulfill({ json: { ...j, local: false, name: "Test network" } }); });
   await p3.goto(`${inst.base}/#/attest`); await p3.waitForTimeout(1500);
   await check("local:false: the app works (Attest page and Connect shown)", (await p3.getByRole("heading", { name: "Attest a photo" }).isVisible()) && (await p3.getByTestId("btn-connect").isVisible()));
-  await check("local:false: no local tools, banner or sample image", !(await p3.getByTestId("local-tools-toggle").isVisible()) && !(await p3.getByTestId("network-banner").isVisible()) && !(await p3.getByTestId("btn-sample-image").count()));
+  await check("local:false: no local tools, banner or sample image", !(await p3.getByTestId("local-tools-bar").isVisible()) && !(await p3.getByTestId("network-banner").isVisible()) && !(await p3.getByTestId("btn-sample-image").count()));
   await ctx3.close();
 
   // ---- layout

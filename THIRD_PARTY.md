@@ -26,6 +26,12 @@ Versions are those installed from the lock files. Licences are those declared in
 |---|---|---|
 | IXH26 Track 1 slides (the brief) | De Componendis Cifris | Cited as the brief, with the event page https://www.decifris.it/ixh26/. Not copied into this repository |
 
+## What is original
+
+The Paprika protocol, the `Paprika.sol` contract, the chain library, the command-line tool, the web app, the tests,
+the documents and the slides were written by the team during the hackathon. UMA's contracts and WETH are used
+unchanged, as building blocks, exactly as a real deployment would use them.
+
 ## Work done before the hackathon
 
 None. All work in this repository was created during the hackathon.

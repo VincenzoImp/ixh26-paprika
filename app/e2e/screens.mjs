@@ -100,7 +100,7 @@ try {
   await click("btn-reveal");
   expect((await state("record-verdict")) === "accused", "record under accusation");
   await shot("under-accusation-vote-pending");
-  await t("local-tools-toggle").click();
+  await t("network-pill").click();
   await shot("local-network-tools");
   await t("local-tools-close").click();
   await click("btn-vote-not-fake-inline");

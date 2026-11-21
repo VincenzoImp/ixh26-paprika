@@ -101,7 +101,7 @@ const STEPS = [
     states: [
       { name: "accused-bob", title: "Under accusation (Bob)", who: "bob", url: (v) => `#/record/${v.p1}`, expect: async (x) => x.stateIs("record-verdict", "accused") },
       { name: "accused-alice", title: "Under accusation (Alice, the depositor)", url: (v) => `#/record/${v.p1}` },
-      { name: "local-tools-open", title: "Local network tools open", who: "bob", url: (v) => `#/record/${v.p1}`, prep: async (x) => { await x.d.t("local-tools-toggle").click(); await x.settle(); } },
+      { name: "local-tools-open", title: "Local network tools open", who: "bob", url: (v) => `#/record/${v.p1}`, prep: async (x) => { await x.d.t("network-pill").click(); await x.settle(); } },
       { name: "protocol-open", title: "Protocol view drawer open", who: "bob", url: (v) => `#/record/${v.p1}`, prep: async (x) => { await x.d.t("protocol-toggle").check(); await x.settle(); } },
     ] },
   { name: "vote-not-proven", seed: async (x) => { await x.goto(`#/record/${x.v.p1}`); await x.d.click("btn-vote-not-fake-inline"); },

@@ -47,9 +47,9 @@ async function run() {
 
   // ---------------------------------------------------------------- wording and shell (no wallet)
   await page.goto(`${inst.base}/#/verify`); await page.waitForTimeout(1200); await idle();
-  const banner = await text("network-banner");
+  const banner = await text("network-pill");
   await check("wording: the banner does not call UMA's real VotingV2 'simulated' (docs: three demo voter accounts)", !/simulated/i.test(banner), banner);
-  await t("local-tools-toggle").click(); await page.waitForTimeout(200);
+  await t("network-pill").click(); await page.waitForTimeout(200);
   const bar = await t("local-tools-bar").innerText().catch(() => "");
   await check("wording: local tools do not call the voters 'simulated'", !/simulated/i.test(bar), bar.replace(/\s+/g, " ").slice(0, 120));
   await go("#/attest"); await page.waitForTimeout(300);
@@ -133,7 +133,7 @@ async function run() {
     await page.evaluate(() => document.querySelectorAll("[data-testid=toast] button").forEach((b) => b.click()));
     await go(`#/record/${F}`); await page.waitForTimeout(400);
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)); await page.waitForTimeout(200);
-    const a = await t("btn-download").boundingBox(), b = await t("local-tools-toggle").boundingBox();
+    const a = await t("btn-download").boundingBox(), b = await t("network-pill").boundingBox();
     await check(`layout ${w}px: the 'Local network' pill does not cover 'Download the attested file'`, !overlap(a, b), JSON.stringify({ a, b }));
     if (overlap(a, b)) await page.screenshot({ path: path.join(OUT, `overlap-download-${w}.png`) });
     const hs = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
@@ -146,7 +146,7 @@ async function run() {
   const hits = [];
   for (const w of [1440, 1280]) for (let hgt = 560; hgt <= 1000; hgt += 20) {
     await page.setViewportSize({ width: w, height: hgt }); await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(60);
-    if (overlap(await t("btn-download").boundingBox(), await t("local-tools-toggle").boundingBox())) hits.push(`${w}x${hgt}`);
+    if (overlap(await t("btn-download").boundingBox(), await t("network-pill").boundingBox())) hits.push(`${w}x${hgt}`);
   }
   if (hits.length) { const [w, hh] = hits[0].split("x").map(Number); await page.setViewportSize({ width: w, height: hh }); await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: path.join(OUT, `overlap-download-${hits[0]}.png`) }); }
   await check("layout: the 'Local network' pill covers 'Download the attested file' at no window height (no scroll)", hits.length === 0, hits.join(", "));
@@ -181,7 +181,7 @@ async function run() {
   await clickConfirm("btn-commit", "confirm-commit");
   await page.reload(); await page.waitForTimeout(1500); await idle();
   await check("reload: after commit + reload the reveal is offered", await t("btn-reveal").isEnabled());
-  await t("local-tools-toggle").click().catch(() => {}); await page.waitForTimeout(200);
+  await t("network-pill").click().catch(() => {}); await page.waitForTimeout(200);
   await shot("skip-enabled-during-commit");
   await check("lost B1: time skip blocked while a commitment is unrevealed, with the reason", !(await t("btn-advance-time").isEnabled()) && (await t("advance-why").isVisible()));
   await page.locator("[data-testid=local-tools-bar] .t-close").click().catch(() => {});
