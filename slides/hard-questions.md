@@ -42,7 +42,7 @@ this an answer to the track?**
 A guarantee of physical origin needs trusted hardware, and trusted hardware needs a manufacturer.
 The brief criticises exactly that centralisation. Paprika keeps every part that needs no
 manufacturer: the device signature, the time window and the public record that nobody can erase.
-It adds an economic penalty. A verifier can still require hardware-held keys as its own policy.
+It adds an economic penalty.
 We trade a stronger guarantee for the removal of the manufacturer, and we say so on slide 1.
 
 **6. UMA is a token-weighted vote. What does one corrupt vote cost compared with B? And does every
