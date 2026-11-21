@@ -17,6 +17,11 @@
 //   REVEAL_WINDOW [900]    seconds allowed between commit and reveal
 //   LIVENESS [7200]        seconds, passed to UMA (each accusation is disputed at once, so it never runs out)
 //   STAKE [1000000]        voting tokens minted to and staked by each voter
+//   MAX_ROLLS [4294967295] VotingV2.maxRolls (uint32 rounds). An unresolved vote request "rolls" to the next round;
+//                          when its roll count exceeds maxRolls, VotingV2 deletes it and the assertion can never settle
+//                          (both bonds stay in OOv3). The count grows by every round skipped, so jumping the local clock
+//                          over an open accusation (7 days = ~5,000 rounds of 120 s) would delete it with UMA's
+//                          mainnet value 4. The default is the uint32 maximum: never reached (the roll count is uint32).
 // Why these defaults: a vote moves the chain clock forward by up to 4 x PHASE_LENGTH = 240 s. REVEAL_WINDOW (900 s)
 // survives three votes on other photos between a commit and its reveal; PHOTO_WINDOW (3600 s) survives about 15.
 // The photo under accusation does not lose time: Paprika extends its window by the time spent under accusation.
@@ -33,12 +38,15 @@ async function main() {
   const PHOTO_WINDOW = BigInt(env("PHOTO_WINDOW", "3600")), REVEAL_WINDOW = BigInt(env("REVEAL_WINDOW", "900"));
   const LIVENESS = BigInt(env("LIVENESS", "7200")), PHASE_LENGTH = BigInt(env("PHASE_LENGTH", "60"));
   const STAKE = ethers.parseEther(env("STAKE", "1000000"));
+  const MAX_ROLLS = BigInt(env("MAX_ROLLS", "4294967295"));
+  if (MAX_ROLLS < 1n || MAX_ROLLS > 4294967295n) throw new Error("MAX_ROLLS must be between 1 and 4294967295 (uint32)");
 
   const signers = await ethers.getSigners();
   const [operator, photographer, accuser] = signers;
   const voters = signers.slice(3, 6);
   const uma = await deployUmaWithVoting(hre, {
     finalFee: FINAL_FEE, liveness: LIVENESS, phaseLength: PHASE_LENGTH, voters, stakePerVoter: STAKE, currency: "WETH9",
+    maxRolls: MAX_ROLLS,
   });
   const oo = await uma.oo.getAddress(), weth = await uma.currency.getAddress();
   if (BOND < uma.minimumBond) throw new Error(`BOND ${ethers.formatEther(BOND)} is below UMA's minimum bond ${ethers.formatEther(uma.minimumBond)}`);
@@ -67,7 +75,7 @@ async function main() {
       BOND: BOND.toString(), PHOTO_WINDOW: Number(PHOTO_WINDOW), REVEAL_WINDOW: Number(REVEAL_WINDOW), LIVENESS: Number(LIVENESS),
       PHASE_LENGTH: Number(PHASE_LENGTH), finalFee: FINAL_FEE.toString(), minimumBond: uma.minimumBond.toString(),
       burnedBondPercentage: (await uma.oo.burnedBondPercentage()).toString(),
-      stakePerVoter: STAKE.toString(), gat: uma.params.gat.toString(), spat: uma.params.spat.toString(),
+      stakePerVoter: STAKE.toString(), maxRolls: MAX_ROLLS.toString(), gat: uma.params.gat.toString(), spat: uma.params.spat.toString(),
     },
     token: { symbol: await uma.currency.symbol(), decimals: Number(await uma.currency.decimals()) },
     abis: {

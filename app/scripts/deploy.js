@@ -29,7 +29,7 @@ export async function deploy() {
   await run(HARDHAT_BIN, ["run", "scripts/deploy-local.js", "--network", "localhost"], { cwd: CONTRACT_DIR, env });
   fs.mkdirSync(path.dirname(WEB_DEPLOYMENT_FILE), { recursive: true });
   fs.copyFileSync(DEPLOYMENT_FILE, WEB_DEPLOYMENT_FILE);
-  console.log(`Deployment written to ${DEPLOYMENT_FILE}\n  and copied to ${WEB_DEPLOYMENT_FILE}`);
+  console.log(`Deployment written to ${DEPLOYMENT_FILE}\n  and copied to ${WEB_DEPLOYMENT_FILE} (served as /deployment.json for this instance)`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

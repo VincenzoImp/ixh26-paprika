@@ -267,6 +267,26 @@ const reg = async (who, dev = newDevice()) => { firstGas("register", await send(
     CASE("signatures and replay (UMA vote)", Object.entries(R).map(([k, x]) => `${k}: "${x}"`).join("; "), "no tokens move, except the forfeited commit bond (BOND to the burn address)");
   });
 
+  it("9 a long clock jump during an open accusation does not lose the vote", async () => {
+    const owner = s[5], A = s[6];
+    const o0 = await val(owner), a0 = await val(A);
+    const dev = await reg(owner); await attest(owner, dev, h("i9"));
+    const x = await reveal(await commit(A, h("i9"), dev.keyId));
+    // Jump PHOTO_WINDOW + REVEAL_WINDOW while the accusation is open: thousands of DVM rounds pass without a vote.
+    await later(P.WINDOW + P.REVEAL);
+    const a = await c.uma.oo.getAssertion(x.id);
+    const req = { identifier: a.identifier, time: a.assertionTime, ancillaryData: await c.uma.oo.stampAssertion(x.id) };
+    const [st] = await c.uma.voting.getPriceRequestStatuses([req]);
+    const rounds = Number(P.WINDOW + P.REVEAL) / (2 * PHASE);
+    assert.equal(Number(st.status), 1, "still Active (1), not ToDelete (4)");
+    await vote(c, x.id, false);
+    const v = await c.pap.verify(h("i9"), dev.keyId);
+    assert.equal(v.state, 1n);
+    assert.equal((await val(owner)) - o0, c.payout - 2n * c.BOND, "owner: -BOND locked + (BOND - fee) credit = -fee");
+    assert.equal((await val(A)) - a0, -c.BOND);
+    CASE("long clock jump during an open accusation", `jump ${P.WINDOW + P.REVEAL} s (~${Math.round(rounds)} DVM rounds) with the accusation open: request still Active (maxRolls ${await c.uma.voting.maxRolls()}), the vote resolves it, record back to ${ST[v.state]}`, `accuser -BOND = ${F(-c.BOND)}; depositor credit +BOND - fee, deposit still locked`);
+  });
+
   after(() => {
     console.log("\n      GAS with the real contracts (gasUsed; first occurrence)");
     for (const [k, g] of Object.entries(gasLog)) console.log(`        ${k.padEnd(58)} ${g}`);

@@ -1,6 +1,6 @@
 # Paprika: cases, costs and limits
 
-Measured in `output/2026-11-21-run.txt` (`npx hardhat test`, 8 tests, all passing; also passing with
+Measured in `output/2026-11-21-run.txt` (`npx hardhat test`, 9 tests, all passing; also passing with
 `PHASE_LENGTH=86400`, UMA's mainnet phase). One suite, `test/paprika.integration.test.js`, against the real contracts,
 all deployed on the in-process Hardhat chain (hardfork osaka) from published code:
 
@@ -28,6 +28,7 @@ accusation.
 | 6 Self-accusation | The forger's second account accuses the forger's photo and wins. | Net `-fee` = -0.5: the real penalty for a fake. |
 | 7 Key revocation | A copy of the revocation from another address reverts "bad sig". The key holder revokes. The revoked device's `attest` reverts "not active". Its record stays Attested and is refunded. | No WETH moves at revocation. |
 | 8 Signatures and replay | Rejected: replayed attest "exists"; another key, another chain id, high-s, proof-of-possession used as capture, register copied by another sender "bad sig"; future anchor "anchor"; key registered twice "key used"; callback not from the oracle "only oracle"; reveal by another account "no commit"; commitment reused "commitment used"; reveal after `REVEAL_WINDOW` "too late", then `forfeitCommit` sends `BOND` to `0x...dEaD`. | Only the forfeited bond moves (`BOND` to the burn address). |
+| 9 Long clock jump during an open accusation | With the accusation open, the clock jumps `PHOTO_WINDOW + REVEAL_WINDOW` (608,400 s, about 5,070 DVM rounds of 120 s). The request is still Active because `maxRolls` is the uint32 maximum; the vote resolves it (FALSE) and the record returns to Attested. With UMA's mainnet `maxRolls` = 4 the same jump deletes the request (status ToDelete). | Accuser `-BOND`; depositor `+BOND - fee` credit. |
 
 ## The vote, measured
 
@@ -38,20 +39,23 @@ accusation.
 
 ## Gas (gasUsed, real contracts)
 
+From the run file. Values move by a few hundred gas (up to ~16k for the first `commitVote` of a round) between runs,
+because keys, salts and hashes are random and the zero bytes in calldata change.
+
 | function | gas |
 |---|---|
 | `register` | 101,872 |
 | `attest` (P-256 verify, WETH `transferFrom`, `attestersOf` index) | 167,013 |
-| `commitClaim` | 86,799 |
-| `revealClaim` (OOv3 `assertTruth` + `disputeAssertion` + `VotingV2.requestPrice`) | 703,743 |
-| `VotingV2.commitVote` (max of 3; the first in a round costs most) | 215,398 |
+| `commitClaim` | 86,787 |
+| `revealClaim` (OOv3 `assertTruth` + `disputeAssertion` + `VotingV2.requestPrice`) | 703,897 |
+| `VotingV2.commitVote` (max of 3; the first in a round costs most) | 231,883 |
 | `VotingV2.revealVote` (max of 3) | 193,821 |
 | `settleAssertion` -> callback, fake proven | 185,923 |
 | `settleAssertion` -> callback, rejected | 161,269 |
 | `refund` | 55,940 |
 | `revokeKey` | 44,161 |
 | `withdrawCredit` | 35,437 |
-| deploy `Paprika` | 2,476,722 |
+| deploy `Paprika` | 2,465,066 |
 
 ## Design choices made where the brief was silent
 
@@ -78,8 +82,13 @@ accusation.
 - **After `accusableUntil + REVEAL_WINDOW` a fake can no longer be punished.**
 - **The outcome is only as good as UMA's vote.** A wrong TRUE costs an honest depositor `BOND` and its key. Here the
   vote is UMA's real VotingV2, but the three voters hold all the stake: whoever controls them decides.
-- **A vote that misses quorum rolls to the next round** (at most 4 times, then the request is deleted and the bonds
-  stay in OOv3 for good). Not exercised here; see `uma-vote/README.md`.
+- **A vote request that is not resolved rolls to the next round; after `maxRolls` rolls VotingV2 deletes it.** The roll
+  count grows by every round that passes without a resolution (quorum missed, or nobody voted). After deletion
+  `getPrice` reverts, so `OOv3.settleAssertion` reverts for good: the record stays Accused, both bonds stay in OOv3,
+  and refund is impossible. Only UMA governance could unblock it (a registered contract re-requesting the same price).
+  UMA mainnet uses `maxRolls` = 4 (with daily phases: about 8 days without a resolution). This deployment uses the
+  uint32 maximum, so a jump of the local clock can never delete a request (case 9). See
+  [`uma-vote/README.md`](../../uma-vote/README.md) for the quorum test.
 - **Griefing delays the refund by the vote time of each false accusation.** Each costs the griefer `BOND`.
 - **`attestersOf` lists grow without limit.** Anyone with a free key can attach records to a famous hash, at a
   refundable `BOND` each.

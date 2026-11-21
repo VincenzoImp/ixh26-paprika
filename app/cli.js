@@ -15,7 +15,7 @@ import { ethers } from "ethers";
 import { createDevice, exportDevice, importDevice, sha256 } from "./lib/device.js";
 import {
   advanceTime, attestPhoto, balances, chainInfo, commitAccusation, connect, credits, formatToken, listRecords,
-  onActivity, refund, registerDevice, revealAccusation, revokeKey, umaVote, unwrap, verifyPhoto, withdrawCredit,
+  listAccusations, onActivity, refund, registerDevice, revealAccusation, revokeKey, umaVote, unwrap, verifyPhoto, withdrawCredit,
 } from "./lib/paprika.js";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -37,17 +37,21 @@ const HELP = `Paprika CLI (local chain only)
   register                                 create a device key (app/.state/device.json) and register it (photographer)
   attest <file>                            photographer attests <file> with the saved device, deposit B
   verify <file>                            show every record of <file>
-  accuse-commit <file> --evidence "<text>" accuser commits an accusation (bond B); --key <keyId> to choose the device
-  accuse-reveal                            accuser reveals the last commitment: UMA assertion + dispute
-  vote <true|false>                        real UMA vote (VotingV2, 3 voters) on the last assertion, then settle
+  accuse-commit <file> --evidence "<text>" accuser commits an accusation (bond B); evidence is required;
+                                           --key <keyId> to choose the device. Several commitments can be pending.
+  accuse-reveal [#|file]                   accuser reveals a pending commitment: UMA assertion + dispute
+                                           (needed only when several are pending; "status" lists them)
+  vote <true|false> [assertionId]          real UMA vote (VotingV2, 3 voters) on the open accusation, then settle
                                            (true = fake proven); the chain clock jumps through the vote phases
   refund <file>                            refund the deposit of <file> (after the challenge period)
   withdraw <photographer|accuser|operator> withdraw the role's credit from Paprika (as WETH)
   unwrap <role> [amount]                   turn the role's WETH back into ETH (all of it by default)
   revoke                                   revoke the saved device key (photographer)
-  advance <seconds>                        move the chain clock forward (demo control)
+  advance <seconds> [--force]              move the chain clock forward (demo control); refused while an
+                                           accusation is open (vote first), unless --force
   balances                                 WETH balances, credits and ETH of the roles
-  demo                                     run the whole demo story with checks (exit code 1 on any mismatch)
+  demo                                     run the whole demo story with checks (exit code 1 on any mismatch);
+                                           also writes the run to app/output/cli-demo.txt
 `;
 
 // ------------------------------------------------------------------ setup and state
@@ -88,7 +92,26 @@ async function loadDevice() {
 
 function readFile(file) {
   if (!file) throw new Error("missing <file>");
+  if (!fs.existsSync(file)) throw new Error(`file not found: ${file}`);
   return new Uint8Array(fs.readFileSync(file));
+}
+
+// True if the bytes start like a JPEG, PNG, GIF, WebP, HEIC/AVIF or TIFF file.
+function looksLikeImage(b) {
+  const hex = Array.from(b.slice(0, 12), (x) => x.toString(16).padStart(2, "0")).join("");
+  return hex.startsWith("ffd8ff") || hex.startsWith("89504e47") || hex.startsWith("47494638") ||
+    (hex.startsWith("52494646") && hex.slice(16, 24) === "57454250") || hex.slice(8, 16) === "66747970" ||
+    hex.startsWith("49492a00") || hex.startsWith("4d4d002a");
+}
+
+// Pending commitments (never overwritten). Older state files had a single `lastCommit`.
+function pendingCommits(state) {
+  if (!state.commits) state.commits = [];
+  if (state.lastCommit) { state.commits.push(state.lastCommit); delete state.lastCommit; }
+  return state.commits;
+}
+function describeCommit(c, i) {
+  return `#${i + 1}  photo ${short(c.photoHash)}  key ${short(c.keyId)}  evidence "${c.evidence ?? "?"}"  committed ${c.committedAt ?? "?"}`;
 }
 
 function option(args, name) {
@@ -139,7 +162,8 @@ function printRecord(ctx, r) {
   console.log(`    signed between   block ${r.anchorBlock} and block ${r.recordedBlock} (recorded ${when(r.recordedAt)})`);
   console.log(`    depositor        ${r.depositor}`);
   console.log(`    deposit locked   ${formatToken(ctx, r.depositLocked)}`);
-  console.log(`    accusable until  ${when(r.accusableUntil)}   refundable at ${when(r.refundableAt)}`);
+  // The challenge times only matter while the record can still be accused or refunded.
+  if (r.state === "attested" || r.state === "accused") console.log(`    accusable until  ${when(r.accusableUntil)}   refundable at ${when(r.refundableAt)}`);
   console.log(`    device           ${r.device.status}${r.device.status === "flagged" ? ` at block ${r.device.flaggedAtBlock} (${r.device.reason}); record ${r.recordedBeforeFlag ? "predates" : "follows"} the flag` : ""}`);
 }
 
@@ -151,12 +175,13 @@ const commands = {
     const info = await chainInfo(ctx);
     const p = ctx.params;
     console.log(`chain      id ${info.chainId}, block ${info.blockNumber}, time ${when(info.timestamp)}  (${ctx.rpcUrl})`);
-    for (const [k, v] of Object.entries(ctx.addresses)) console.log(`${k.padEnd(11)}${v}`);
+    for (const [k, v] of Object.entries(ctx.addresses)) console.log(`${k.padEnd(13)}${v}`);
     console.log(`params     B = ${formatToken(ctx, p.bond)}, challenge period ${p.photoWindow} s, reveal period ${p.revealWindow} s, UMA fee share ${p.feeShare}`);
     for (const [k, v] of Object.entries(ctx.accounts)) console.log(`${k.padEnd(13)}${v}`);
     console.log(`device     ${fs.existsSync(DEVICE_FILE) ? (await loadDevice()).keyId : "none (run register)"}`);
-    if (state.lastCommit) console.log(`last commitment ${state.lastCommit.commitment}`);
-    if (state.lastAssertion) console.log(`last assertion  ${state.lastAssertion}`);
+    const pending = pendingCommits(state);
+    if (pending.length) { console.log("pending commitments (reveal with accuse-reveal [#|file]):"); pending.forEach((c, i) => console.log(`  ${describeCommit(c, i)}`)); }
+    for (const a of (await listAccusations(ctx)).filter((x) => x.open)) console.log(`open accusation ${a.assertionId} on photo ${short(a.photoHash)} (vote with: vote <true|false>)`);
     await commands.balances(ctx);
   },
 
@@ -171,7 +196,9 @@ const commands = {
 
   async attest(ctx, args, state) {
     const device = await loadDevice();
-    const r = await attestPhoto(ctx, "photographer", device, readFile(args[0]));
+    const bytes = readFile(args[0]);
+    if (bytes.length && !looksLikeImage(bytes)) console.log(`Warning: ${args[0]} does not look like an image file; attesting it anyway.`);
+    const r = await attestPhoto(ctx, "photographer", device, bytes);
     state.lastPhoto = r.photoHash;
     console.log(`Photo attested. photoHash ${r.photoHash}, anchor block ${r.anchorBlock}, deposit ${formatToken(ctx, ctx.params.bond)} locked.`);
   },
@@ -185,7 +212,8 @@ const commands = {
   },
 
   async "accuse-commit"(ctx, args, state) {
-    const evidence = option(args, "--evidence") ?? "";
+    const evidence = option(args, "--evidence");
+    if (!evidence || !evidence.trim()) throw new Error('evidence is required: accuse-commit <file> --evidence "<text or URL>"');
     let keyId = option(args, "--key");
     const photoHash = await sha256(readFile(args[0]));
     if (!keyId) {
@@ -194,24 +222,49 @@ const commands = {
       keyId = recs[0].keyId;
     }
     const r = await commitAccusation(ctx, "accuser", { photoHash, keyId, evidence });
-    state.lastCommit = { photoHash, keyId, evidenceHash: r.evidenceHash, salt: r.salt, commitment: r.commitment };
-    console.log(`Accusation committed: only the hash ${r.commitment} is on chain. Bond ${formatToken(ctx, ctx.params.bond)}.`);
-    console.log(`  salt and evidence hash saved in app/.state/ for the reveal.`);
+    const list = pendingCommits(state);
+    list.push({ photoHash, keyId, evidence, evidenceHash: r.evidenceHash, salt: r.salt, commitment: r.commitment, file: args[0], committedAt: new Date().toISOString() });
+    console.log(`Accusation committed (#${list.length}): only the hash ${r.commitment} is on chain. Bond ${formatToken(ctx, ctx.params.bond)}.`);
+    console.log(`  salt and evidence hash saved in app/.state/ for the reveal (${list.length} pending).`);
+    if (r.warning) console.log(`  Warning: ${r.warning}.`);
   },
 
-  async "accuse-reveal"(ctx, _args, state) {
-    if (!state.lastCommit) throw new Error("no commitment saved: run accuse-commit first");
-    const r = await revealAccusation(ctx, "accuser", state.lastCommit);
-    delete state.lastCommit;
-    if (/^0x0+$/.test(r.assertionId)) { console.log("Photo already proven fake: no new accusation, the bond is credited back."); return; }
+  async "accuse-reveal"(ctx, args, state) {
+    const list = pendingCommits(state);
+    if (!list.length) throw new Error("no pending commitment: run accuse-commit first");
+    let i;
+    if (!args[0]) {
+      if (list.length > 1) throw new Error(`${list.length} pending commitments; choose one: accuse-reveal <#|file>\n  ${list.map(describeCommit).join("\n  ")}`);
+      i = 0;
+    } else if (/^#?\d+$/.test(args[0])) {
+      i = Number(args[0].replace("#", "")) - 1;
+    } else {
+      const h = await sha256(readFile(args[0]));
+      i = list.findIndex((c) => c.photoHash === h);
+    }
+    if (!(i >= 0 && i < list.length)) throw new Error(`no such pending commitment: ${args[0]}\n  ${list.map(describeCommit).join("\n  ")}`);
+    const c = list[i];
+    console.log(`Revealing ${describeCommit(c, i)}`);
+    const r = await revealAccusation(ctx, "accuser", c);
+    list.splice(i, 1);
+    if (r.bondReturned) { console.log(`No new accusation (${r.reason}): the bond is credited back to the accuser (withdraw accuser).`); return; }
     state.lastAssertion = r.assertionId;
     console.log(`Accusation revealed, asserted to UMA and disputed with the photo's deposit. assertionId ${r.assertionId}`);
   },
 
   async vote(ctx, args, state) {
-    if (!["true", "false"].includes(args[0])) throw new Error("usage: vote <true|false>   (true = the evidence proves the fake)");
-    if (!state.lastAssertion) throw new Error("no assertion saved: run accuse-reveal first");
-    const r = await umaVote(ctx, state.lastAssertion, args[0] === "true", { onPhase: printPhase });
+    if (!["true", "false"].includes(args[0])) throw new Error("usage: vote <true|false> [assertionId]   (true = the evidence proves the fake)");
+    // Which accusation: the one given, else the one revealed last if still open, else the only open one.
+    const open = (await listAccusations(ctx)).filter((a) => a.open);
+    let id = args[1];
+    if (!id) {
+      if (state.lastAssertion && open.some((a) => a.assertionId === state.lastAssertion)) id = state.lastAssertion;
+      else if (open.length === 1) id = open[0].assertionId;
+      else if (!open.length) throw new Error("no open accusation to vote on (reveal one with accuse-reveal first)");
+      else throw new Error(`${open.length} open accusations; choose one: vote <true|false> <assertionId>\n  ${open.map((a) => `${a.assertionId}  photo ${short(a.photoHash)}`).join("\n  ")}`);
+    }
+    console.log(`Voting on assertion ${id}`);
+    const r = await umaVote(ctx, id, args[0] === "true", { onPhase: printPhase });
     console.log(`UMA vote (round ${r.roundId}, ${ctx.voters.length} voters, ${r.simulatedSeconds} s of chain time skipped): ` +
       `${args[0] === "true" ? "fake PROVEN (accuser wins)" : "accusation REJECTED (depositor wins)"}; assertion settled.`);
     delete state.lastAssertion;
@@ -235,15 +288,16 @@ const commands = {
   },
 
   async revoke(ctx) {
-    const device = await loadDevice();
+    const device = await loadDevice();   // already flagged: the library says so before sending anything
     await revokeKey(ctx, "photographer", device);
     console.log(`Key ${device.keyId} revoked: device flagged, no money moved.`);
   },
 
   async advance(ctx, args) {
-    const s = Number(args[0]);
-    if (!Number.isFinite(s) || s < 0) throw new Error("usage: advance <seconds>");
-    const r = await advanceTime(ctx, s);
+    const force = args.includes("--force");
+    const s = Number(args.filter((a) => a !== "--force")[0]);
+    if (!Number.isFinite(s) || s < 0) throw new Error("usage: advance <seconds> [--force]");
+    const r = await advanceTime(ctx, s, { force });
     console.log(`Chain clock moved forward ${s} s. Now ${when(r.timestamp)}.`);
   },
 
@@ -272,6 +326,20 @@ const NO_MONEY = new Set(["status", "verify", "balances", "advance", "demo", "he
 // Runs the click path of impl/mock/DEMO.md, plus the optional "fake proven" and "revoke key" endings.
 // Each step prints what happened and checks the expected outcome; any mismatch exits with code 1.
 async function runDemo(ctx) {
+  // Everything the demo prints is also written to app/output/cli-demo.txt (a saved run).
+  const lines = [];
+  const log0 = console.log;
+  console.log = (...a) => { lines.push(a.join(" ")); log0(...a); };
+  try {
+    await runDemoSteps(ctx);
+  } finally {
+    console.log = log0;
+    fs.mkdirSync(path.join(APP_DIR, "output"), { recursive: true });
+    fs.writeFileSync(path.join(APP_DIR, "output", "cli-demo.txt"), `# node cli.js demo  (${new Date().toISOString()}, ${ctx.rpcUrl})\n${lines.join("\n")}\n`);
+  }
+}
+
+async function runDemoSteps(ctx) {
   const B = ctx.params.bond;
   const fee = (B * BigInt(Math.round(ctx.params.feeShare * 1e6))) / 1_000_000n;   // f x B, what UMA keeps
   const results = [];
@@ -394,7 +462,7 @@ async function runDemo(ctx) {
       let early = null;
       try { await refund(ctx, "photographer", { photoHash: photo1Hash, keyId: deviceA.keyId }); } catch (e) { early = e.message; }
       console.log(`   refund before the period ends -> error "${early}"`);
-      check(early === "too early", 'revert reason "too early"');
+      check(String(early).startsWith("too early"), 'refused "too early"');
       const now = (await chainInfo(ctx)).timestamp;
       const secs = Math.max(ctx.params.photoWindow, rec.refundableAt - now);
       const t = await advanceTime(ctx, secs);
@@ -443,7 +511,7 @@ async function runDemo(ctx) {
       let err = null;
       try { await attestPhoto(ctx, "photographer", deviceA, randomPhoto()); } catch (e) { err = e.message; }
       console.log(`   flagged device tries to attest again -> error "${err}"`);
-      check(err === "not active", 'revert reason "not active"');
+      check(/flagged \(fake-proven\)/.test(String(err)), "refused: device flagged (fake-proven), before any money moves");
     });
 
     await step("11. Optional: revoke key (no money moves)", async (before) => {
@@ -459,7 +527,8 @@ async function runDemo(ctx) {
       // The revoke is checked through a record-less device status: attest with it must fail.
       let err2 = null;
       try { await attestPhoto(ctx, "photographer", deviceB, randomPhoto()); } catch (e) { err2 = e.message; }
-      check(err2 === "not active", "revoked device cannot attest");
+      console.log(`   revoked device tries to attest -> error "${err2}"`);
+      check(/flagged \(key-revoked\)/.test(String(err2)), "revoked device cannot attest");
     });
 
     await step("12. Unwrap: WETH back to ETH", async () => {
@@ -483,10 +552,8 @@ async function runDemo(ctx) {
 
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
-  if (!cmd || cmd === "help" || cmd === "--help" || !commands[cmd]) {
-    console.log(HELP);
-    process.exit(cmd && cmd !== "help" && cmd !== "--help" ? 1 : 0);
-  }
+  if (!cmd || cmd === "help" || cmd === "--help") { console.log(HELP); process.exit(0); }
+  if (!commands[cmd]) { console.error(`Unknown command: ${cmd}\n`); console.error(HELP); process.exit(1); }
   const { deployment } = loadDeployment();
   const ctx = connect({ rpcUrl: RPC_URL, deployment });
   const state = loadState(await deploymentId(ctx));

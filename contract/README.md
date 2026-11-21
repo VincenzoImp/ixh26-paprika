@@ -11,7 +11,7 @@ local chain. The protocol is described in [`../docs/protocol.md`](../docs/protoc
 | [`lib/deploy-uma-dvm.js`](lib/deploy-uma-dvm.js) | Deploys UMA's contracts from the compiled artifacts in the npm package `@uma/contracts-node`: the Optimistic Oracle V3, the voting contract `VotingV2` with the UMA voting token, and the bond currency (`WETH9`). Mints and stakes voting tokens for the voters |
 | [`lib/vote.js`](lib/vote.js) | Runs a real UMA vote on a disputed assertion: the voters commit, then reveal, then `settleAssertion`. Moves the local chain clock to each phase |
 | [`scripts/deploy-local.js`](scripts/deploy-local.js) | Deploys UMA's contracts, `WETH9` and Paprika on a running local node. Voters: accounts 3, 4, 5. Writes `deployments/local.json` with addresses, parameters, accounts, RPC URL and ABIs |
-| [`test/paprika.integration.test.js`](test/paprika.integration.test.js) | 8 tests against the real contracts: honest path, one pixel changed, true and false accusation, second accusation, self-accusation, key revocation, signatures and replay |
+| [`test/paprika.integration.test.js`](test/paprika.integration.test.js) | 9 tests against the real contracts: honest path, one pixel changed, true and false accusation, second accusation, self-accusation, key revocation, signatures and replay, a long clock jump during an open accusation |
 | [`output/cases.md`](output/cases.md) | The table of cases, with formulas and measured values, and gas per function |
 | [`output/2026-11-21-run.txt`](output/2026-11-21-run.txt) | The raw output of the last test run |
 | [`hardhat.config.js`](hardhat.config.js) | Solidity 0.8.28 with the optimizer. The local chain uses hardfork `osaka`, which provides the P-256 precompile |
@@ -39,8 +39,10 @@ npm run deploy:local             # terminal 2: writes deployments/local.json
 ```
 
 The deployment reads the parameters from environment variables: `BOND`, `FINAL_FEE`, `PHASE_LENGTH`, `PHOTO_WINDOW`,
-`REVEAL_WINDOW`, `LIVENESS` and `STAKE`. The header of `scripts/deploy-local.js` lists their defaults and explains
-them. To use another port, start the node with `--port 8546` and deploy with `RPC_PORT=8546`. The file is then
+`REVEAL_WINDOW`, `LIVENESS`, `STAKE` and `MAX_ROLLS`. The header of `scripts/deploy-local.js` lists their defaults
+and explains them. `MAX_ROLLS` is `VotingV2.maxRolls`: after that many rounds without a resolution, UMA deletes a vote
+request and the accusation can never settle. UMA uses 4 on mainnet. The demo uses the uint32 maximum, so jumping the
+local clock never deletes a request. To use another port, start the node with `--port 8546` and deploy with `RPC_PORT=8546`. The file is then
 `deployments/local-8546.json`.
 The demo app runs these steps for you: see [`../docs/demo.md`](../docs/demo.md).
 

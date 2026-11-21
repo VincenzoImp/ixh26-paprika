@@ -77,7 +77,11 @@ async function getProviderAndSigners(hre) {
  *                           answer (strictly more). Default 0.5e18 (UMA mainnet value).
  * @param opts.emissionRate  UMA staking rewards per second (default 0: keeps balances easy to read; mainnet 0.18e18).
  * @param opts.unstakeCoolDown seconds (default 7 days, mainnet value).
- * @param opts.maxRolls      how many times an unresolved request may roll before deletion (default 4, mainnet).
+ * @param opts.maxRolls      VotingV2.maxRolls (uint32): how many voting rounds an unresolved request may roll before
+ *                           the DVM deletes it (deleted when rollCount > maxRolls). rollCount grows by the number of
+ *                           rounds that passed without a resolution, so a jump of the local clock by N rounds counts
+ *                           as N rolls. Default MAX_UINT32 (4,294,967,295): never deleted in a demo (a jump of 7 days
+ *                           with 60 s phases is ~5,000 rounds). UMA mainnet uses 4.
  * @param opts.baseSlashAmount FixedSlashSlashingLibrary slash per missed/wrong vote (default 0.001e18 = 0.1%, mainnet).
  * @returns {Promise<object>} all contracts (ethers v6, connected to the deployer) + parameters + per-step gas.
  */
@@ -94,7 +98,7 @@ async function deployUmaWithVoting(
     spat = ethers.parseEther("0.5"),
     emissionRate = 0n,
     unstakeCoolDown = 7 * 24 * 3600,
-    maxRolls = 4,
+    maxRolls = 4294967295,
     maxRequestsPerRound = 1000,
     baseSlashAmount = ethers.parseEther("0.001"),
     governanceSlashAmount = 0n,

@@ -14,12 +14,23 @@ export const HARDHAT_BIN = path.join(CONTRACT_DIR, "node_modules", ".bin", "hard
 export const CHAIN_HOST = "127.0.0.1";
 export const CHAIN_PORT = Number(process.env.RPC_PORT || 8545);
 export const RPC_URL = process.env.RPC_URL || `http://${CHAIN_HOST}:${CHAIN_PORT}`;
-export const WEB_HOST = "127.0.0.1";
+export const WEB_HOST = process.env.HOST || "127.0.0.1";   // HOST overrides; default local only
 export const WEB_PORT = Number(process.env.WEB_PORT || 5173);
 export const SUFFIX = CHAIN_PORT === 8545 ? "" : `-${CHAIN_PORT}`;
 export const PID_FILE = path.join(STATE_DIR, `pids${SUFFIX}.json`);
 export const DEPLOYMENT_FILE = path.join(CONTRACT_DIR, "deployments", `local${SUFFIX}.json`);
+// The deployment the web page loads for THIS instance. deploy.js writes it; start.js and web.js pass its absolute
+// path to server.js as DEPLOYMENT_FILE, and the server serves it at /deployment.json, so the page never sees the
+// per-port name. (app/web/deployment.json for the default port 8545, app/web/deployment-<RPC_PORT>.json otherwise.)
 export const WEB_DEPLOYMENT_FILE = path.join(APP_DIR, "web", `deployment${SUFFIX}.json`);
+
+/** Environment for server.js: where to listen, which chain to relay /rpc to, which deployment to serve. */
+export function serverEnv() {
+  return {
+    ...process.env, HOST: WEB_HOST, PORT: String(WEB_PORT), WEB_PORT: String(WEB_PORT),
+    RPC_PORT: String(CHAIN_PORT), RPC_URL, DEPLOYMENT_FILE: WEB_DEPLOYMENT_FILE,
+  };
+}
 
 /** True if a JSON-RPC node answers eth_chainId at RPC_URL. */
 export async function rpcAlive(url = RPC_URL) {

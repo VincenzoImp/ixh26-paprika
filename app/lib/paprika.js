@@ -297,12 +297,20 @@ export async function registerDevice(ctx, role, device) {
  */
 export async function attestPhoto(ctx, role, device, photoBytes) {
   signerOf(ctx, role);
+  // Checks BEFORE spending anything (no wrap, no approve when the attest would revert anyway).
+  const bytes = asBytes(photoBytes);
+  if (bytes.length === 0) throw new Error("the photo is empty (0 bytes): nothing to attest");
+  const d = await read(ctx.contracts.paprika.devices(device.keyId));
+  if (Number(d.status) === 0) throw new Error("this device key is not registered on this chain: register it first");
+  if (Number(d.status) === 2) throw new Error(`this device key is flagged (${REASONS[Number(d.reason)]}) and can no longer attest`);
+  const existing = await read(ctx.contracts.paprika.verify(await sha256(bytes), device.keyId));
+  if (Number(existing.state) !== 0) throw new Error(`this key already attested this exact file (record ${STATES[Number(existing.state)]})`);
   // The block hash is read FIRST, before the photo is hashed and signed: a block hash cannot be known in
   // advance, so a signature over it proves the photo was signed after block `anchorBlock`. The block that
   // records the attestation gives the upper bound. The contract checks blockhash(anchorBlock), which only
   // exists for the 256 most recent blocks, so the anchor must be recent.
   const anchor = await read(ctx.provider.getBlock("latest"));
-  const photoHash = await sha256(asBytes(photoBytes));
+  const photoHash = await sha256(bytes);
   const msg = captureMessage({ chainId: ctx.chainId, contract: ctx.addresses.paprika, keyId: device.keyId, photoHash, blockHash: anchor.hash });
   const sig = toHex(await device.sign(msg));
   const txHashes = [];
@@ -318,6 +326,9 @@ export async function attestPhoto(ctx, role, device, photoBytes) {
  */
 export async function revokeKey(ctx, role, device) {
   const caller = ctx.accounts[role] ?? signerOf(ctx, role);
+  const d = await read(ctx.contracts.paprika.devices(device.keyId));
+  if (Number(d.status) === 0) throw new Error("this device key is not registered on this chain");
+  if (Number(d.status) === 2) throw new Error(`this key is already flagged (${REASONS[Number(d.reason)]}): nothing to revoke`);
   const msg = revokeMessage({ chainId: ctx.chainId, contract: ctx.addresses.paprika, keyId: device.keyId, caller });
   const sig = toHex(await device.sign(msg));
   const r = await send(ctx, role, ctx.contracts.paprika, "revokeKey", [device.keyId, sig], "Paprika.revokeKey");
@@ -332,10 +343,27 @@ export async function revokeKey(ctx, role, device) {
  * Sends: WETH.deposit (wraps only the missing ETH), WETH.approve (if needed), then Paprika.commitClaim(commitment),
  * which pulls BOND from `role`.
  * KEEP the returned salt and evidenceHash: the reveal needs them.
+ * Checks first, before any money moves: evidence is not empty; the record exists, is not refunded, not proven fake,
+ * and the challenge period is not over. If another accusation is open on the photo the commit still goes ahead
+ * (the contract credits the bond back if it is still open at reveal time) and `warning` explains it.
+ * Returns { txHashes, commitment, salt, evidenceHash, warning (string or null) }.
  */
 export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }) {
   const claimant = ctx.accounts[role] ?? signerOf(ctx, role);
-  const evidenceHash = await sha256(utf8(String(evidence ?? "")));
+  if (!String(evidence ?? "").trim()) throw new Error("evidence is required (a text or a URL that shows the photo is not genuine)");
+  const rec = await read(ctx.contracts.paprika.verify(photoHash, keyId));
+  const state = STATES[Number(rec.state)];
+  if (state === "none") throw new Error("this photo has no record for this device key: nothing to accuse");
+  if (state === "refunded") throw new Error("this photo was refunded: its challenge period is over");
+  if (state === "fake") throw new Error("this photo is already proven fake");
+  const now = Number(await latestTimestamp(ctx));
+  if (now >= Number(rec.accusableUntil)) {
+    throw new Error(`the challenge period is over (it ended at ${new Date(Number(rec.accusableUntil) * 1000).toISOString()})`);
+  }
+  const warning = state === "accused"
+    ? "another accusation is open on this photo: if it is still open when you reveal, no new accusation opens and your bond is credited back"
+    : null;
+  const evidenceHash = await sha256(utf8(String(evidence)));
   const salt = ethers.hexlify(ethers.randomBytes(32));
   // abi.encode (NOT encodePacked): each value padded to 32 bytes, the address first.
   const commitment = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
@@ -344,25 +372,69 @@ export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }
   await ensureFunds(ctx, role, txHashes);
   const r = await send(ctx, role, ctx.contracts.paprika, "commitClaim", [commitment], "Paprika.commitClaim");
   txHashes.push(r.hash);
-  return { txHashes, commitment, salt, evidenceHash };
+  return { txHashes, commitment, salt, evidenceHash, warning };
 }
 
 /**
  * Step 2: reveals the commitment (at least one block after the commit; under automine every transaction is its
  * own block, so any later call works). Sends Paprika.revealClaim, which asserts the accusation at UMA's
  * Optimistic Oracle V3 with the accuser's bond and disputes it at once with the photo's deposit: UMA's vote
- * decides. Returns the UMA assertionId (ZeroHash if the photo was already proven fake: the bond is credited back).
+ * decides. Returns { txHash, assertionId, bondReturned, reason }. If the photo was already proven fake, or another
+ * accusation is still open on it, no accusation opens: assertionId = ZeroHash, bondReturned = true, the bond is
+ * credited back to the accuser, and reason is "already proven fake" or "another accusation is open".
  */
 export async function revealAccusation(ctx, role, { photoHash, keyId, evidenceHash, salt }) {
   const { paprika } = ctx.contracts;
+  const before = STATES[Number((await read(paprika.verify(photoHash, keyId))).state)];
   const r = await send(ctx, role, paprika, "revealClaim", [photoHash, keyId, evidenceHash, salt], "Paprika.revealClaim");
   let assertionId = ethers.ZeroHash;
+  let bondReturned = false;
   for (const log of r.logs) {
     if (log.address.toLowerCase() !== ctx.addresses.paprika.toLowerCase()) continue;
     const parsed = paprika.interface.parseLog(log);
     if (parsed?.name === "AccusationOpened") assertionId = parsed.args.assertionId;
+    if (parsed?.name === "BondReturned") bondReturned = true;
   }
-  return { txHash: r.hash, assertionId };
+  const reason = bondReturned ? (before === "fake" ? "already proven fake" : "another accusation is open") : null;
+  return { txHash: r.hash, assertionId, bondReturned, reason };
+}
+
+/**
+ * Every accusation ever opened, oldest first, from the AccusationOpened / AccusationResolved events (reads only):
+ * [{ assertionId, photoHash, keyId, claimant, evidenceHash, openedAt, blockNumber, txHash, open,
+ *    outcome: "pending" | "fake-proven" | "rejected" }]. Use it to find an open accusation again after a reload.
+ */
+export async function listAccusations(ctx) {
+  const { paprika } = ctx.contracts;
+  const [opened, resolved] = await read(Promise.all([
+    paprika.queryFilter(paprika.filters.AccusationOpened(), 0, "latest"),
+    paprika.queryFilter(paprika.filters.AccusationResolved(), 0, "latest"),
+  ]));
+  const outcome = new Map(resolved.map((ev) => [ev.args.assertionId, ev.args.fakeProven ? "fake-proven" : "rejected"]));
+  return Promise.all(opened.map(async (ev) => ({
+    assertionId: ev.args.assertionId,
+    photoHash: ev.args.photoHash,
+    keyId: ev.args.keyId,
+    claimant: ev.args.claimant,
+    evidenceHash: ev.args.evidenceHash,
+    openedAt: await blockTime(ctx, ev.blockNumber),
+    blockNumber: ev.blockNumber,
+    txHash: ev.transactionHash,
+    open: !outcome.has(ev.args.assertionId),
+    outcome: outcome.get(ev.args.assertionId) || "pending",
+  })));
+}
+
+/**
+ * Identity of "this chain + this deployment" (reads only): "<chainId>:<paprika address>:<hash of block 1>", or
+ * "<chainId>:<paprika>:no-contract" when nothing is deployed at the Paprika address. A restarted Hardhat chain gives
+ * the same addresses but a new block-1 hash, so a page can compare fingerprints to detect a restart or redeploy.
+ */
+export async function deploymentFingerprint(ctx) {
+  const code = await read(ctx.provider.getCode(ctx.addresses.paprika));
+  if (!code || code === "0x") return `${ctx.chainId}:${ctx.addresses.paprika.toLowerCase()}:no-contract`;
+  const b1 = await read(ctx.provider.send("eth_getBlockByNumber", ["0x1", false]));
+  return `${ctx.chainId}:${ctx.addresses.paprika.toLowerCase()}:${b1 ? b1.hash : "none"}`;
 }
 
 // Latest block timestamp through a raw call (never cached).
@@ -466,6 +538,18 @@ export async function umaVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
 
 /** Credits the deposit back to the depositor once the photo can no longer be accused. Sends Paprika.refund (anyone may call it). */
 export async function refund(ctx, role, { photoHash, keyId }) {
+  const rec = await read(ctx.contracts.paprika.verify(photoHash, keyId));
+  const state = STATES[Number(rec.state)];
+  if (state === "attested") {
+    const now = Number(await latestTimestamp(ctx));
+    // The refund transaction is mined at least one second after the latest block.
+    if (now + 1 < Number(rec.refundableAt)) {
+      throw new Error(`too early: refundable at ${new Date(Number(rec.refundableAt) * 1000).toISOString()} (in ${Number(rec.refundableAt) - now} s of chain time)`);
+    }
+  } else if (state === "none") throw new Error("no record for this photo and key");
+  else if (state === "refunded") throw new Error("already refunded");
+  else if (state === "accused") throw new Error("under accusation: the deposit is held by UMA until the vote");
+  else if (state === "fake") throw new Error("proven fake: the deposit was lost");
   const r = await send(ctx, role, ctx.contracts.paprika, "refund", [photoHash, keyId], "Paprika.refund");
   return { txHash: r.hash };
 }
@@ -473,6 +557,7 @@ export async function refund(ctx, role, { photoHash, keyId }) {
 /** Moves all credit of `role` from Paprika to its wallet, as WETH. Sends Paprika.withdrawCredit. Reverts "no credit" if zero. */
 export async function withdrawCredit(ctx, role) {
   const { paprika } = ctx.contracts;
+  if ((await read(paprika.credits(ctx.accounts[role] ?? signerOf(ctx, role)))) === 0n) throw new Error(`no credit to withdraw for the ${role}`);
   const r = await send(ctx, role, paprika, "withdrawCredit", [], "Paprika.withdrawCredit");
   let amount = 0n;
   for (const log of r.logs) {
@@ -493,14 +578,26 @@ export async function wrap(ctx, role, amount) {
 export async function unwrap(ctx, role, amount) {
   const value = amount === undefined || amount === null ? await read(ctx.contracts.token.balanceOf(ctx.accounts[role])) : BigInt(amount);
   if (value <= 0n) throw new Error("no WETH to unwrap");
+  const held = await read(ctx.contracts.token.balanceOf(ctx.accounts[role]));
+  if (value > held) throw new Error(`only ${formatToken(ctx, held)} to unwrap`);
   const r = await send(ctx, role, ctx.contracts.token, "withdraw", [value], `${ctx.params.tokenSymbol}.withdraw (unwrap)`);
   return { txHash: r.hash, amount: value };
 }
 
 // ------------------------------------------------------------------ demo control
 
-/** Local-chain demo control: moves the chain clock forward (evm_increaseTime) and mines one block (evm_mine). */
-export async function advanceTime(ctx, seconds) {
+/**
+ * Local-chain demo control: moves the chain clock forward (evm_increaseTime) and mines one block (evm_mine).
+ * Refuses while an accusation is open, unless { force: true }: UMA's vote on it is scheduled in a given round, and
+ * jumping far past it makes the request roll (see the deploy script's MAX_ROLLS). Vote first, then advance.
+ */
+export async function advanceTime(ctx, seconds, { force = false } = {}) {
+  if (!force) {
+    const open = (await listAccusations(ctx)).filter((a) => a.open);
+    if (open.length) {
+      throw new Error(`${open.length} accusation(s) still open (photo ${open[0].photoHash.slice(0, 10)}...): run the UMA vote first, or force the jump ({ force: true }; CLI: --force)`);
+    }
+  }
   try {
     await ctx.provider.send("evm_increaseTime", [Math.max(0, Math.floor(Number(seconds)))]);
     await ctx.provider.send("evm_mine", []);

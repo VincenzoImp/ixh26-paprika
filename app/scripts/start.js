@@ -9,10 +9,13 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   APP_DIR, CHAIN_HOST, CHAIN_PORT, CONTRACT_DIR, HARDHAT_BIN, RPC_URL, STATE_DIR, WEB_HOST, WEB_PORT,
-  SUFFIX, ensureContractDeps, killGroup, rpcAlive, waitForRpc, writePid,
+  SUFFIX, ensureContractDeps, serverEnv, killGroup, rpcAlive, waitForRpc, writePid,
 } from "./common.js";
 import { deploy } from "./deploy.js";
 
+if (!["127.0.0.1", "localhost", "::1"].includes(WEB_HOST)) {
+  console.warn(`WARNING: HOST=${WEB_HOST}: the page and its /rpc relay (unlocked Hardhat accounts) are reachable from other machines.`);
+}
 const children = [];
 let stopping = false;
 function stopAll(code = 0) {
@@ -33,8 +36,11 @@ function background(name, cmd, args, opts) {
   const child = spawn(cmd, args, { detached: true, ...opts });
   children.push({ name, child });
   writePid(name, child.pid);
-  child.on("exit", (code) => {
-    if (!stopping) { console.error(`${name} exited (code ${code}); stopping.`); stopAll(1); }
+  child.on("exit", (code, signal) => {
+    if (stopping) return;
+    // Killed by a signal (e.g. `npm run stop` from another terminal) or exited cleanly: a normal stop.
+    if (code === 0 || code === null) { console.log(`${name} stopped${signal ? ` (${signal})` : ""}; stopping the rest.`); stopAll(0); }
+    else { console.error(`${name} exited with code ${code}; stopping.`); stopAll(1); }
   });
   return child;
 }
@@ -52,7 +58,7 @@ try {
   }
   await deploy();
   if (fs.existsSync(path.join(APP_DIR, "server.js"))) {
-    background("web", process.execPath, ["server.js"], { cwd: APP_DIR, stdio: "inherit", env: { ...process.env, HOST: WEB_HOST, PORT: String(WEB_PORT), RPC_URL } });
+    background("web", process.execPath, ["server.js"], { cwd: APP_DIR, stdio: "inherit", env: serverEnv() });
     console.log(`\nPaprika is running: http://${WEB_HOST}:${WEB_PORT}/   (chain: ${RPC_URL})\nPress Ctrl-C to stop.`);
   } else {
     console.log(`\napp/server.js not found: chain and contracts are up (${RPC_URL}); the web UI is not started.\nTry \`node cli.js demo\`. Press Ctrl-C to stop.`);
