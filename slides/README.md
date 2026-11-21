@@ -2,25 +2,27 @@
 
 | File | Content |
 |---|---|
-| [`deck.tex`](deck.tex) | The 7-slide pitch deck for Paprika (LaTeX Beamer) |
-| [`deck.pdf`](deck.pdf) | The compiled deck. Build it with `pdflatex deck.tex`, run twice, from this folder |
-| [`speaker-notes.md`](speaker-notes.md) | Two to four sentences per slide, for a 5-minute pitch |
-| [`hard-questions.md`](hard-questions.md) | The 8 hardest questions we expect from the judges, with short answers |
+| `deck.tex` | The 7-slide pitch deck for Paprika (LaTeX Beamer) |
+| `deck.pdf` | Compiled deck (`pdflatex deck.tex`, run twice, from this folder) |
+| `speaker-notes.md` | 2-5 sentences per slide, for a 5-minute pitch |
+| `hard-questions.md` | The 10 hardest questions we expect from the judges, with short answers |
 
-## Rules for the slides
+## Constraints
 
-- The source of truth is [`docs/protocol.md`](../docs/protocol.md). The limits are in [`docs/limits.md`](../docs/limits.md).
-- The deck presents one solution, Paprika, as it is.
-- Amounts and durations are deployment parameters. The slides use the symbols `B`, `T_photo`, `T_reveal` and `f`.
-- The only number with a source is UMA's vote time ("within 48-72 hours", https://docs.uma.xyz/developers/resolving-disputes).
-- There are no gas figures and no per-network costs.
-- The slides do not say "first", "novel", "secure" or "guarantees authenticity".
-- Slide 6 shows a screenshot of the web app if the file exists, else a placeholder box.
-- The demo statement: a local Ethereum chain, UMA's contracts, and the vote simulated with UMA's test oracle
-  (`MockOracleAncillary`, deployed by [`contract/lib/deploy-uma.js`](../contract/lib/deploy-uma.js)).
-  See [`docs/demo.md`](../docs/demo.md).
+- Facts: `docs/protocol.md`, `docs/design-rationale.md`, `docs/limits.md`, `docs/demo.md`,
+  `app/README.md`. Measured values: `contract/output/cases.md`.
+- Structure follows the slide proposal in `app/output/first-time-review.md` (section 2.3), with
+  one running example: Alice attests, Bob accuses, UMA decides.
+- Amounts and durations use the symbols `B`, `T_photo`, `T_reveal` and `f`. Demo values appear
+  once, on slide 6, with their source (`app/README.md`) in a LaTeX comment.
+- Slide 6 uses crops of `app/output/screens/04-verifier-attested.png` and
+  `14-verifier-proven-fake.png`.
+- No "first", "novel", "secure" or "guarantees authenticity".
 
-## Review status
+## Not yet audited
 
-- No claim audit has been run on the deck, the notes or the hard questions.
-- The answers to questions 3, 7 and 8 in `hard-questions.md` give the team's reasoning, not measurements.
+- **No claim audit has been run** on the deck, the notes or the hard questions.
+- The two slide-6 crops come from two demo runs with different sample images, not from the same
+  file before and after.
+- Hard question 8 (sequencer-known block hashes on rollups) is our reasoning; no source in the
+  repository checks it.
