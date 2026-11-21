@@ -1,4 +1,4 @@
-# npx hardhat test  (2026-11-21T01:16:01+01:00; Hardhat 2.29, hardfork osaka; PHASE_LENGTH=60)
+# npx hardhat test  (2026-11-21T01:20:14+01:00; Hardhat 2.29, hardfork osaka; PHASE_LENGTH=60; also 8 passing with PHASE_LENGTH=86400)
 
 
   Paprika with real UMA (OOv3 + VotingV2) and WETH9
@@ -13,41 +13,41 @@
       BAL start                    depositor 20.0 | accuser 20.0 | Paprika 1.0 | oracle 0.0 | Store 0.0
       BAL after attest             depositor 19.0 | accuser 20.0 | Paprika 2.0 | oracle 0.0 | Store 0.0
       BAL after reveal (accused)   depositor 19.0 | accuser 19.0 | Paprika 1.0 | oracle 2.0 | Store 0.0
-      VOTE TRUE (fake proven): round 14965239, 3 commits + 3 reveals + settle, 176 s of chain time
+      VOTE TRUE (fake proven): round 14965241, 3 commits + 3 reveals + settle, 165 s of chain time
       BAL after settle (TRUE)      depositor 19.0 | accuser 19.0 (+credit 1.5) | Paprika 2.5 | oracle 0.0 | Store 0.5
       CASE true accusation (UMA vote): photo Fake, device Flagged (FakeProven) at block 73 | accuser credited 2 x BOND - fee = 1.5 (net +BOND - fee = 0.5); depositor -BOND = -1.0; Store +fee = 0.5
     ✔ 3 true accusation: commit, reveal (assert + dispute at the real oracle), vote TRUE, settle
       invariant ok: Paprika holds 2.5 = deposits 1.0 + commit bonds 0.0 + credits 1.5; oracle 0.0 for 0 open
       BAL after reveal (accused)   depositor 19.0 | accuser 19.0 | Paprika 2.5 | oracle 2.0 | Store 0.5
-      VOTE FALSE (rejected): round 14965241, 3 commits + 3 reveals + settle, 229 s of chain time
+      VOTE FALSE (rejected): round 14965243, 3 commits + 3 reveals + settle, 229 s of chain time
       BAL after settle (FALSE)     depositor 19.0 (+credit 0.5) | accuser 19.0 | Paprika 4.0 | oracle 0.0 | Store 1.0
       CASE false accusation (UMA vote): record back to Attested, device untouched, window extended by the 236 s under accusation; refund afterwards | accuser -BOND = -1.0; depositor +BOND - fee = 0.5 (deposit returned); Store +fee = 0.5
     ✔ 4 false accusation: vote FALSE, deposit restored, window extended
       invariant ok: Paprika holds 4.0 = deposits 1.0 + commit bonds 0.0 + credits 3.0; oracle 0.0 for 0 open
-      VOTE FALSE (rejected): round 14970313, 3 commits + 3 reveals + settle, 227 s of chain time
-      VOTE TRUE (fake proven): round 14970315, 3 commits + 3 reveals + settle, 232 s of chain time
-      CASE second accusation while one is open (UMA vote): B's reveal: "accusation open"; after A is voted false (the vote moved the clock, B's commitment is still inside REVEAL_WINDOW), B reveals the same commitment and is voted true | photo Fake
-    ✔ 5 second accusation while one is open (38ms)
-      invariant ok: Paprika holds 6.0 = deposits 1.0 + commit bonds 0.0 + credits 5.0; oracle 0.0 for 0 open
-      VOTE TRUE (fake proven): round 14970317, 3 commits + 3 reveals + settle, 229 s of chain time
+      VOTE FALSE (rejected): round 14970315, 3 commits + 3 reveals + settle, 226 s of chain time
+      VOTE TRUE (fake proven): round 14970317, 3 commits + 3 reveals + settle, 231 s of chain time
+      CASE second accusation while one is open (UMA vote): B's reveal during A's accusation: BondReturned, credit +BOND, A still open; same commitment again: "no commit"; after A is voted false, B commits again and is voted true | B net 0 while waiting, then +BOND - fee = 0.5; photo Fake
+    ✔ 5 second accusation while one is open: bond back, open accusation unaffected, accuse again later (43ms)
+      invariant ok: Paprika holds 7.0 = deposits 1.0 + commit bonds 0.0 + credits 6.0; oracle 0.0 for 0 open
+      VOTE TRUE (fake proven): round 14970319, 3 commits + 3 reveals + settle, 229 s of chain time
       CASE self-accusation (UMA vote): the forger's second account accuses and wins | net -fee = -0.5
     ✔ 6 self-accusation loses the oracle fee
-      invariant ok: Paprika holds 7.5 = deposits 1.0 + commit bonds 0.0 + credits 6.5; oracle 0.0 for 0 open
+      invariant ok: Paprika holds 8.5 = deposits 1.0 + commit bonds 0.0 + credits 7.5; oracle 0.0 for 0 open
       CASE key revocation (UMA vote): revocation copied by another address: "bad sig"; holder revokes; revoked device attests: "not active"; its record stays Attested and is refunded | no tokens move at revocation
     ✔ 7 key revocation
-      invariant ok: Paprika holds 8.5 = deposits 1.0 + commit bonds 0.0 + credits 7.5; oracle 0.0 for 0 open
+      invariant ok: Paprika holds 9.5 = deposits 1.0 + commit bonds 0.0 + credits 8.5; oracle 0.0 for 0 open
       CASE signatures and replay (UMA vote): replay: "exists"; otherKey: "bad sig"; otherChain: "bad sig"; highS: "bad sig"; futureAnchor: "anchor"; popAsCapture: "bad sig"; keyUsed: "key used"; callbackNotOracle: "only oracle"; popFrontRun: "bad sig"; revealByOther: "no commit"; commitReused: "commitment used"; tooLate: "too late" | no tokens move, except the forfeited commit bond (BOND to the burn address)
     ✔ 8 signature and replay checks
-      invariant ok: Paprika holds 9.5 = deposits 2.0 + commit bonds 0.0 + credits 7.5; oracle 0.0 for 0 open
+      invariant ok: Paprika holds 10.5 = deposits 2.0 + commit bonds 0.0 + credits 8.5; oracle 0.0 for 0 open
 
       GAS with the real contracts (gasUsed; first occurrence)
-        deploy Paprika                                             2476722
-        register                                                   101872
+        deploy Paprika                                             2465066
+        register                                                   101860
         attest (P-256 verify + WETH transferFrom)                  167001
         refund                                                     55940
         withdrawCredit                                             35437
         commitClaim                                                86799
-        revealClaim (OOv3 assertTruth + disputeAssertion + VotingV2.requestPrice) 703801
+        revealClaim (OOv3 assertTruth + disputeAssertion + VotingV2.requestPrice) 703743
         VotingV2.commitVote (max of 3)                             215410
         VotingV2.revealVote (max of 3)                             193821
         oo.settleAssertion -> Paprika callback (TRUE)              185923
@@ -55,5 +55,5 @@
         revokeKey                                                  44149
 
 
-  8 passing (464ms)
+  8 passing (476ms)
 

@@ -36,7 +36,8 @@ interface IOptimisticOracleV3CallbackRecipient {
 /// 4. Accusing: until accusableUntil (attest time + PHOTO_WINDOW), anyone commits a hidden accusation with BOND
 ///    (commitClaim), then reveals it 1 block to REVEAL_WINDOW later (revealClaim). Paprika asserts "this photo is
 ///    not genuine" at UMA's Optimistic Oracle V3 with the accuser's bond and disputes it at once with the photo's
-///    deposit, so UMA's token-holder vote always decides. One accusation per photo at a time.
+///    deposit, so UMA's token-holder vote always decides. One accusation per photo at a time: a valid reveal that
+///    arrives while another accusation is open (or after the photo is proven fake) gets its bond back as credit.
 /// 5. UMA settles and pays Paprika 2 x BOND - fee (fee = burnedBondPercentage x BOND goes to UMA's Store).
 ///    Fake proven: the accuser gets it all, the device is flagged. Rejected: the deposit is restored, the depositor
 ///    gets the rest, and the window is extended by the time the photo spent under accusation.
@@ -174,7 +175,8 @@ contract Paprika is IOptimisticOracleV3CallbackRecipient {
 
     /// Step 2: reveal at least one block and at most REVEAL_WINDOW after a commit made while the photo was accusable.
     /// Attested: asserts the accusation at UMA with the claimant's bond and disputes it with the photo's deposit.
-    /// Fake: no accusation, bond credited back (returns 0). While another accusation is open: reverts.
+    /// Fake, or Accused (another accusation is open on this photo): no new accusation, the commitment is consumed and
+    /// the bond is credited back (returns 0, emits BondReturned). The claimant may commit again later.
     function revealClaim(bytes32 photoHash, bytes32 keyId, bytes32 evidenceHash, bytes32 salt) external returns (bytes32 assertionId) {
         bytes32 cm = keccak256(abi.encode(msg.sender, photoHash, keyId, evidenceHash, salt));
         Commit storage k = commits[cm];
@@ -184,11 +186,12 @@ contract Paprika is IOptimisticOracleV3CallbackRecipient {
         Record storage r = records[photoHash][keyId];
         require(r.state != State.None, "no record");
         require(r.state != State.Refunded, "refunded");
-        require(r.state != State.Accused, "accusation open");
         require(k.committedBlock >= r.recordedBlock && k.committedAt <= r.accusableUntil, "outside window");
         k.live = false;
-        // already proven fake by someone else: nothing to judge, the bond goes back
-        if (r.state == State.Fake) {
+        // Already proven fake, or already under accusation (UMA judges one accusation per photo at a time): nothing
+        // to judge now, the bond goes back. A waiting accuser never loses its bond to a vote that outlasts its
+        // REVEAL_WINDOW; it can commit again once the open accusation is settled.
+        if (r.state == State.Fake || r.state == State.Accused) {
             _credit(msg.sender, BOND);
             emit BondReturned(cm, msg.sender);
             return bytes32(0);

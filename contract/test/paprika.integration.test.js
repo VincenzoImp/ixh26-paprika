@@ -184,17 +184,31 @@ const reg = async (who, dev = newDevice()) => { firstGas("register", await send(
     CASE("false accusation (UMA vote)", `record back to ${ST[v.state]}, device untouched, window extended by the ${tRes - opened} s under accusation; refund afterwards`, `accuser -BOND = ${F(-c.BOND)}; depositor +BOND - fee = ${F(c.payout - c.BOND)} (deposit returned); Store +fee = ${F(c.fee)}`);
   });
 
-  it("5 second accusation while one is open", async () => {
+  it("5 second accusation while one is open: bond back, open accusation unaffected, accuse again later", async () => {
     const owner = s[1], A = s[7], B = s[8];
     const dev = await reg(owner); await attest(owner, dev, h("i5"));
     const xA = await reveal(await commit(A, h("i5"), dev.keyId));
+    const b0 = await val(B), oo0 = await c.token.balanceOf(c.oo);
     const kB = await commit(B, h("i5"), dev.keyId);
-    const r1 = await rv(c.pap.connect(B).revealClaim(kB.photo, kB.keyId, kB.ev, kB.salt), "accusation open");
+    // B reveals while A's accusation is open: no new accusation, B's commitment is consumed, B's bond is credited back.
+    const xB1 = await reveal(kB);
+    const ev = xB1.r.logs.map((l) => { try { return c.pap.interface.parseLog(l); } catch { return null; } }).find((x) => x && x.name === "BondReturned");
+    assert(ev && ev.args.claimant === B.address && xB1.id === null, "BondReturned, no AccusationOpened");
+    assert.equal(await c.pap.credits(B.address), c.BOND);
+    assert.equal(await val(B), b0, "B net 0 (bond is now credit)");
+    // A's accusation is untouched: still open, photo Accused, the oracle still holds both bonds.
+    assert.equal((await c.pap.accusations(xA.id)).open, true);
+    assert.equal((await c.pap.verify(h("i5"), dev.keyId)).state, 2n);
+    assert.equal(await c.token.balanceOf(c.oo), oo0);
+    const again = await rv(c.pap.connect(B).revealClaim(kB.photo, kB.keyId, kB.ev, kB.salt), "no commit");
     await vote(c, xA.id, false);
-    const xB = await reveal(kB);
-    assert(xB.id);
-    await vote(c, xB.id, true);
-    CASE("second accusation while one is open (UMA vote)", `B's reveal: "${r1}"; after A is voted false (the vote moved the clock, B's commitment is still inside REVEAL_WINDOW), B reveals the same commitment and is voted true`, `photo ${ST[(await c.pap.verify(h("i5"), dev.keyId)).state]}`);
+    // Later, B commits again with a new salt and its accusation goes to the vote.
+    const xB2 = await reveal(await commit(B, h("i5"), dev.keyId));
+    assert(xB2.id);
+    await vote(c, xB2.id, true);
+    assert.equal((await c.pap.verify(h("i5"), dev.keyId)).state, 4n);
+    assert.equal((await val(B)) - b0, c.payout - c.BOND);
+    CASE("second accusation while one is open (UMA vote)", `B's reveal during A's accusation: BondReturned, credit +BOND, A still open; same commitment again: "${again}"; after A is voted false, B commits again and is voted true`, `B net 0 while waiting, then +BOND - fee = ${F(c.payout - c.BOND)}; photo ${ST[(await c.pap.verify(h("i5"), dev.keyId)).state]}`);
   });
 
   it("6 self-accusation loses the oracle fee", async () => {

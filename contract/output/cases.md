@@ -24,7 +24,7 @@ accusation.
 | 2 One pixel changed | `attestersOf(modified hash)` = `[]`, and `verify` finds nothing (state None). | No WETH moves. |
 | 3 True accusation | Commit, then reveal: Paprika calls `assertTruth` and `disputeAssertion` at OOv3 (which holds 2 WETH); OOv3 asks VotingV2 for a price. The voters vote TRUE, `settleAssertion` runs. The photo becomes Fake and the device Flagged (FakeProven). | Accuser credited `2 x BOND - fee` = 1.5 (net `+BOND - fee` = +0.5). Depositor `-BOND` = -1. Store `+fee` = +0.5. |
 | 4 False accusation | The voters vote FALSE. The deposit is restored, the record returns to Attested, `accusableUntil` is extended by the time spent under accusation (236 s here, one vote). The device is untouched; the refund works afterwards. | Accuser `-BOND` = -1. Depositor `+BOND - fee` = +0.5 (deposit returned). Store `+fee` = +0.5. |
-| 5 Second accusation while one is open | The second reveal reverts "accusation open". After the first is voted FALSE (the vote moved the clock 227 s, less than `REVEAL_WINDOW`), the same second commitment is revealed and voted TRUE. | One accusation per photo at a time. |
+| 5 Second accusation while one is open | B reveals while A's accusation is open: no new accusation, B's commitment is consumed and its `BOND` is credited back (`BondReturned`). A's accusation is untouched (still open, OOv3 still holds 2 x BOND). Revealing the same commitment again: "no commit". After A is voted FALSE, B commits again and is voted TRUE. | B: net 0 while waiting, then `+BOND - fee` = +0.5. |
 | 6 Self-accusation | The forger's second account accuses the forger's photo and wins. | Net `-fee` = -0.5: the real penalty for a fake. |
 | 7 Key revocation | A copy of the revocation from another address reverts "bad sig". The key holder revokes. The revoked device's `attest` reverts "not active". Its record stays Attested and is refunded. | No WETH moves at revocation. |
 | 8 Signatures and replay | Rejected: replayed attest "exists"; another key, another chain id, high-s, proof-of-possession used as capture, register copied by another sender "bad sig"; future anchor "anchor"; key registered twice "key used"; callback not from the oracle "only oracle"; reveal by another account "no commit"; commitment reused "commitment used"; reveal after `REVEAL_WINDOW` "too late", then `forfeitCommit` sends `BOND` to `0x...dEaD`. | Only the forfeited bond moves (`BOND` to the burn address). |
@@ -43,7 +43,7 @@ accusation.
 | `register` | 101,872 |
 | `attest` (P-256 verify, WETH `transferFrom`, `attestersOf` index) | 167,013 |
 | `commitClaim` | 86,799 |
-| `revealClaim` (OOv3 `assertTruth` + `disputeAssertion` + `VotingV2.requestPrice`) | 703,812 |
+| `revealClaim` (OOv3 `assertTruth` + `disputeAssertion` + `VotingV2.requestPrice`) | 703,743 |
 | `VotingV2.commitVote` (max of 3; the first in a round costs most) | 215,398 |
 | `VotingV2.revealVote` (max of 3) | 193,821 |
 | `settleAssertion` -> callback, fake proven | 185,923 |
@@ -64,13 +64,13 @@ accusation.
 
 ## Known limits
 
-- **FLAW: an accusation can outlast the commitments it blocks.** While one accusation is open, every other
-  commitment on that photo can only wait; it expires after `REVEAL_WINDOW` and is forfeited. With UMA's mainnet
-  phases a vote takes 3 to 4 days of chain time, against a 1-hour `REVEAL_WINDOW`. A forger holding its own
-  commitment can reveal first when a hunter's reveal appears, and the hunter then loses `BOND`; the forger's cost is
-  `fee`. Case 5 passes only because the test's vote (60 s phases) is shorter than `REVEAL_WINDOW`. Simplest fix, not
-  applied: while the photo is Accused, return the bond on reveal instead of reverting (or set `REVEAL_WINDOW` above
-  4 x the DVM phase length).
+- **A forger can stall accusations at `fee` per vote round.** Holding its own commitment, a forger can reveal a junk
+  self-accusation right before an honest one (e.g. right after each settlement). The honest reveal then gets its bond
+  back (no loss since the fix below) and must commit again after the vote. Each round costs the forger `fee`, and the
+  photo's window is extended by the time under accusation, so the stall never makes the window run out.
+- **Fixed: a waiting accuser no longer loses its bond.** Before, a reveal during an open accusation reverted, and a
+  vote longer than `REVEAL_WINDOW` (3 to 4 days with UMA's mainnet phases, against 1 hour) made the waiting
+  commitment expire and be forfeited. Now such a reveal returns the bond as credit (case 5).
 - **Self-accusation makes the penalty for a fake `fee`, not `BOND`.** Repeated rejected self-accusations cost `fee`
   per round and do not make the window expire, because the window is extended each time.
 - **One accusation per photo at a time.**
