@@ -159,7 +159,9 @@ forfeited (`forfeit`). `vote` takes the only open accusation; with several open 
   2 to 4 phases of chain time). It takes well under a second of real time.
   It is safe to call twice for the same accusation (two tabs, or a tab and the CLI). If the accusation is already
   decided, it sends nothing and returns `{ status: "already-settled", fakeProven }`. If another vote is already
-  running in this round, it throws an error with `code` = `VOTE_IN_PROGRESS` and a plain message. A normal vote
+  running in this round, it throws an error with `code` = `VOTE_IN_PROGRESS` and a plain message. A second call in
+the same page waits for the first and returns `already-settled`. Two pages that start at the very same moment can
+spoil the round: then the error has `code` = `VOTE_INTERFERED` and the next call resolves it. A normal vote
   returns `status: "settled"` and `fakeProven`.
 - `refund` works only after `refundableAt` (= `accusableUntil` + reveal period + 1 s), not after the challenge
   period alone. A rejected accusation extends `accusableUntil` by the time the accusation was open. Too early, it

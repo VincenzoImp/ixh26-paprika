@@ -468,20 +468,64 @@ async function advanceTo(ctx, ts) {
  *   4. jump past the round end; the operator calls OOv3.settleAssertion, which reads the price from VotingV2
  *      (resolved: revealed stake above the GAT, winning answer above the SPAT), pays out, and calls Paprika back.
  * onPhase({ phase: "commit" | "reveal" | "settle", roundId, txHashes, timestamp }) is called after each phase.
- * Returns { txHashes, roundId, simulatedSeconds } (simulatedSeconds = chain time skipped by the jumps).
+ * Returns { status: "settled", txHashes, roundId, simulatedSeconds, fakeProven }.
+ *
+ * Safe to call twice for the same assertion (two tabs, or a tab and the CLI):
+ *   - already settled: returns { status: "already-settled", fakeProven, txHashes: [], roundId: null, simulatedSeconds: 0 }
+ *     without sending anything;
+ *   - another vote already committed in this round (VoteCommitted events of our voters): throws an Error with
+ *     code "VOTE_IN_PROGRESS" and a plain message, before sending anything;
+ *   - a second call in the same page or process waits for the first and returns its result ("already-settled");
+ *   - if a vote from another page starts at the very same moment, a voter whose commit was overwritten is skipped
+ *     (2 of 3 voters still reach the quorum); if the round still does not resolve, it throws code "VOTE_INTERFERED"
+ *     ("run the vote again"); the request rolls to the next round and the next call resolves it.
  */
+// Votes running in this page / process, by assertion id: a second call waits for the first, then reports its result.
+const votesRunning = new Map();
+
 export async function umaVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
+  const key = String(assertionId).toLowerCase();
+  if (votesRunning.has(key)) {
+    await votesRunning.get(key).catch(() => {});
+    const x = await read(ctx.contracts.oo.getAssertion(assertionId));
+    if (x.settled) return { status: "already-settled", fakeProven: Boolean(x.settlementResolution), txHashes: [], roundId: null, simulatedSeconds: 0 };
+  }
+  const run = runVote(ctx, assertionId, fakeProven, { onPhase });
+  votesRunning.set(key, run);
+  try { return await run; } finally { if (votesRunning.get(key) === run) votesRunning.delete(key); }
+}
+
+async function runVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
   const { oo, voting } = ctx.contracts;
   if (!voting || !ctx.voters.length) throw new Error("this deployment has no UMA voting contract or voters: run `npm run deploy` again");
   const a = await read(oo.getAssertion(assertionId));
   if (a.asserter === ethers.ZeroAddress) throw new Error("unknown assertion id");
-  if (a.settled) throw new Error("assertion already settled");
+  const settledResult = (x) => ({ status: "already-settled", fakeProven: Boolean(x.settlementResolution), txHashes: [], roundId: null, simulatedSeconds: 0 });
+  if (a.settled) return settledResult(a);
   if (a.disputer === ethers.ZeroAddress) throw new Error("assertion is not disputed");
   const identifier = a.identifier;
   const time = a.assertionTime;
   const ancillaryData = await read(oo.stampAssertion(assertionId));
   const phaseLength = BigInt(ctx.params.phaseLength || (await read(voting.voteTiming())));
   const roundLength = 2n * phaseLength;
+  const inProgress = () => {
+    const e = new Error("a vote on this accusation is already running (another tab or the CLI): wait a few seconds, then reload");
+    e.code = "VOTE_IN_PROGRESS";
+    return e;
+  };
+  // Commits already made in `round` for this request (by anyone): voter address (lowercase) -> true.
+  const committedIn = async (round) => {
+    const evs = await read(voting.queryFilter(voting.filters.VoteCommitted(null, null, null, identifier), 0, "latest"));
+    const out = new Set();
+    for (const ev of evs) {
+      if (BigInt(ev.args.roundId) === round && BigInt(ev.args.time) === BigInt(time) && ev.args.ancillaryData === ancillaryData) out.add(ev.args.voter.toLowerCase());
+    }
+    return out;
+  };
+  const stillOpen = async () => {
+    const x = await read(oo.getAssertion(assertionId));
+    return x.settled ? x : null;
+  };
 
   // 1. Status of the DVM request: 1 Active (voted this round), 3 Future (voted next round).
   const [st] = await read(voting.getPriceRequestStatuses([{ identifier, time, ancillaryData }]));
@@ -489,7 +533,11 @@ export async function umaVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
   if (status !== 1 && status !== 3) throw new Error(`no pending UMA vote for this assertion (status ${DVM_STATUS[status] ?? status})`);
   let roundId = BigInt(st.lastVotingRound);
   // Active but already in the reveal phase: too late to commit in this round; the request rolls to the next one.
-  if (status === 1 && Number(await read(voting.getVotePhase())) === 1) roundId += 1n;
+  if (status === 1 && Number(await read(voting.getVotePhase())) === 1) {
+    if ((await committedIn(roundId)).size) throw inProgress();   // someone is revealing in this round right now
+    roundId += 1n;
+  }
+  if ((await committedIn(roundId)).size) throw inProgress();
   const commitStart = roundId * roundLength, revealStart = commitStart + phaseLength, roundEnd = commitStart + roundLength;
   const txHashes = [];
   let simulated = 0n;
@@ -505,33 +553,57 @@ export async function umaVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
   const ballots = [];
   const commitHashes = [];
   for (const v of ctx.voters) {
+    // Another vote got here first for this voter: leave its commit alone (it will reveal it).
+    if ((await committedIn(roundId)).has(v.address.toLowerCase())) {
+      if (!ballots.length) throw inProgress();
+      continue;
+    }
     const salt = BigInt(ethers.hexlify(ethers.randomBytes(31)));   // positive int256
     const hash = ethers.solidityPackedKeccak256(
       ["int256", "int256", "address", "uint256", "bytes", "uint256", "bytes32"],
       [price, salt, v.address, time, ancillaryData, roundId, identifier]);
-    const r = await send(ctx, v, voting, "commitVote", [identifier, time, ancillaryData, hash], "UMA VotingV2.commitVote");
-    ballots.push({ v, salt });
-    commitHashes.push(r.hash);
+    try {
+      const r = await send(ctx, v, voting, "commitVote", [identifier, time, ancillaryData, hash], "UMA VotingV2.commitVote");
+      ballots.push({ v, salt });
+      commitHashes.push(r.hash);
+    } catch (e) {
+      if (!ballots.length) throw /reveal phase|must be active/i.test(e.message) ? inProgress() : e;
+    }
   }
   txHashes.push(...commitHashes);
   await report("commit", commitHashes);
 
-  // 3. Reveal phase: each voter reveals its price and salt.
+  // 3. Reveal phase: each voter reveals its price and salt. A reveal fails only if another vote overwrote that
+  //    voter's commit; skip it (the others may still reach the quorum).
   simulated += await advanceTo(ctx, revealStart);
   const revealHashes = [];
   for (const { v, salt } of ballots) {
-    const r = await send(ctx, v, voting, "revealVote", [identifier, time, price, ancillaryData, salt], "UMA VotingV2.revealVote");
-    revealHashes.push(r.hash);
+    try {
+      const r = await send(ctx, v, voting, "revealVote", [identifier, time, price, ancillaryData, salt], "UMA VotingV2.revealVote");
+      revealHashes.push(r.hash);
+    } catch { /* overwritten by a concurrent vote */ }
   }
   txHashes.push(...revealHashes);
   await report("reveal", revealHashes);
 
   // 4. After the round: settle on OOv3 (reads VotingV2's price, pays out, calls Paprika's callback).
   simulated += await advanceTo(ctx, roundEnd);
-  const r = await send(ctx, "operator", oo, "settleAssertion", [assertionId], "UMA OOv3.settleAssertion");
+  const done = await stillOpen();
+  if (done) return { ...settledResult(done), txHashes, roundId: Number(roundId), simulatedSeconds: Number(simulated) };
+  let r;
+  try {
+    r = await send(ctx, "operator", oo, "settleAssertion", [assertionId], "UMA OOv3.settleAssertion");
+  } catch (e) {
+    const after = await stillOpen();
+    if (after) return { ...settledResult(after), txHashes, roundId: Number(roundId), simulatedSeconds: Number(simulated) };
+    const err = new Error("the vote did not resolve: another vote on this accusation (another tab or the CLI) ran at the same time; run the vote again");
+    err.code = "VOTE_INTERFERED";
+    throw err;
+  }
   txHashes.push(r.hash);
   await report("settle", [r.hash]);
-  return { txHashes, roundId: Number(roundId), simulatedSeconds: Number(simulated) };
+  const final = await read(oo.getAssertion(assertionId));
+  return { status: "settled", fakeProven: Boolean(final.settlementResolution), txHashes, roundId: Number(roundId), simulatedSeconds: Number(simulated) };
 }
 
 // ------------------------------------------------------------------ money

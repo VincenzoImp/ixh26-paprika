@@ -78,10 +78,19 @@ export function readPids() {
   try { return JSON.parse(fs.readFileSync(PID_FILE, "utf8")); } catch { return {}; }
 }
 export function writePid(name, pid) {
+  // Removing an entry never creates the file (a script exiting after `npm run stop` must not leave it behind).
+  if (!pid && !fs.existsSync(PID_FILE)) return;
   fs.mkdirSync(STATE_DIR, { recursive: true });
   const pids = readPids();
   if (pid) pids[name] = pid; else delete pids[name];
-  fs.writeFileSync(PID_FILE, JSON.stringify(pids, null, 2));
+  if (Object.keys(pids).length) fs.writeFileSync(PID_FILE, JSON.stringify(pids, null, 2));
+  else fs.rmSync(PID_FILE, { force: true });
+}
+
+// What `npm start` is serving for this instance ({ webUrl, rpcUrl, pid }), so a second start can name the real page.
+export const INSTANCE_FILE = path.join(STATE_DIR, `instance${SUFFIX}.json`);
+export function readInstance() {
+  try { return JSON.parse(fs.readFileSync(INSTANCE_FILE, "utf8")); } catch { return null; }
 }
 
 /** Kills a process group started with detached: true (falls back to the single process). */
@@ -150,7 +159,7 @@ export function hardhatNodePids(port) {
 export function cleanupInstanceFiles() {
   if (!SUFFIX) return [];
   const removed = [];
-  const candidates = [WEB_DEPLOYMENT_FILE, DEPLOYMENT_FILE, PID_FILE, path.join(STATE_DIR, `chain${SUFFIX}.log`)];
+  const candidates = [WEB_DEPLOYMENT_FILE, DEPLOYMENT_FILE, PID_FILE, INSTANCE_FILE, path.join(STATE_DIR, `chain${SUFFIX}.log`)];
   for (const f of candidates) if (fs.existsSync(f)) { fs.rmSync(f, { force: true }); removed.push(f); }
   return removed;
 }

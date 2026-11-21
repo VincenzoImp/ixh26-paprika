@@ -14,8 +14,8 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   APP_DIR, CHAIN_HOST, CHAIN_PORT, CONTRACT_DIR, HARDHAT_BIN, RPC_URL, STATE_DIR, WEB_HOST, WEB_PORT,
-  SUFFIX, cleanupInstanceFiles, ensureContractDeps, serverEnv, killGroup, liveDeployment, portBusy, rpcAlive,
-  waitForRpc, writePid,
+  INSTANCE_FILE, SUFFIX, cleanupInstanceFiles, ensureContractDeps, serverEnv, killGroup, liveDeployment, portBusy,
+  readInstance, rpc, rpcAlive, waitForRpc, writePid,
 } from "./common.js";
 import { deploy } from "./deploy.js";
 
@@ -32,6 +32,7 @@ function stopAll(code = 0) {
     killGroup(child.pid);
     writePid(name, null);
   }
+  fs.rmSync(INSTANCE_FILE, { force: true });
   if (ownChain) cleanupInstanceFiles();   // only files of a chain this script started (and is now gone)
   console.log("\nStopped.");
   process.exit(code);
@@ -82,7 +83,9 @@ try {
   // 0. Never redeploy over a running instance.
   const live = (await rpcAlive()) ? await liveDeployment() : null;
   if (live) {
-    console.error(`Paprika is already running at ${URL_WEB} (chain ${RPC_URL}, Paprika ${live.addresses.paprika}).`);
+    const inst = readInstance();
+    const where = inst?.webUrl ? `at ${inst.webUrl} (chain ${RPC_URL}` : `on chain ${RPC_URL} (web page unknown: started step by step`;
+    console.error(`Paprika is already running ${where}, Paprika ${live.addresses.paprika}).`);
     console.error(`Open that page, or use \`${STOP_HINT}\` first. Nothing was changed.`);
     process.exit(1);
   }
@@ -95,7 +98,15 @@ try {
     console.warn(`WARNING: HOST=${WEB_HOST}: the page and its /rpc relay (unlocked Hardhat accounts) are reachable from other machines.`);
   }
   if (await rpcAlive()) {
-    console.log(`A node without a Paprika deployment answers on ${RPC_URL}: deploying on it.`);
+    // A node we did not start: only use it if it is unused (e.g. a fresh `npm run chain`), never a chain that
+    // already holds something (another clone's demo, for example).
+    const used = Number(await rpc("eth_blockNumber"));
+    if (used > 0) {
+      console.error(`A chain already runs on ${RPC_URL} and is in use (block ${used}), but not with this folder's Paprika.`);
+      console.error("npm start would add a second Paprika to it. Choose another RPC_PORT, or stop that chain first. Nothing was changed.");
+      process.exit(1);
+    }
+    console.log(`An unused node answers on ${RPC_URL}: deploying on it.`);
   } else {
     await ensureContractDeps();
     const log = fs.openSync(path.join(STATE_DIR, `chain${SUFFIX}.log`), "w");
@@ -108,6 +119,7 @@ try {
   await deploy();
   if (fs.existsSync(path.join(APP_DIR, "server.js"))) {
     startWeb();
+    fs.writeFileSync(INSTANCE_FILE, JSON.stringify({ webUrl: URL_WEB, rpcUrl: RPC_URL, pid: process.pid }, null, 2));
     console.log(`\nPaprika is running: ${URL_WEB}   (chain: ${RPC_URL})\nPress Ctrl-C to stop (or \`${STOP_HINT}\` from another terminal).`);
   } else {
     console.log(`\napp/server.js not found: chain and contracts are up (${RPC_URL}); the web UI is not started.\nTry \`node cli.js demo\`. Press Ctrl-C to stop.`);

@@ -39,7 +39,7 @@ const DEPLOYMENT_CANDIDATES = [
 const HELP = `Paprika CLI (local chain only)
 
   status                                   chain, contracts, parameters, saved device, balances
-  register                                 create a device key (app/.state/device.json) and register it (photographer)
+  register                                 create a device key (app/.state/cli/<id>/device.json) and register it
   attest <file>                            photographer attests <file> with the saved device, deposit B
   verify <file>                            show every record of <file>
   accuse-commit <file> --evidence "<text>" accuser commits an accusation (bond B); evidence is required;
@@ -284,6 +284,7 @@ const commands = {
     }
     console.log(`Voting on assertion ${id}`);
     const r = await umaVote(ctx, id, args[0] === "true", { onPhase: printPhase });
+    if (r.status === "already-settled") { console.log(`This accusation was already decided: ${r.fakeProven ? "fake PROVEN" : "REJECTED"}. Nothing sent.`); return; }
     console.log(`UMA vote (round ${r.roundId}, ${ctx.voters.length} voters, ${r.simulatedSeconds} s of chain time skipped): ` +
       `${args[0] === "true" ? "fake PROVEN (accuser wins)" : "accusation REJECTED (depositor wins)"}; assertion settled.`);
     delete state.lastAssertion;
