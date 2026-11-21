@@ -189,7 +189,7 @@ transactions on a local chain.
 |---|---|---|---|
 | Contract integration tests | Paprika with UMA's oracle, UMA's vote and WETH: every case in [`contract/output/cases.md`](../contract/output/cases.md) | 9 tests pass | `cd contract && npx hardhat test` |
 | End-to-end browser test | The whole demo story in the web app, with header amounts and states compared with the chain at each step | 168 checks pass | `cd app && npm run e2e` |
-| Edge-case browser test | A second accusation on an accused photo, simultaneous votes, a reveal at its deadline, downloads, dropped files, narrow windows, a revoked key after its challenge period, a second `npm start`, the `/rpc` relay, `npm run stop` on another port | 15 checks pass | `cd app && npm run e2e:edge` |
+| Edge-case browser test | A second accusation on an accused photo, simultaneous votes, a reveal at its deadline, downloads, dropped files, narrow windows, a revoked key after its challenge period, a second `npm start`, the `/rpc` relay, `npm run stop` on another port | 18 checks pass | `cd app && npm run e2e:edge` |
 | Command-line demo | The 13 steps above, with checks | 13 steps pass | `cd app && npm run demo:cli` |
 | Screens | One screenshot per state, in [`app/output/screens/`](../app/output/screens/) | All states as expected | `cd app && npm run screens` |
 

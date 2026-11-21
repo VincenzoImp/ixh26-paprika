@@ -52,3 +52,6 @@ contract/deployments/
 app/web/deployment.json
 app/.state/
 app/web/deployment-*.json
+
+# Test run artefacts
+app/output/e2e/

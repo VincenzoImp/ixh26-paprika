@@ -5,7 +5,7 @@
  *
  * Deploys: Finder, Store, whitelists, Registry, VotingToken (the UMA token), FixedSlashSlashingLibrary, VotingV2
  *   (the DVM, registered as "Oracle"), the bond currency, OptimisticOracleV3; mints and stakes voting tokens for the
- *   demo voters and registers OOv3 in the Registry. Copied from uma-vote/lib/deploy-uma-dvm.js.
+ *   demo voters and registers OOv3 in the Registry.
  * Constructor arguments follow UMA's own hardhat-deploy scripts (packages/core/deploy/003, 004, 052, 053, 057);
  * the deviations are listed next to each step and in README.md.
  *

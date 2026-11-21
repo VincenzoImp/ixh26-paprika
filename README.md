@@ -35,7 +35,7 @@ The demo, step by step, and how the local chain differs from a public network: [
 
 - 9 contract integration tests, with UMA's oracle, UMA's vote and WETH on a local chain (`cd contract && npx hardhat test`).
 - An end-to-end browser test of the whole demo story: 168 checks against the chain (`cd app && npm run e2e`).
-- An edge-case browser test: 15 checks (`cd app && npm run e2e:edge`).
+- An edge-case browser test: 18 checks (`cd app && npm run e2e:edge`).
 - Two independent staging runs and one acceptance run from a clean clone of the repository.
 
 Details: [docs/demo.md](docs/demo.md#how-it-was-tested).

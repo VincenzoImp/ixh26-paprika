@@ -1,5 +1,5 @@
-// Paprika: edge-case end-to-end test (staging test 2). One check per finding of app/output/staging-2-report.md that
-// can be reproduced automatically. It FAILS while a finding is open and PASSES once it is fixed.
+// Paprika: edge-case end-to-end test. Each check covers one edge case of the web app, the server or the scripts:
+// concurrent actions, reloads, odd inputs, the /rpc relay, restarts. Every check must pass.
 //
 // It starts its OWN fresh instance (chain + deploy + web) on spare ports, drives the page with Playwright (Chromium,
 // headless) and the chain with app/lib/paprika.js, and stops the instance at the end.
@@ -227,7 +227,7 @@ async function edge() {
     !/can still be accused/i.test(detail), detail);
   void R;
 
-  // ---- acceptance-report checks (A-2, A-4, A-7) ----
+  // ---- refused files, simultaneous votes, timeline after a reload ----
   await t("tab-photographer").click();
   await t("btn-generate-key").click(); await page.waitForTimeout(150); await idle();
   await must("register key for A-checks", await click("btn-register"));

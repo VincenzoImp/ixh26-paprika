@@ -62,7 +62,7 @@ npx playwright install chromium
 | Command | What it does |
 |---|---|
 | `npm run e2e` | The whole demo story in the web app, checked against the chain at each step (168 checks) |
-| `npm run e2e:edge` | Edge cases of the web app, the server and the scripts (15 checks) |
+| `npm run e2e:edge` | Edge cases of the web app, the server and the scripts (18 checks) |
 | `npm run screens` | One screenshot per state into `output/screens/` (set `OUT` to write elsewhere) |
 | `npm run demo:cli` | The 13-step demo in the terminal, with checks. Needs a running, deployed chain |
 
