@@ -55,3 +55,6 @@ app/web/deployment-*.json
 
 # Test run artefacts
 app/output/e2e/
+
+# Local copy of the brief (not part of the submission)
+track/
