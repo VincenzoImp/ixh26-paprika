@@ -21,20 +21,26 @@ npm run chain        # Hardhat node of ../contract on 127.0.0.1:8545 (hardfork o
 npm run deploy       # UMA + token + Paprika; writes ../contract/deployments/local.json and web/deployment.json
 npm run web          # node server.js on 127.0.0.1:5173
 npm run demo:cli     # node cli.js demo: the whole demo story with checks
-npm run stop         # kills leftover chain / web processes
+npm run stop         # kills leftover chain / web processes of this instance
 ```
 
 The chain lives in memory. A restart starts from block 0, so you must deploy again.
+
+Ports: `RPC_PORT` (chain, default 8545) and `WEB_PORT` (UI, default 5173). Every script and the CLI read them, so
+two instances can run side by side. Example: `RPC_PORT=8546 WEB_PORT=5174 npm start`, then
+`RPC_PORT=8546 node cli.js demo`. With a port other than 8545, the files get a suffix:
+`../contract/deployments/local-8546.json`, `web/deployment-8546.json`, `.state/*-8546.json`. `npm run stop` only
+stops the instance on its own `RPC_PORT`. The deployment JSON carries `rpcUrl`, and `connect` uses it by default.
 
 ## Files
 
 | File | What it is |
 |---|---|
 | `lib/device.js` | The device. Makes a P-256 key, exports and imports it (JWK), builds the three signed messages (register, capture, revoke) byte for byte as `Paprika.sol` hashes them, and signs with low-s. It uses only WebCrypto, so it runs in Node and in a browser. |
-| `lib/paprika.js` | The chain client (ethers 6). One function per action: register, attest, verify, accuse (commit, reveal), simulated UMA vote, refund, withdraw, revoke, advance time, balances, activity log. |
+| `lib/paprika.js` | The chain client (ethers 6). One function per action: register, attest, verify, accuse (commit, reveal), UMA vote, refund, withdraw, wrap and unwrap WETH, revoke, advance time, balances, activity log. |
 | `cli.js` | The command-line tool. `node cli.js help` lists the commands. |
 | `scripts/chain.js` | `npm run chain`. |
-| `scripts/deploy.js` | `npm run deploy`. Calls `../contract/scripts/deploy-local.js` and copies the JSON to `web/`. |
+| `scripts/deploy.js` | `npm run deploy`. Calls `../contract/scripts/deploy-local.js` and copies the JSON to `web/`. The header explains the defaults. |
 | `scripts/web.js` | `npm run web`. |
 | `scripts/start.js` | `npm start`. Chain in the background (log in `.state/chain.log`), wait for the RPC, deploy, web. |
 | `scripts/stop.js` | `npm run stop`. |
@@ -44,24 +50,34 @@ The chain lives in memory. A restart starts from block 0, so you must deploy aga
 
 ## Deploy parameters
 
-Set them as environment variables for `npm run deploy` or `npm start`. Token amounts are whole tokens.
+Set them as environment variables for `npm run deploy` or `npm start`. Amounts are in whole WETH.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BOND` | 100 | `B`: the photo deposit and the accusation bond. Must be at least UMA's minimum bond (2 x `FINAL_FEE`). |
-| `FINAL_FEE` | 50 | UMA Store final fee for the token. |
+| `BOND` | 1 | `B`: the photo deposit and the accusation bond. Must be at least UMA's minimum bond (2 x `FINAL_FEE`). |
+| `FINAL_FEE` | 0.5 | UMA Store final fee for WETH. |
+| `PHASE_LENGTH` | 60 | Seconds of each UMA vote phase (commit, then reveal). UMA uses 86400 on mainnet. |
 | `PHOTO_WINDOW` | 3600 | Challenge period in seconds: how long a photo can be accused. |
-| `REVEAL_WINDOW` | 600 | Seconds between commit and reveal. |
+| `REVEAL_WINDOW` | 900 | Seconds between commit and reveal. |
 | `LIVENESS` | 7200 | Seconds, passed to UMA. Every accusation is disputed at once, so it never runs out. |
-| `MINT` | 10000 | Test tokens minted to each of the first 5 Hardhat accounts. |
+| `STAKE` | 1000000 | UMA voting tokens staked by each voter. |
+
+Why these values: one vote moves the chain clock forward by 2 to 4 phases, so at most 240 s. `REVEAL_WINDOW`
+(900 s) is longer than three votes. A commitment made before a vote on another photo can still be revealed after
+it. `PHOTO_WINDOW` (3600 s) is longer than about 15 votes. The accused photo does not lose time: the contract adds
+the time it spent under accusation to its window.
 
 ## Role accounts
 
 | Role | Hardhat account | Address |
 |---|---|---|
-| operator | 0 | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`. Deploys. Sends the simulated UMA vote. |
+| operator | 0 | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`. Deploys. Calls `settleAssertion` after a vote. |
 | photographer | 1 | `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`. Owns the device. Pays the deposits. |
 | accuser | 2 | `0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC`. Pays the accusation bonds. |
+| voters | 3, 4, 5 | `0x90F7...b906`, `0x15d3...6A65`, `0x9965...A4dc`. Hold and stake UMA voting tokens. Vote in `VotingV2`. |
+
+The roles get no tokens at deployment. They hold Hardhat's test ETH (10,000 each). `attestPhoto` and
+`commitAccusation` wrap exactly the missing ETH into WETH before they pay.
 
 ## CLI commands
 
@@ -72,16 +88,17 @@ node cli.js attest <file>                            attest a photo (deposit B)
 node cli.js verify <file>                            show the records of a photo
 node cli.js accuse-commit <file> --evidence "<text>" commit an accusation (bond B)
 node cli.js accuse-reveal                            reveal it: UMA assertion + dispute
-node cli.js vote <true|false>                        simulated UMA vote (true = fake proven) + settle
+node cli.js vote <true|false>                        real UMA vote by 3 voters (true = fake proven) + settle
 node cli.js refund <file>                            refund the deposit after the challenge period
-node cli.js withdraw <role>                          withdraw the role's credit
+node cli.js withdraw <role>                          withdraw the role's credit (as WETH)
+node cli.js unwrap <role> [amount]                   turn the role's WETH back into ETH
 node cli.js revoke                                   revoke the device key
 node cli.js advance <seconds>                        move the chain clock forward
-node cli.js balances                                 token balances and credits
+node cli.js balances                                 WETH balances, credits and ETH
 node cli.js demo                                     the whole demo, with checks
 ```
 
-Each command prints the transaction hashes and the money that moved. `RPC_URL` and `PAPRIKA_DEPLOYMENT`
+Each command prints the transaction hashes and the money that moved. `RPC_PORT` (or `RPC_URL`) and `PAPRIKA_DEPLOYMENT`
 (path of the deployment JSON) override the defaults.
 
 ## Library notes (`lib/paprika.js`)
@@ -89,25 +106,38 @@ Each command prints the transaction hashes and the money that moved. `RPC_URL` a
 - `connect({ rpcUrl, deployment })` is synchronous. Awaiting it is harmless.
 - `createDevice`, `importDevice`, `exportDevice`, `sha256` and `device.sign` return promises (WebCrypto is async).
   `device.keyId`, `device.x` and `device.y` are `0x` hex strings.
-- Payouts are **credits**. `refund` and the vote outcome add credit inside Paprika. Tokens reach a wallet only
+- Money is **WETH** (`ctx.params.tokenSymbol` = "WETH"). `attestPhoto` and `commitAccusation` first wrap the
+  missing ETH (`WETH9.deposit`), then approve, then pay; `txHashes` lists every transaction. `wrap(ctx, role, amount)`
+  and `unwrap(ctx, role, amount?)` convert by hand.
+- Payouts are **credits**. `refund` and the vote outcome add credit inside Paprika. WETH reaches a wallet only
   with `withdrawCredit(ctx, role)`.
+- `umaVote(ctx, assertionId, fakeProven, { onPhase })` runs a real vote. The three voters commit, then reveal, then
+  the operator settles. The chain clock jumps to each phase. `onPhase({ phase, roundId, txHashes, timestamp })` is
+  called for `commit`, `reveal` and `settle`. It returns `{ txHashes, roundId, simulatedSeconds }` (7 transactions,
+  2 to 4 phases of chain time). It takes well under a second of real time.
 - `refund` works only after `refundableAt` (= `accusableUntil` + reveal period + 1 s), not after the challenge
   period alone. A rejected accusation extends `accusableUntil` by the time the accusation was open.
 - `verifyPhoto` entries also carry `photoHash` and `recordedBeforeFlag`. `device.status` is `none`, `active` or
   `flagged`. `device.reason` is `none`, `fake-proven` or `key-revoked`.
 - `revealAccusation` returns `assertionId` = zero hash if the photo was already proven fake. The bond is then
   credited back.
-- `balances` also returns `oo` (UMA's oracle, which holds both bonds during an accusation) and `operator`.
+- `balances` returns WETH amounts. It also returns `oo` (UMA's oracle, which holds both bonds during an
+  accusation), `operator`, and `eth` = `{ operator, photographer, accuser }` ETH balances.
 - Errors carry the contract's revert reason as the message, for example `too early`, `not active`, `bad sig`.
 
-## What is real and what is simulated
+## What is real
 
-- **Real:** the Paprika contract, UMA's Optimistic Oracle V3, Finder, Store, AddressWhitelist and
-  IdentifierWhitelist (UMA's published bytecode from `@uma/contracts-node`). The P-256 signatures, checked by
-  the chain's P-256 precompile (hardfork osaka). Deposits, bonds, UMA's fee and all payouts.
-- **Simulated:**
-  - The UMA vote. UMA's `MockOracleAncillary` replaces the token-holder vote. `umaVote` pushes the result with
-    `pushPrice` (1e18 = fake proven, 0 = rejected), then calls `settleAssertion`.
-  - The device key. It is a software key, not a camera's secure chip.
-  - The token. It is UMA's `TestnetERC20`: anyone can mint it.
-  - Time. `advanceTime` moves the local chain clock.
+Nothing is mocked. Every contract runs on the local chain and comes from published code:
+
+- **Paprika**, from `../contract`.
+- **UMA's Optimistic Oracle V3** and its plumbing: Finder, Store, AddressWhitelist, IdentifierWhitelist, Registry.
+- **UMA's voting system**: `VotingV2` and the UMA voting token. Voters stake, commit a hidden vote, then reveal it.
+- **WETH9**, the bond currency. The roles wrap their test ETH.
+- The P-256 signatures are checked by the chain's P-256 precompile (hardfork osaka).
+
+What is specific to this demo:
+
+- The voters are three demo accounts (3, 4, 5). They hold all the voting tokens, so they decide every vote. The
+  CLI and the UI choose how they vote.
+- Time is advanced on the local chain: for the vote phases, and with `advanceTime` for the challenge period.
+- The device key is a software key, not a camera's secure chip.

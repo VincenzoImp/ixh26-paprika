@@ -2,8 +2,10 @@
 //
 // It talks to a LOCAL Hardhat node over JSON-RPC with ethers 6 and sends transactions from Hardhat's default
 // unlocked accounts (eth_sendTransaction: the node holds the keys, this code holds none). Roles:
-//   operator = account 0 (deployer; also plays UMA's vote on the mock oracle), photographer = 1, accuser = 2.
-// The contract addresses, parameters and ABIs come from the deployment JSON written by
+//   operator = account 0 (deployer; settles UMA assertions), photographer = 1, accuser = 2,
+//   voters = accounts 3, 4, 5 (they hold staked UMA voting tokens and vote in UMA's VotingV2).
+// Deposits and bonds are in WETH (UMA's WETH9): the roles hold ETH and wrap exactly what they need.
+// The contract addresses, parameters, RPC URL and ABIs come from the deployment JSON written by
 // contract/scripts/deploy-local.js (copied to app/web/deployment.json for the browser).
 //
 // In the browser, "ethers" is resolved through an import map; device.js has no dependencies.
@@ -24,6 +26,7 @@ const STATES = ["none", "attested", "accused", "refunded", "fake"];          // 
 const DEVICE_STATUS = ["none", "active", "flagged"];                          // Paprika.Status
 const REASONS = ["none", "fake-proven", "key-revoked"];                       // Paprika.Reason
 const NUMERICAL_TRUE = 10n ** 18n;   // OOv3 reads price 1e18 as "the assertion is true", anything else as false
+const DVM_STATUS = ["NotRequested", "Active", "Resolved", "Future", "ToDelete"];   // VotingV2 RequestStatus
 
 // ------------------------------------------------------------------ connection
 
@@ -31,19 +34,25 @@ const NUMERICAL_TRUE = 10n ** 18n;   // OOv3 reads price 1e18 as "the assertion 
  * Connects to the node and the deployed contracts. Synchronous (no network call): awaiting it is harmless.
  * deployment = the parsed JSON written by the deploy script.
  */
-export function connect({ rpcUrl = "http://127.0.0.1:8545", deployment }) {
+export function connect({ rpcUrl, deployment }) {
   if (!deployment?.addresses?.paprika) throw new Error("deployment JSON is missing or has no Paprika address");
+  rpcUrl = rpcUrl || deployment.rpcUrl || "http://127.0.0.1:8545";
   const chainId = Number(deployment.chainId ?? 31337);
   // staticNetwork: skip chain detection calls; short polling interval: automine answers at once.
   // cacheTimeout -1: by default ethers shares identical requests for 250 ms, so a read right after a transaction
   // or after evm_mine could return the previous block. A demo must always show fresh state.
   const provider = new ethers.JsonRpcProvider(rpcUrl, chainId, { staticNetwork: true, pollingInterval: 100, cacheTimeout: -1 });
 
+  const known = deployment.accounts || {};
   const minted = deployment.token?.mintedTo || [];
   const accounts = {};
-  ROLES.forEach((role, i) => { accounts[role] = ethers.getAddress(minted[i] || HARDHAT_ACCOUNTS[i]); });
+  ROLES.forEach((role, i) => { accounts[role] = ethers.getAddress(known[role] || minted[i] || HARDHAT_ACCOUNTS[i]); });
   const signers = {};
   for (const role of ROLES) signers[role] = new ethers.JsonRpcSigner(provider, accounts[role]);
+  // UMA voters (accounts 3-5): unlocked on the node like the roles; they only sign commitVote / revealVote.
+  const voters = (deployment.voters || []).map((address, i) => ({
+    label: `voter${i + 1}`, address: ethers.getAddress(address), signer: new ethers.JsonRpcSigner(provider, address),
+  }));
 
   const a = deployment.addresses, abis = deployment.abis;
   const p = deployment.parameters;
@@ -54,20 +63,26 @@ export function connect({ rpcUrl = "http://127.0.0.1:8545", deployment }) {
     provider,
     signers,
     accounts,
-    addresses: { paprika: a.paprika, oo: a.oo, store: a.store, mockOracle: a.mockOracle, currency: a.currency },
+    voters,
+    addresses: {
+      paprika: a.paprika, oo: a.oo, store: a.store, currency: a.currency, weth: a.weth || deployment.weth || a.currency,
+      voting: a.voting || deployment.voting, votingToken: a.votingToken || deployment.votingToken,
+    },
     params: {
       bond: BigInt(p.BOND),
       photoWindow: Number(p.PHOTO_WINDOW),
       revealWindow: Number(p.REVEAL_WINDOW),
       feeShare: Number(BigInt(p.burnedBondPercentage ?? "500000000000000000")) / 1e18,   // UMA's burnedBondPercentage
-      tokenSymbol: deployment.token?.symbol ?? "TOKEN",
+      tokenSymbol: deployment.token?.symbol ?? "WETH",
       tokenDecimals: Number(deployment.token?.decimals ?? 18),
+      phaseLength: Number(deployment.phaseLength ?? p.PHASE_LENGTH ?? 0),   // seconds of each UMA voting phase
     },
     contracts: {
       paprika: new ethers.Contract(a.paprika, abis.Paprika, provider),
-      token: new ethers.Contract(a.currency, abis.TestnetERC20, provider),
+      token: new ethers.Contract(a.currency, abis.WETH9, provider),        // WETH9: ERC-20 + deposit/withdraw
       oo: new ethers.Contract(a.oo, abis.OptimisticOracleV3, provider),
-      mockOracle: new ethers.Contract(a.mockOracle, abis.MockOracleAncillary, provider),
+      voting: abis.VotingV2 && (a.voting || deployment.voting)
+        ? new ethers.Contract(a.voting || deployment.voting, abis.VotingV2, provider) : null,
     },
     activity: [],          // every transaction sent through this ctx, oldest first
     listeners: new Set(),  // onActivity callbacks
@@ -76,7 +91,10 @@ export function connect({ rpcUrl = "http://127.0.0.1:8545", deployment }) {
   return ctx;
 }
 
-/** Registers a callback called with { blockNumber, txHash, call, from, role } after every transaction sent through ctx. Returns an unsubscribe function. */
+/**
+ * Registers a callback called with { blockNumber, txHash, call, from, role } after every transaction sent through
+ * ctx (role is "photographer" | "accuser" | "operator" | "voter1".."voter3"). Returns an unsubscribe function.
+ */
 export function onActivity(ctx, callback) {
   ctx.listeners.add(callback);
   return () => ctx.listeners.delete(callback);
@@ -110,19 +128,23 @@ function signerOf(ctx, role) {
   return s;
 }
 
-// Sends one transaction from a role, waits for it to be mined, reports it to onActivity, returns the receipt.
-// `label` is the human name of the call shown in the activity log, e.g. "Paprika.attest".
-async function send(ctx, role, contract, method, args, label) {
-  const signer = signerOf(ctx, role);
+// Sends one transaction, waits for it to be mined, reports it to onActivity, returns the receipt.
+// `who` is a role name or a voter { label, address, signer }. `label` is the call shown in the activity log,
+// e.g. "Paprika.attest". `overrides` (optional) carries e.g. { value } for payable calls.
+async function send(ctx, who, contract, method, args, label, overrides) {
+  const voter = typeof who === "object" ? who : null;
+  const signer = voter ? voter.signer : signerOf(ctx, who);
+  const role = voter ? voter.label : who;
+  const from = voter ? voter.address : ctx.accounts[who];
   let receipt;
   try {
-    const tx = await contract.connect(signer)[method](...args);
+    const tx = await contract.connect(signer)[method](...args, ...(overrides ? [overrides] : []));
     receipt = await tx.wait();
   } catch (e) {
     throw fail(e);
   }
   if (!receipt || receipt.status !== 1) throw new Error(`${label} reverted`);
-  const item = { blockNumber: receipt.blockNumber, txHash: receipt.hash, call: label, from: ctx.accounts[role], role };
+  const item = { blockNumber: receipt.blockNumber, txHash: receipt.hash, call: label, from, role };
   ctx.activity.push(item);
   for (const cb of ctx.listeners) {
     try { cb(item); } catch { /* a broken listener must not break the transaction flow */ }
@@ -135,9 +157,15 @@ async function read(promise) {
   try { return await promise; } catch (e) { throw fail(e); }
 }
 
-// Makes sure `role` has approved Paprika to pull at least one BOND; sends approve(BOND) if not.
-async function ensureAllowance(ctx, role, txHashes) {
+// Makes sure `role` can pay one BOND to Paprika: wraps exactly the missing amount of ETH into WETH
+// (WETH9.deposit{value}) and sends approve(BOND) if the allowance is too low. Pushes the tx hashes it sent.
+async function ensureFunds(ctx, role, txHashes) {
   const { token } = ctx.contracts;
+  const held = await read(token.balanceOf(ctx.accounts[role]));
+  if (held < ctx.params.bond) {
+    const r = await send(ctx, role, token, "deposit", [], `${ctx.params.tokenSymbol}.deposit (wrap ETH)`, { value: ctx.params.bond - held });
+    txHashes.push(r.hash);
+  }
   const have = await read(token.allowance(ctx.accounts[role], ctx.addresses.paprika));
   if (have >= ctx.params.bond) return;
   const r = await send(ctx, role, token, "approve", [ctx.addresses.paprika, ctx.params.bond], `${ctx.params.tokenSymbol}.approve`);
@@ -177,7 +205,10 @@ export async function chainInfo(ctx) {
   return { chainId: ctx.chainId, blockNumber: b.number, timestamp: Number(b.timestamp) };
 }
 
-/** Token balances (bigint) of photographer, accuser, UMA Store and Paprika; also operator and the UMA oracle. Reads only. */
+/**
+ * WETH balances (bigint) of photographer, accuser, UMA Store and Paprika; also operator and UMA's oracle (oo, which
+ * holds both bonds during a vote). `eth` = native ETH balances of the three roles (they pay gas in ETH). Reads only.
+ */
 export async function balances(ctx) {
   const { token } = ctx.contracts;
   const who = {
@@ -186,7 +217,10 @@ export async function balances(ctx) {
   };
   const keys = Object.keys(who);
   const values = await read(Promise.all(keys.map((k) => token.balanceOf(who[k]))));
-  return Object.fromEntries(keys.map((k, i) => [k, values[i]]));
+  const out = Object.fromEntries(keys.map((k, i) => [k, values[i]]));
+  const eth = await read(Promise.all(ROLES.map((r) => ctx.provider.getBalance(ctx.accounts[r]))));
+  out.eth = Object.fromEntries(ROLES.map((r, i) => [r, eth[i]]));
+  return out;
 }
 
 /** Credit (bigint) that `address` can collect from Paprika with withdrawCredit. Reads only. */
@@ -257,8 +291,9 @@ export async function registerDevice(ctx, role, device) {
 }
 
 /**
- * Attests a photo with a deposit of BOND tokens paid by `role`.
- * Sends: token.approve (only if the allowance is too low), then Paprika.attest(photoHash, anchorBlock, keyId, sig).
+ * Attests a photo with a deposit of BOND (WETH) paid by `role`.
+ * Sends: WETH.deposit (wraps only the missing ETH), WETH.approve (only if needed), then
+ * Paprika.attest(photoHash, anchorBlock, keyId, sig). txHashes lists them in order.
  */
 export async function attestPhoto(ctx, role, device, photoBytes) {
   signerOf(ctx, role);
@@ -271,7 +306,7 @@ export async function attestPhoto(ctx, role, device, photoBytes) {
   const msg = captureMessage({ chainId: ctx.chainId, contract: ctx.addresses.paprika, keyId: device.keyId, photoHash, blockHash: anchor.hash });
   const sig = toHex(await device.sign(msg));
   const txHashes = [];
-  await ensureAllowance(ctx, role, txHashes);
+  await ensureFunds(ctx, role, txHashes);
   const r = await send(ctx, role, ctx.contracts.paprika, "attest", [photoHash, anchor.number, device.keyId, sig], "Paprika.attest");
   txHashes.push(r.hash);
   return { txHashes, photoHash, keyId: device.keyId, anchorBlock: anchor.number };
@@ -294,7 +329,8 @@ export async function revokeKey(ctx, role, device) {
 /**
  * Step 1 of an accusation. Only a hash goes on chain, so nobody can tell which photo is accused:
  * commitment = keccak256(abi.encode(claimant, photoHash, keyId, evidenceHash, salt)), with a random salt.
- * Sends: token.approve (if needed), then Paprika.commitClaim(commitment), which pulls BOND from `role`.
+ * Sends: WETH.deposit (wraps only the missing ETH), WETH.approve (if needed), then Paprika.commitClaim(commitment),
+ * which pulls BOND from `role`.
  * KEEP the returned salt and evidenceHash: the reveal needs them.
  */
 export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }) {
@@ -305,7 +341,7 @@ export async function commitAccusation(ctx, role, { photoHash, keyId, evidence }
   const commitment = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
     ["address", "bytes32", "bytes32", "bytes32", "bytes32"], [claimant, photoHash, keyId, evidenceHash, salt]));
   const txHashes = [];
-  await ensureAllowance(ctx, role, txHashes);
+  await ensureFunds(ctx, role, txHashes);
   const r = await send(ctx, role, ctx.contracts.paprika, "commitClaim", [commitment], "Paprika.commitClaim");
   txHashes.push(r.hash);
   return { txHashes, commitment, salt, evidenceHash };
@@ -329,15 +365,42 @@ export async function revealAccusation(ctx, role, { photoHash, keyId, evidenceHa
   return { txHash: r.hash, assertionId };
 }
 
+// Latest block timestamp through a raw call (never cached).
+async function latestTimestamp(ctx) {
+  try { return BigInt((await ctx.provider.send("eth_getBlockByNumber", ["latest", false])).timestamp); } catch (e) { throw fail(e); }
+}
+
+// Moves the local chain clock to exactly `ts` (evm_setNextBlockTimestamp + evm_mine, i.e. evm_increaseTime to an
+// exact boundary). Returns the seconds advanced (0 if already there).
+async function advanceTo(ctx, ts) {
+  const now = await latestTimestamp(ctx);
+  if (ts <= now) return 0n;
+  try {
+    await ctx.provider.send("evm_setNextBlockTimestamp", [ethers.toQuantity(ts)]);
+    await ctx.provider.send("evm_mine", []);
+  } catch (e) { throw fail(e); }
+  return ts - now;
+}
+
 /**
- * THE SIMULATED VOTE. On a real network UMA token holders vote (DVM). Locally, UMA's MockOracleAncillary stands in
- * for the DVM: when Paprika disputed the assertion, OOv3 called mockOracle.requestPrice(identifier, assertionTime,
- * stampAssertion(assertionId)). We rebuild that exact triple from OOv3's own views, push the "vote result" for it
- * (1e18 = the accusation is true = fake proven; 0 = rejected), then call OOv3.settleAssertion. UMA pays the winner
- * (via Paprika's callback) and sends its fee to the Store. Both transactions are sent by the operator account.
+ * THE VOTE: a real UMA vote in VotingV2, the DVM, by the three voter accounts (3-5), then settlement.
+ * When Paprika disputed its assertion, OOv3 called VotingV2.requestPrice(identifier, assertionTime,
+ * stampAssertion(assertionId)). VotingV2 votes on it in the NEXT round; a round = commit phase + reveal phase,
+ * each `phaseLength` seconds, roundId = floor(timestamp / (2 x phaseLength)). On the local chain we jump the clock:
+ *   1. find the request status (getPriceRequestStatuses: a fresh request is "Future" and is NOT listed by
+ *      getPendingRequests, so we query it directly);
+ *   2. jump to the commit phase of its round; each voter commits
+ *      keccak256(abi.encodePacked(int256 price, int256 salt, address voter, uint256 time, bytes ancillaryData,
+ *      uint256 roundId, bytes32 identifier)) with price 1e18 = "the accusation is true" (fake proven), 0 = rejected;
+ *   3. jump to the reveal phase; each voter reveals (price, salt);
+ *   4. jump past the round end; the operator calls OOv3.settleAssertion, which reads the price from VotingV2
+ *      (resolved: revealed stake above the GAT, winning answer above the SPAT), pays out, and calls Paprika back.
+ * onPhase({ phase: "commit" | "reveal" | "settle", roundId, txHashes, timestamp }) is called after each phase.
+ * Returns { txHashes, roundId, simulatedSeconds } (simulatedSeconds = chain time skipped by the jumps).
  */
-export async function umaVote(ctx, assertionId, fakeProven) {
-  const { oo, mockOracle } = ctx.contracts;
+export async function umaVote(ctx, assertionId, fakeProven, { onPhase } = {}) {
+  const { oo, voting } = ctx.contracts;
+  if (!voting || !ctx.voters.length) throw new Error("this deployment has no UMA voting contract or voters: run `npm run deploy` again");
   const a = await read(oo.getAssertion(assertionId));
   if (a.asserter === ethers.ZeroAddress) throw new Error("unknown assertion id");
   if (a.settled) throw new Error("assertion already settled");
@@ -345,16 +408,58 @@ export async function umaVote(ctx, assertionId, fakeProven) {
   const identifier = a.identifier;
   const time = a.assertionTime;
   const ancillaryData = await read(oo.stampAssertion(assertionId));
-  const pending = await read(mockOracle.getPendingQueries());
-  const match = pending.find((q) => q.identifier === identifier && q.time === time && q.ancillaryData === ancillaryData);
-  if (!match) throw new Error("no pending vote for this assertion on UMA's mock oracle");
-  const price = fakeProven ? NUMERICAL_TRUE : 0n;
+  const phaseLength = BigInt(ctx.params.phaseLength || (await read(voting.voteTiming())));
+  const roundLength = 2n * phaseLength;
+
+  // 1. Status of the DVM request: 1 Active (voted this round), 3 Future (voted next round).
+  const [st] = await read(voting.getPriceRequestStatuses([{ identifier, time, ancillaryData }]));
+  const status = Number(st.status);
+  if (status !== 1 && status !== 3) throw new Error(`no pending UMA vote for this assertion (status ${DVM_STATUS[status] ?? status})`);
+  let roundId = BigInt(st.lastVotingRound);
+  // Active but already in the reveal phase: too late to commit in this round; the request rolls to the next one.
+  if (status === 1 && Number(await read(voting.getVotePhase())) === 1) roundId += 1n;
+  const commitStart = roundId * roundLength, revealStart = commitStart + phaseLength, roundEnd = commitStart + roundLength;
   const txHashes = [];
-  const r1 = await send(ctx, "operator", mockOracle, "pushPrice", [identifier, time, ancillaryData, price], "UMA MockOracle.pushPrice (simulated vote)");
-  txHashes.push(r1.hash);
-  const r2 = await send(ctx, "operator", oo, "settleAssertion", [assertionId], "UMA OOv3.settleAssertion");
-  txHashes.push(r2.hash);
-  return { txHashes };
+  let simulated = 0n;
+  const report = async (phase, hashes) => {
+    if (onPhase) {
+      try { onPhase({ phase, roundId: Number(roundId), txHashes: hashes, timestamp: Number(await latestTimestamp(ctx)) }); } catch { /* UI callback errors are ignored */ }
+    }
+  };
+
+  // 2. Commit phase: each voter commits a hidden vote with a random salt.
+  simulated += await advanceTo(ctx, commitStart);
+  const price = fakeProven ? NUMERICAL_TRUE : 0n;
+  const ballots = [];
+  const commitHashes = [];
+  for (const v of ctx.voters) {
+    const salt = BigInt(ethers.hexlify(ethers.randomBytes(31)));   // positive int256
+    const hash = ethers.solidityPackedKeccak256(
+      ["int256", "int256", "address", "uint256", "bytes", "uint256", "bytes32"],
+      [price, salt, v.address, time, ancillaryData, roundId, identifier]);
+    const r = await send(ctx, v, voting, "commitVote", [identifier, time, ancillaryData, hash], "UMA VotingV2.commitVote");
+    ballots.push({ v, salt });
+    commitHashes.push(r.hash);
+  }
+  txHashes.push(...commitHashes);
+  await report("commit", commitHashes);
+
+  // 3. Reveal phase: each voter reveals its price and salt.
+  simulated += await advanceTo(ctx, revealStart);
+  const revealHashes = [];
+  for (const { v, salt } of ballots) {
+    const r = await send(ctx, v, voting, "revealVote", [identifier, time, price, ancillaryData, salt], "UMA VotingV2.revealVote");
+    revealHashes.push(r.hash);
+  }
+  txHashes.push(...revealHashes);
+  await report("reveal", revealHashes);
+
+  // 4. After the round: settle on OOv3 (reads VotingV2's price, pays out, calls Paprika's callback).
+  simulated += await advanceTo(ctx, roundEnd);
+  const r = await send(ctx, "operator", oo, "settleAssertion", [assertionId], "UMA OOv3.settleAssertion");
+  txHashes.push(r.hash);
+  await report("settle", [r.hash]);
+  return { txHashes, roundId: Number(roundId), simulatedSeconds: Number(simulated) };
 }
 
 // ------------------------------------------------------------------ money
@@ -365,7 +470,7 @@ export async function refund(ctx, role, { photoHash, keyId }) {
   return { txHash: r.hash };
 }
 
-/** Moves all credit of `role` from Paprika to its wallet. Sends Paprika.withdrawCredit. Reverts "no credit" if zero. */
+/** Moves all credit of `role` from Paprika to its wallet, as WETH. Sends Paprika.withdrawCredit. Reverts "no credit" if zero. */
 export async function withdrawCredit(ctx, role) {
   const { paprika } = ctx.contracts;
   const r = await send(ctx, role, paprika, "withdrawCredit", [], "Paprika.withdrawCredit");
@@ -376,6 +481,20 @@ export async function withdrawCredit(ctx, role) {
     if (parsed?.name === "CreditWithdrawn") amount = parsed.args.amount;
   }
   return { txHash: r.hash, amount };
+}
+
+/** Wraps `amount` (bigint, base units) of the role's ETH into WETH. Sends WETH9.deposit{value: amount}. */
+export async function wrap(ctx, role, amount) {
+  const r = await send(ctx, role, ctx.contracts.token, "deposit", [], `${ctx.params.tokenSymbol}.deposit (wrap ETH)`, { value: BigInt(amount) });
+  return { txHash: r.hash, amount: BigInt(amount) };
+}
+
+/** Unwraps WETH back to ETH: `amount` (bigint), or the role's whole WETH balance if omitted. Sends WETH9.withdraw. */
+export async function unwrap(ctx, role, amount) {
+  const value = amount === undefined || amount === null ? await read(ctx.contracts.token.balanceOf(ctx.accounts[role])) : BigInt(amount);
+  if (value <= 0n) throw new Error("no WETH to unwrap");
+  const r = await send(ctx, role, ctx.contracts.token, "withdraw", [value], `${ctx.params.tokenSymbol}.withdraw (unwrap)`);
+  return { txHash: r.hash, amount: value };
 }
 
 // ------------------------------------------------------------------ demo control

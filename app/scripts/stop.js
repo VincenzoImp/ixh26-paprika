@@ -1,5 +1,5 @@
-// `npm run stop`: kills the chain and web server started by the other scripts (PIDs in app/.state/pids.json),
-// plus any leftover Hardhat node on port 8545 started from ../contract.
+// `npm run stop`: kills the chain and web server started by the other scripts for THIS instance (RPC_PORT, default
+// 8545; PIDs in app/.state/pids[-<port>].json), plus a leftover Hardhat node on that port. Other ports are untouched.
 import { execSync } from "node:child_process";
 import { CHAIN_PORT, killGroup, readPids, writePid } from "./common.js";
 

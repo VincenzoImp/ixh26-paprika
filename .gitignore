@@ -51,3 +51,4 @@ artifacts/
 contract/deployments/
 app/web/deployment.json
 app/.state/
+app/web/deployment-*.json

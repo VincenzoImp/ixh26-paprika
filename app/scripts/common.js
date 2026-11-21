@@ -7,16 +7,19 @@ import { fileURLToPath } from "node:url";
 export const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const CONTRACT_DIR = path.resolve(APP_DIR, "..", "contract");
 export const STATE_DIR = path.join(APP_DIR, ".state");
-export const PID_FILE = path.join(STATE_DIR, "pids.json");
 export const HARDHAT_BIN = path.join(CONTRACT_DIR, "node_modules", ".bin", "hardhat");
-export const DEPLOYMENT_FILE = path.join(CONTRACT_DIR, "deployments", "local.json");
-export const WEB_DEPLOYMENT_FILE = path.join(APP_DIR, "web", "deployment.json");
 
+// Ports: RPC_PORT (chain, default 8545) and WEB_PORT (UI, default 5173). Several instances can run side by side;
+// every per-instance file gets a "-<RPC_PORT>" suffix when the chain is not on the default port.
 export const CHAIN_HOST = "127.0.0.1";
-export const CHAIN_PORT = 8545;
+export const CHAIN_PORT = Number(process.env.RPC_PORT || 8545);
 export const RPC_URL = process.env.RPC_URL || `http://${CHAIN_HOST}:${CHAIN_PORT}`;
 export const WEB_HOST = "127.0.0.1";
 export const WEB_PORT = Number(process.env.WEB_PORT || 5173);
+export const SUFFIX = CHAIN_PORT === 8545 ? "" : `-${CHAIN_PORT}`;
+export const PID_FILE = path.join(STATE_DIR, `pids${SUFFIX}.json`);
+export const DEPLOYMENT_FILE = path.join(CONTRACT_DIR, "deployments", `local${SUFFIX}.json`);
+export const WEB_DEPLOYMENT_FILE = path.join(APP_DIR, "web", `deployment${SUFFIX}.json`);
 
 /** True if a JSON-RPC node answers eth_chainId at RPC_URL. */
 export async function rpcAlive(url = RPC_URL) {

@@ -29,8 +29,9 @@ interface IOptimisticOracleV3CallbackRecipient {
 /// 1. A device (phone secure element) has a P-256 key. Anyone registers it for free with register(x, y, popSig);
 ///    popSig proves the key is held and names the caller. keyId = sha256(x || y). A key registers once, ever.
 /// 2. The device signs (photo sha256, a recent block hash). Anyone submits it with attest(); the sender pays a
-///    deposit of BOND tokens (approved beforehand) and becomes the depositor. The record says the photo existed
-///    between anchorBlock and recordedBlock. One record per (photo, key); attestersOf(photoHash) lists the keys.
+///    deposit of BOND tokens (approved beforehand) and becomes the depositor. The record bounds when the photo was
+///    SIGNED: after block anchorBlock, no later than block recordedBlock (not when it was taken or first existed).
+///    One record per (photo, key); attestersOf(photoHash) lists the keys.
 /// 3. Verification from a file alone: hash it, call attestersOf(hash), then verify(hash, keyId) for each key.
 /// 4. Accusing: until accusableUntil (attest time + PHOTO_WINDOW), anyone commits a hidden accusation with BOND
 ///    (commitClaim), then reveals it 1 block to REVEAL_WINDOW later (revealClaim). Paprika asserts "this photo is

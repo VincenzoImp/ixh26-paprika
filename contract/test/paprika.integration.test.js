@@ -1,17 +1,22 @@
-// Paprika against the REAL UMA Optimistic Oracle V3 stack (Finder, Store, whitelists, OptimisticOracleV3 from the
-// npm package @uma/contracts-node; only the DVM vote is UMA's MockOracleAncillary), on the in-process Hardhat chain.
-// Each test prints `CASE <name>: <what happened> | <numbers>`: amounts are in tokens, written as a formula of BOND and
-// fee = burnedBondPercentage x BOND, then the measured value. `BAL` lines show token balances at each step.
+// Paprika integration tests, on the in-process Hardhat chain (hardfork osaka), against the real contracts it depends
+// on, all deployed from UMA's published artifacts (@uma/contracts-node, see lib/deploy-uma-dvm.js): Finder, Store,
+// whitelists, Registry, OptimisticOracleV3, the DVM VotingV2 with its VotingToken (3 voters, accounts 10-12, stake
+// and vote by commit/reveal; lib/vote.js), and WETH9 as the bond currency (accounts wrap ETH). Nothing is replaced.
+// Each test prints `CASE <name>: <what happened> | <numbers>`: amounts are in WETH, written as a formula of BOND and
+// fee = burnedBondPercentage x BOND, then the measured value. `BAL` lines show WETH balances at each step.
 // After every test: Paprika's balance == BOND x Attested records + BOND x unrevealed commitments + credits, and the
 // oracle holds 2 x BOND per open accusation.
 const assert = require("assert");
 const crypto = require("crypto");
 const hre = require("hardhat");
 const { ethers, network } = hre;
-const { deployUma } = require("../lib/deploy-uma");
-const { resolveDispute } = require("../lib/resolve");
+const { deployUmaWithVoting } = require("../lib/deploy-uma-dvm");
+const { resolveByVote } = require("../lib/vote");
 
-const P = { FINAL_FEE: ethers.parseEther("50"), WINDOW: 7 * 86400, REVEAL: 3600, LIVENESS: 7200, VOTE: 2 * 86400 };
+// PHASE_LENGTH: UMA vote phase (commit, reveal) in seconds; a vote moves the clock 2 to 4 phases. The windows are
+// kept well above one vote so that a commitment made before a vote can still be revealed after it (case 5).
+const PHASE = Number(process.env.PHASE_LENGTH || 60);
+const P = { FINAL_FEE: ethers.parseEther("0.5"), WINDOW: Math.max(7 * 86400, 20 * PHASE), REVEAL: Math.max(3600, 5 * PHASE), LIVENESS: 7200 };
 const N_P256 = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
 const F = (x) => ethers.formatEther(x);
 const h = (s) => ethers.sha256(ethers.toUtf8Bytes(s));
@@ -44,25 +49,40 @@ const msgReg = named("PAPRIKA/REGISTER"), msgRev = named("PAPRIKA/REVOKE");
 const msgCap = (c, keyId, photo, bh) => ethers.solidityPacked(["string", "uint256", "address", "bytes32", "bytes32", "bytes32"], ["PAPRIKA/CAPTURE", c.chainId, c.addr, keyId, photo, bh]);
 const commitmentOf = (who, photo, keyId, ev, salt) => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["address", "bytes32", "bytes32", "bytes32", "bytes32"], [who, photo, keyId, ev, salt]));
 
-describe("Paprika with the real UMA Optimistic Oracle V3", function () {
+// The real vote: the 3 voters commit and reveal in VotingV2, then OOv3.settleAssertion. Returns the settle receipt.
+async function vote(c, id, truthful) {
+  const res = await resolveByVote(c.uma, hre, id, truthful, undefined, { log: () => {} });
+  assert(res.settled, `vote did not settle: ${res.settleError}`);
+  gasLog["VotingV2.commitVote (max of 3)"] = [...res.commits.map((x) => x.gasUsed), gasLog["VotingV2.commitVote (max of 3)"] || 0n].reduce((a, b) => (a > b ? a : b));
+  gasLog["VotingV2.revealVote (max of 3)"] = [...res.reveals.map((x) => x.gasUsed), gasLog["VotingV2.revealVote (max of 3)"] || 0n].reduce((a, b) => (a > b ? a : b));
+  console.log(`      VOTE ${truthful ? "TRUE (fake proven)" : "FALSE (rejected)"}: round ${res.roundId}, 3 commits + 3 reveals + settle, ${res.simulatedSeconds} s of chain time`);
+  return { res, settleReceipt: await ethers.provider.getTransactionReceipt(res.settle.hash) };
+}
+
+describe("Paprika with real UMA (OOv3 + VotingV2) and WETH9", function () {
   let c, s;
   before(async () => {
     s = await ethers.getSigners();
-    const uma = await deployUma(hre, { finalFee: P.FINAL_FEE, liveness: P.LIVENESS });
-    const BOND = uma.minimumBond;   // the smallest bond UMA accepts for this token
+    const uma = await deployUmaWithVoting(hre, {
+      finalFee: P.FINAL_FEE, liveness: P.LIVENESS, phaseLength: PHASE, voters: s.slice(10, 13), currency: "WETH9",
+    });
+    const BOND = uma.minimumBond;   // the smallest bond UMA accepts for WETH
     const oo = await uma.oo.getAddress(), token = uma.currency;
     const pap = await (await ethers.getContractFactory("Paprika", s[0])).deploy(oo, await token.getAddress(), BOND, P.WINDOW, P.REVEAL, P.LIVENESS);
     const addr = await pap.getAddress();
-    for (const a of s.slice(1, 10)) { await send(token.allocateTo(a.address, 20n * BOND)); await send(token.connect(a).approve(addr, ethers.MaxUint256)); }
+    gasLog["deploy Paprika"] = (await pap.deploymentTransaction().wait()).gasUsed;
+    // Every test account wraps ETH into WETH (WETH9.deposit) and approves Paprika.
+    for (const a of s.slice(1, 10)) { await send(token.connect(a).deposit({ value: 20n * BOND })); await send(token.connect(a).approve(addr, ethers.MaxUint256)); }
     const fee = (BOND * (await uma.oo.burnedBondPercentage())) / 10n ** 18n;
     c = { uma, pap, addr, token, oo, store: await uma.store.getAddress(), BOND, fee, payout: 2n * BOND - fee, chainId: (await ethers.provider.getNetwork()).chainId, fromBlock: await ethers.provider.getBlockNumber() };
-    console.log(`      real UMA stack: OOv3 ${oo}, Store ${c.store}, identifier ${ethers.decodeBytes32String(await pap.identifier())}, minimum bond ${F(BOND)} = BOND, burnedBondPercentage ${F(await uma.oo.burnedBondPercentage())}, fee ${F(fee)}`);
+    console.log(`      real UMA stack: OOv3 ${oo}, VotingV2 ${await uma.voting.getAddress()} (phase ${PHASE} s, 3 voters x ${F(uma.params.stakePerVoter)} UMA staked, GAT ${F(uma.params.gat)}, SPAT ${F(uma.params.spat)}), Store ${c.store}, WETH9 ${await token.getAddress()}`);
+    console.log(`      identifier ${ethers.decodeBytes32String(await pap.identifier())}, minimum bond ${F(BOND)} WETH = BOND, burnedBondPercentage ${F(await uma.oo.burnedBondPercentage())}, fee ${F(fee)}; PHOTO_WINDOW ${P.WINDOW} s, REVEAL_WINDOW ${P.REVEAL} s`);
   });
   afterEach(async () => {
     const logs = await c.pap.queryFilter("*", c.fromBlock);
     let deposits = 0n, bonds = 0n, credits = 0n, open = 0n; const who = new Set(), seen = new Set();
     for (const l of logs) {
-      const a = l.args, key = l.eventName + (a[0] || "") + (a[1] || "");
+      const a = l.args, key = l.eventName + (a.length > 0 ? a[0] : "") + (a.length > 1 ? a[1] : "");
       if (seen.has(key)) continue; seen.add(key);
       if (l.eventName === "Attested" && (await c.pap.records(a.photoHash, a.keyId)).state === 1n) deposits += c.BOND;
       if (l.eventName === "Committed" && (await c.pap.commits(a.commitment)).live) bonds += c.BOND;
@@ -76,16 +96,18 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     console.log(`      invariant ok: Paprika holds ${F(bal)} = deposits ${F(deposits)} + commit bonds ${F(bonds)} + credits ${F(credits)}; oracle ${F(2n * c.BOND * open)} for ${open} open`);
   });
 
-  const reg = async (who, dev = newDevice()) => { await send(c.pap.connect(who).register(dev.x, dev.y, dev.sign(msgReg(c, dev.keyId, who.address)))); return dev; };
+  // Records the gas of the first transaction of each kind (the transaction is always sent).
+const firstGas = (k, r) => { gasLog[k] ??= r.gasUsed; return r; };
+const reg = async (who, dev = newDevice()) => { firstGas("register", await send(c.pap.connect(who).register(dev.x, dev.y, dev.sign(msgReg(c, dev.keyId, who.address))))); return dev; };
   async function attest(who, dev, photo) {
     const b = await ethers.provider.getBlock("latest");
     const sig = dev.sign(msgCap(c, dev.keyId, photo, b.hash));
-    await send(c.pap.connect(who).attest(photo, b.number, dev.keyId, sig));
+    firstGas("attest (P-256 verify + WETH transferFrom)", await send(c.pap.connect(who).attest(photo, b.number, dev.keyId, sig)));
     return { sig, anchor: b.number, v: await c.pap.verify(photo, dev.keyId) };
   }
   async function commit(who, photo, keyId, ev = h("evidence")) {
     const salt = ethers.hexlify(ethers.randomBytes(32)), cm = commitmentOf(who.address, photo, keyId, ev, salt);
-    await send(c.pap.connect(who).commitClaim(cm));
+    firstGas("commitClaim", await send(c.pap.connect(who).commitClaim(cm)));
     return { who, photo, keyId, ev, salt, cm };
   }
   async function reveal(k) {
@@ -108,11 +130,11 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     const a = await attest(relayer, dev, h("i1"));
     await rv(c.pap.refund(h("i1"), dev.keyId), "too early");
     await warpTo(a.v.refundableAt);
-    await send(c.pap.refund(h("i1"), dev.keyId));
-    await send(c.pap.connect(relayer).withdrawCredit());
+    gasLog["refund"] = (await send(c.pap.refund(h("i1"), dev.keyId))).gasUsed;
+    gasLog["withdrawCredit"] = (await send(c.pap.connect(relayer).withdrawCredit())).gasUsed;
     const v = await c.pap.verify(h("i1"), dev.keyId);
     assert.equal(v.state, 3n); assert.equal(await val(relayer), v0);
-    CASE("honest path (real UMA)", `register free, relayer attests and locks BOND, refund after PHOTO_WINDOW + REVEAL_WINDOW; record stays (${ST[v.state]}, recordedBlock ${v.recordedBlock})`, `relayer locked BOND = ${F(c.BOND)} and got it back, net 0`);
+    CASE("honest path (UMA vote)", `register free, relayer attests and locks BOND, refund after PHOTO_WINDOW + REVEAL_WINDOW; record stays (${ST[v.state]}, recordedBlock ${v.recordedBlock})`, `relayer locked BOND = ${F(c.BOND)} and got it back, net 0`);
   });
 
   it("2 one pixel changed", async () => {
@@ -120,7 +142,7 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     const v = await c.pap.verify(h("i2 one pixel changed"), dev.keyId);
     assert.equal(v.state, 0n); assert.equal((await c.pap.attestersOf(h("i2 one pixel changed"))).length, 0);
     assert.deepEqual([...(await c.pap.attestersOf(h("i2")))], [dev.keyId]);
-    CASE("one pixel changed (real UMA)", "attestersOf(modified hash) = [], verify finds no record", `state ${ST[v.state]}, recordedBlock ${v.recordedBlock}`);
+    CASE("one pixel changed (UMA vote)", "attestersOf(modified hash) = [], verify finds no record", `state ${ST[v.state]}, recordedBlock ${v.recordedBlock}`);
   });
 
   it("3 true accusation: commit, reveal (assert + dispute at the real oracle), vote TRUE, settle", async () => {
@@ -130,17 +152,17 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     const dev = await reg(forger); await attest(forger, dev, h("i3 fake"));
     await bal("after attest", P2);
     const k = await commit(hunter, h("i3 fake"), dev.keyId);
-    const x = await reveal(k); gasLog["revealClaim (real OOv3: assertTruth + disputeAssertion)"] = x.r.gasUsed;
+    const x = await reveal(k); gasLog["revealClaim (OOv3 assertTruth + disputeAssertion + VotingV2.requestPrice)"] = x.r.gasUsed;
     await bal("after reveal (accused)", P2);
     assert.equal((await c.pap.verify(h("i3 fake"), dev.keyId)).state, 2n);
-    const res = await resolveDispute(c.uma, x.id, true);   // UMA's mock DVM vote TRUE, then oo.settleAssertion
+    const res = await vote(c, x.id, true);   // UMA's DVM votes TRUE, then oo.settleAssertion
     gasLog["oo.settleAssertion -> Paprika callback (TRUE)"] = res.settleReceipt.gasUsed;
     await bal("after settle (TRUE)", P2);
     const v = await c.pap.verify(h("i3 fake"), dev.keyId);
     assert.equal(v.state, 4n); assert.equal(v.deviceStatus, 2n); assert.equal(v.reason, 1n);
     assert.equal(await val(hunter) - h0, c.payout - c.BOND); assert.equal(await val(forger) - f0, -c.BOND);
     assert.equal((await c.token.balanceOf(c.store)) - st0, c.fee);
-    CASE("true accusation (real UMA)", `photo ${ST[v.state]}, device Flagged (FakeProven) at block ${v.flaggedAtBlock}`, `accuser credited 2 x BOND - fee = ${F(c.payout)} (net +BOND - fee = ${F(c.payout - c.BOND)}); depositor -BOND = ${F(-c.BOND)}; Store +fee = ${F(c.fee)}`);
+    CASE("true accusation (UMA vote)", `photo ${ST[v.state]}, device Flagged (FakeProven) at block ${v.flaggedAtBlock}`, `accuser credited 2 x BOND - fee = ${F(c.payout)} (net +BOND - fee = ${F(c.payout - c.BOND)}); depositor -BOND = ${F(-c.BOND)}; Store +fee = ${F(c.fee)}`);
   });
 
   it("4 false accusation: vote FALSE, deposit restored, window extended", async () => {
@@ -150,8 +172,7 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     const k = await commit(griefer, h("i4"), dev.keyId); const x = await reveal(k);
     await bal("after reveal (accused)", P2);
     const opened = Number((await c.pap.accusations(x.id)).openedAt);
-    await later(P.VOTE);
-    const res = await resolveDispute(c.uma, x.id, false);
+    const res = await vote(c, x.id, false);
     gasLog["oo.settleAssertion -> Paprika callback (FALSE)"] = res.settleReceipt.gasUsed;
     await bal("after settle (FALSE)", P2);
     const tRes = (await ethers.provider.getBlock(res.settleReceipt.blockNumber)).timestamp;
@@ -160,7 +181,7 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     await warpTo(v.refundableAt); await send(c.pap.refund(h("i4"), dev.keyId));
     assert.equal(await val(owner) - o0, c.payout - c.BOND); assert.equal(await val(griefer) - g0, -c.BOND);
     assert.equal((await c.token.balanceOf(c.store)) - st0, c.fee);
-    CASE("false accusation (real UMA)", `record back to ${ST[v.state]}, device untouched, window extended by the ${tRes - opened} s under accusation; refund afterwards`, `accuser -BOND = ${F(-c.BOND)}; depositor +BOND - fee = ${F(c.payout - c.BOND)} (deposit returned); Store +fee = ${F(c.fee)}`);
+    CASE("false accusation (UMA vote)", `record back to ${ST[v.state]}, device untouched, window extended by the ${tRes - opened} s under accusation; refund afterwards`, `accuser -BOND = ${F(-c.BOND)}; depositor +BOND - fee = ${F(c.payout - c.BOND)} (deposit returned); Store +fee = ${F(c.fee)}`);
   });
 
   it("5 second accusation while one is open", async () => {
@@ -169,11 +190,11 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     const xA = await reveal(await commit(A, h("i5"), dev.keyId));
     const kB = await commit(B, h("i5"), dev.keyId);
     const r1 = await rv(c.pap.connect(B).revealClaim(kB.photo, kB.keyId, kB.ev, kB.salt), "accusation open");
-    await resolveDispute(c.uma, xA.id, false);
+    await vote(c, xA.id, false);
     const xB = await reveal(kB);
     assert(xB.id);
-    await resolveDispute(c.uma, xB.id, true);
-    CASE("second accusation while one is open (real UMA)", `B's reveal: "${r1}"; after A is voted false, B reveals the same commitment and is voted true`, `photo ${ST[(await c.pap.verify(h("i5"), dev.keyId)).state]}`);
+    await vote(c, xB.id, true);
+    CASE("second accusation while one is open (UMA vote)", `B's reveal: "${r1}"; after A is voted false (the vote moved the clock, B's commitment is still inside REVEAL_WINDOW), B reveals the same commitment and is voted true`, `photo ${ST[(await c.pap.verify(h("i5"), dev.keyId)).state]}`);
   });
 
   it("6 self-accusation loses the oracle fee", async () => {
@@ -181,10 +202,10 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     const t0 = (await val(forger)) + (await val(sybil));
     const dev = await reg(forger); await attest(forger, dev, h("i6"));
     const x = await reveal(await commit(sybil, h("i6"), dev.keyId));
-    await resolveDispute(c.uma, x.id, true);
+    await vote(c, x.id, true);
     const net = (await val(forger)) + (await val(sybil)) - t0;
     assert.equal(net, -c.fee);
-    CASE("self-accusation (real UMA)", "the forger's second account accuses and wins", `net -fee = ${F(net)}`);
+    CASE("self-accusation (UMA vote)", "the forger's second account accuses and wins", `net -fee = ${F(net)}`);
   });
 
   it("7 key revocation", async () => {
@@ -192,13 +213,13 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
     const dev = await reg(owner); const a = await attest(owner, dev, h("i7"));
     const sig = dev.sign(msgRev(c, dev.keyId, holder.address));
     const r1 = await rv(c.pap.connect(other).revokeKey(dev.keyId, sig), "bad sig");
-    await send(c.pap.connect(holder).revokeKey(dev.keyId, sig));
+    gasLog["revokeKey"] = (await send(c.pap.connect(holder).revokeKey(dev.keyId, sig))).gasUsed;
     const b = await ethers.provider.getBlock("latest");
     const r2 = await rv(c.pap.connect(owner).attest(h("i7b"), b.number, dev.keyId, dev.sign(msgCap(c, dev.keyId, h("i7b"), b.hash))), "not active");
     const v = await c.pap.verify(h("i7"), dev.keyId);
     assert.equal(v.reason, 2n); assert.equal(v.state, 1n);
     await warpTo(a.v.refundableAt); await send(c.pap.refund(h("i7"), dev.keyId));
-    CASE("key revocation (real UMA)", `revocation copied by another address: "${r1}"; holder revokes; revoked device attests: "${r2}"; its record stays Attested and is refunded`, "no tokens move at revocation");
+    CASE("key revocation (UMA vote)", `revocation copied by another address: "${r1}"; holder revokes; revoked device attests: "${r2}"; its record stays Attested and is refunded`, "no tokens move at revocation");
   });
 
   it("8 signature and replay checks", async () => {
@@ -216,11 +237,24 @@ describe("Paprika with the real UMA Optimistic Oracle V3", function () {
       keyUsed: await rv(c.pap.connect(o).register(A.x, A.y, A.sign(msgReg(c, A.keyId, o.address))), "key used"),
       callbackNotOracle: await rv(c.pap.connect(o).assertionResolvedCallback(h("x"), true), "only oracle"),
     };
-    CASE("signatures and replay (real UMA)", Object.entries(R).map(([k, x]) => `${k}: "${x}"`).join("; "), "no tokens move");
+    // Proof of possession names the sender: someone copying a pending register() from the mempool gets "bad sig".
+    const C = newDevice();
+    R.popFrontRun = await rv(c.pap.connect(s[2]).register(C.x, C.y, C.sign(msgReg(c, C.keyId, o.address))), "bad sig");
+    // A commitment binds the claimant: another account cannot reveal it, nor reuse it.
+    const k = await commit(s[2], h("i8"), A.keyId);
+    R.revealByOther = await rv(c.pap.connect(s[3]).revealClaim(k.photo, k.keyId, k.ev, k.salt), "no commit");
+    R.commitReused = await rv(c.pap.connect(s[2]).commitClaim(k.cm), "commitment used");
+    // Not revealed in time: the reveal fails, anyone forfeits the bond to the burn address.
+    await later(P.REVEAL + 1);
+    R.tooLate = await rv(c.pap.connect(s[2]).revealClaim(k.photo, k.keyId, k.ev, k.salt), "too late");
+    const burn0 = await c.token.balanceOf(await c.pap.BURN());
+    await send(c.pap.forfeitCommit(k.cm));
+    assert.equal((await c.token.balanceOf(await c.pap.BURN())) - burn0, c.BOND);
+    CASE("signatures and replay (UMA vote)", Object.entries(R).map(([k, x]) => `${k}: "${x}"`).join("; "), "no tokens move, except the forfeited commit bond (BOND to the burn address)");
   });
 
   after(() => {
-    console.log("\n      GAS with the real UMA OOv3 (gasUsed)");
+    console.log("\n      GAS with the real contracts (gasUsed; first occurrence)");
     for (const [k, g] of Object.entries(gasLog)) console.log(`        ${k.padEnd(58)} ${g}`);
   });
 });

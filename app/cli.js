@@ -6,25 +6,29 @@
 //
 // State kept between commands (device key, last commitment and salt, last UMA assertion id) lives in
 // app/.state/ (git-ignored). It is reset automatically when the Paprika address changes (new deployment).
-// Environment: RPC_URL (default http://127.0.0.1:8545), PAPRIKA_DEPLOYMENT (path of the deployment JSON).
+// Environment: RPC_PORT (default 8545) or RPC_URL, PAPRIKA_DEPLOYMENT (path of the deployment JSON). With a port
+// other than 8545 the CLI reads ../contract/deployments/local-<port>.json and keeps its state in .state/*-<port>.json.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ethers } from "ethers";
 import { createDevice, exportDevice, importDevice, sha256 } from "./lib/device.js";
 import {
   advanceTime, attestPhoto, balances, chainInfo, commitAccusation, connect, credits, formatToken, listRecords,
-  onActivity, refund, registerDevice, revealAccusation, revokeKey, umaVote, verifyPhoto, withdrawCredit,
+  onActivity, refund, registerDevice, revealAccusation, revokeKey, umaVote, unwrap, verifyPhoto, withdrawCredit,
 } from "./lib/paprika.js";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = path.join(APP_DIR, ".state");
-const STATE_FILE = path.join(STATE_DIR, "cli-state.json");
-const DEVICE_FILE = path.join(STATE_DIR, "device.json");
-const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
+const RPC_PORT = Number(process.env.RPC_PORT || (process.env.RPC_URL ? new URL(process.env.RPC_URL).port : 0) || 8545);
+const RPC_URL = process.env.RPC_URL || `http://127.0.0.1:${RPC_PORT}`;
+const SUFFIX = RPC_PORT === 8545 ? "" : `-${RPC_PORT}`;   // one state per local chain instance
+const STATE_FILE = path.join(STATE_DIR, `cli-state${SUFFIX}.json`);
+const DEVICE_FILE = path.join(STATE_DIR, `device${SUFFIX}.json`);
 const DEPLOYMENT_CANDIDATES = [
   process.env.PAPRIKA_DEPLOYMENT,
-  path.join(APP_DIR, "..", "contract", "deployments", "local.json"),
-  path.join(APP_DIR, "web", "deployment.json"),
+  path.join(APP_DIR, "..", "contract", "deployments", `local${SUFFIX}.json`),
+  path.join(APP_DIR, "web", `deployment${SUFFIX}.json`),
 ].filter(Boolean);
 
 const HELP = `Paprika CLI (local chain only)
@@ -35,12 +39,14 @@ const HELP = `Paprika CLI (local chain only)
   verify <file>                            show every record of <file>
   accuse-commit <file> --evidence "<text>" accuser commits an accusation (bond B); --key <keyId> to choose the device
   accuse-reveal                            accuser reveals the last commitment: UMA assertion + dispute
-  vote <true|false>                        simulated UMA vote on the last assertion (true = fake proven) and settle
+  vote <true|false>                        real UMA vote (VotingV2, 3 voters) on the last assertion, then settle
+                                           (true = fake proven); the chain clock jumps through the vote phases
   refund <file>                            refund the deposit of <file> (after the challenge period)
-  withdraw <photographer|accuser|operator> withdraw the role's credit from Paprika
+  withdraw <photographer|accuser|operator> withdraw the role's credit from Paprika (as WETH)
+  unwrap <role> [amount]                   turn the role's WETH back into ETH (all of it by default)
   revoke                                   revoke the saved device key (photographer)
   advance <seconds>                        move the chain clock forward (demo control)
-  balances                                 token balances and credits
+  balances                                 WETH balances, credits and ETH of the roles
   demo                                     run the whole demo story with checks (exit code 1 on any mismatch)
 `;
 
@@ -91,6 +97,12 @@ function option(args, name) {
   const v = args[i + 1];
   args.splice(i, 2);
   return v;
+}
+
+// Prints one phase of a UMA vote (callback of umaVote).
+function printPhase({ phase, roundId, txHashes, timestamp }) {
+  const what = { commit: "voters committed hidden votes", reveal: "voters revealed their votes", settle: "assertion settled on OOv3" }[phase];
+  console.log(`   UMA ${phase.padEnd(6)} round ${roundId}, chain time ${new Date(timestamp * 1000).toISOString().replace(".000Z", "Z")}: ${what} (${txHashes.length} tx)`);
 }
 
 const short = (h) => (h ? `${h.slice(0, 10)}...${h.slice(-6)}` : "-");
@@ -199,8 +211,9 @@ const commands = {
   async vote(ctx, args, state) {
     if (!["true", "false"].includes(args[0])) throw new Error("usage: vote <true|false>   (true = the evidence proves the fake)");
     if (!state.lastAssertion) throw new Error("no assertion saved: run accuse-reveal first");
-    await umaVote(ctx, state.lastAssertion, args[0] === "true");
-    console.log(`Simulated UMA vote: ${args[0] === "true" ? "fake PROVEN (accuser wins)" : "accusation REJECTED (depositor wins)"}; assertion settled.`);
+    const r = await umaVote(ctx, state.lastAssertion, args[0] === "true", { onPhase: printPhase });
+    console.log(`UMA vote (round ${r.roundId}, ${ctx.voters.length} voters, ${r.simulatedSeconds} s of chain time skipped): ` +
+      `${args[0] === "true" ? "fake PROVEN (accuser wins)" : "accusation REJECTED (depositor wins)"}; assertion settled.`);
     delete state.lastAssertion;
   },
 
@@ -237,6 +250,15 @@ const commands = {
   async balances(ctx) {
     const m = await money(ctx);
     for (const [k, v] of Object.entries(m)) console.log(`  ${k.padEnd(20)} ${formatToken(ctx, v)}`);
+    const { eth } = await balances(ctx);
+    for (const [k, v] of Object.entries(eth)) console.log(`  ${("ETH " + k).padEnd(20)} ${ethers.formatEther(v)} ETH`);
+  },
+
+  async unwrap(ctx, args) {
+    const role = args[0];
+    if (!["photographer", "accuser", "operator"].includes(role)) throw new Error("usage: unwrap <role> [amount]");
+    const r = await unwrap(ctx, role, args[1] ? ethers.parseUnits(args[1], ctx.params.tokenDecimals) : undefined);
+    console.log(`Unwrapped ${formatToken(ctx, r.amount)} into ETH for the ${role}.`);
   },
 
   demo: (ctx) => runDemo(ctx),
@@ -281,6 +303,14 @@ async function runDemo(ctx) {
   let photo1Hash, assertion1;
 
   try {
+    await step("0. Wallets: the roles hold ETH; WETH is wrapped on demand", async () => {
+      const b = await balances(ctx);
+      for (const r of ["photographer", "accuser"]) console.log(`   ${r.padEnd(12)} ${ethers.formatEther(b.eth[r])} ETH, ${formatToken(ctx, b[r])}`);
+      console.log(`   UMA voters: ${ctx.voters.map((v) => v.address).join(", ")} (staked UMA voting tokens)`);
+      check(b.eth.photographer >= 2n * B && b.eth.accuser >= 2n * B, "both roles hold enough ETH to wrap");
+      check(ctx.voters.length >= 3, "three UMA voters in the deployment");
+    });
+
     await step("1. Device -> Register (free)", async (before) => {
       const r = await registerDevice(ctx, "photographer", deviceA);
       console.log(`   keyId ${r.keyId}`);
@@ -290,11 +320,17 @@ async function runDemo(ctx) {
     });
 
     await step("2. Capture -> sign & submit (deposit B)", async (before) => {
+      const ethBefore = (await balances(ctx)).eth.photographer;
+      const need = before.photographer >= B ? 0n : B - before.photographer;   // ETH to wrap
       const r = await attestPhoto(ctx, "photographer", deviceA, photo1);
       photo1Hash = r.photoHash;
       console.log(`   photoHash ${r.photoHash}, anchor block ${r.anchorBlock}, ${r.txHashes.length} tx`);
+      const ethAfter = (await balances(ctx)).eth.photographer;
+      console.log(`   wrapped ${formatToken(ctx, need)} from ETH (ETH spent incl. gas: ${ethers.formatEther(ethBefore - ethAfter)})`);
       const d = await moved(before);
-      check(d.photographer === -B, "photographer -B");
+      check((d.photographer ?? 0n) === need - B, "photographer WETH: +wrapped -B");
+      check(ethBefore - ethAfter >= need, "the wrapped amount left the ETH balance");
+      check(need === 0n || r.txHashes.length === 3, "wrap + approve + attest transactions");
       check(d.Paprika === B, "Paprika +B");
     });
 
@@ -317,11 +353,12 @@ async function runDemo(ctx) {
 
     let commit1;
     await step("5. Accuse -> Commit (bond B, only a hash on chain)", async (before) => {
+      const need = before.accuser >= B ? 0n : B - before.accuser;
       commit1 = await commitAccusation(ctx, "accuser", { photoHash: photo1Hash, keyId: deviceA.keyId, evidence: "https://example.org/evidence-that-does-not-prove-it" });
       commit1 = { ...commit1, photoHash: photo1Hash, keyId: deviceA.keyId };
       console.log(`   commitment ${commit1.commitment}`);
       const d = await moved(before);
-      check(d.accuser === -B && d.Paprika === B, "accuser -B, Paprika +B");
+      check((d.accuser ?? 0n) === need - B && d.Paprika === B, "accuser WETH +wrapped -B, Paprika +B");
     });
 
     await step("6. Reveal -> UMA assertion, disputed at once", async (before) => {
@@ -335,8 +372,10 @@ async function runDemo(ctx) {
       check(rec.state === "accused", "state accused");
     });
 
-    await step("7. Negative case 2: vote 'evidence does not prove it' (simulated)", async (before) => {
-      await umaVote(ctx, assertion1, false);
+    await step("7. Negative case 2: UMA vote 'evidence does not prove it' (real VotingV2 vote)", async (before) => {
+      const recBefore = (await verifyPhoto(ctx, photo1Hash))[0];
+      const v = await umaVote(ctx, assertion1, false, { onPhase: printPhase });
+      console.log(`   vote round ${v.roundId}: ${v.txHashes.length} tx, ${v.simulatedSeconds} s of chain time skipped`);
       const w = await withdrawCredit(ctx, "photographer");
       console.log(`   photographer withdrew ${formatToken(ctx, w.amount)}`);
       const d = await moved(before);
@@ -345,6 +384,8 @@ async function runDemo(ctx) {
       check(d["UMA OOv3"] === -2n * B, "UMA released both bonds");
       const [rec] = await verifyPhoto(ctx, photo1Hash);
       check(rec.state === "attested" && rec.depositLocked === B, "photo back to attested, deposit still locked");
+      console.log(`   accusation window extended by ${rec.accusableUntil - recBefore.accusableUntil} s (time under accusation)`);
+      check(rec.accusableUntil - recBefore.accusableUntil >= v.simulatedSeconds, "window extended by at least the vote time");
       console.log(`   accuser net over steps 5-7: -${formatToken(ctx, B)}`);
     });
 
@@ -376,18 +417,21 @@ async function runDemo(ctx) {
     const photo2 = randomPhoto();
     let photo2Hash, assertion2;
     await step("10. Optional: evidence PROVES the fake", async (before) => {
+      const needP = before.photographer >= B ? 0n : B - before.photographer;
+      const needA = before.accuser >= B ? 0n : B - before.accuser;
       const a = await attestPhoto(ctx, "photographer", deviceA, photo2);
       photo2Hash = a.photoHash;
       const c = await commitAccusation(ctx, "accuser", { photoHash: photo2Hash, keyId: deviceA.keyId, evidence: "The original, published before the anchor block: https://example.org/original.jpg" });
       const r = await revealAccusation(ctx, "accuser", { ...c, photoHash: photo2Hash, keyId: deviceA.keyId });
       assertion2 = r.assertionId;
-      await umaVote(ctx, assertion2, true);
+      const v = await umaVote(ctx, assertion2, true, { onPhase: printPhase });
+      console.log(`   vote round ${v.roundId}: ${v.txHashes.length} tx, ${v.simulatedSeconds} s of chain time skipped`);
       const w = await withdrawCredit(ctx, "accuser");
       console.log(`   accuser withdrew ${formatToken(ctx, w.amount)}`);
       const d = await moved(before);
       check(w.amount === 2n * B - fee, "accuser payout B + (B - f x B)");
-      check(d.accuser === B - fee, "accuser net +(B - f x B)");
-      check(d.photographer === -B, "photographer lost the deposit B");
+      check((d.accuser ?? 0n) - needA === B - fee, "accuser net +(B - f x B) (besides wrapping)");
+      check((d.photographer ?? 0n) - needP === -B, "photographer lost the deposit B (besides wrapping)");
       check(d["UMA Store"] === fee, "UMA Store +f x B");
       const [rec2] = await verifyPhoto(ctx, photo2Hash);
       printRecord(ctx, rec2);
@@ -416,6 +460,17 @@ async function runDemo(ctx) {
       let err2 = null;
       try { await attestPhoto(ctx, "photographer", deviceB, randomPhoto()); } catch (e) { err2 = e.message; }
       check(err2 === "not active", "revoked device cannot attest");
+    });
+
+    await step("12. Unwrap: WETH back to ETH", async () => {
+      for (const role of ["photographer", "accuser"]) {
+        const b = await balances(ctx);
+        if (b[role] === 0n) continue;
+        const r = await unwrap(ctx, role);
+        const a = await balances(ctx);
+        console.log(`   ${role.padEnd(12)} unwrapped ${formatToken(ctx, r.amount)} -> ETH ${ethers.formatEther(b.eth[role])} -> ${ethers.formatEther(a.eth[role])}`);
+        check(a[role] === 0n && a.eth[role] > b.eth[role], "WETH 0, ETH up");
+      }
     });
   } finally {
     console.log("\n== Summary");

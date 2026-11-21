@@ -1,5 +1,5 @@
 // `npm start`: the whole local demo in one command.
-//   1. starts the Hardhat node in the background (log: app/.state/chain.log), unless one already answers;
+//   1. starts the Hardhat node in the background (log: app/.state/chain[-<RPC_PORT>].log), unless one already answers;
 //   2. waits until the RPC answers;
 //   3. deploys UMA + token + Paprika (scripts/deploy.js) and copies the deployment JSON into app/web/;
 //   4. starts the web UI server (app/server.js) if it exists, and prints the URL.
@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   APP_DIR, CHAIN_HOST, CHAIN_PORT, CONTRACT_DIR, HARDHAT_BIN, RPC_URL, STATE_DIR, WEB_HOST, WEB_PORT,
-  ensureContractDeps, killGroup, rpcAlive, waitForRpc, writePid,
+  SUFFIX, ensureContractDeps, killGroup, rpcAlive, waitForRpc, writePid,
 } from "./common.js";
 import { deploy } from "./deploy.js";
 
@@ -45,14 +45,14 @@ try {
     console.log(`A node already answers on ${RPC_URL}: using it.`);
   } else {
     await ensureContractDeps();
-    const log = fs.openSync(path.join(STATE_DIR, "chain.log"), "w");
+    const log = fs.openSync(path.join(STATE_DIR, `chain${SUFFIX}.log`), "w");
     background("chain", HARDHAT_BIN, ["node", "--hostname", CHAIN_HOST, "--port", String(CHAIN_PORT)], { cwd: CONTRACT_DIR, stdio: ["ignore", log, log] });
-    console.log(`Starting the Hardhat node on ${RPC_URL} (log: app/.state/chain.log) ...`);
+    console.log(`Starting the Hardhat node on ${RPC_URL} (log: app/.state/chain${SUFFIX}.log) ...`);
     if (!(await waitForRpc(90000))) throw new Error("the node did not answer within 90 s");
   }
   await deploy();
   if (fs.existsSync(path.join(APP_DIR, "server.js"))) {
-    background("web", process.execPath, ["server.js"], { cwd: APP_DIR, stdio: "inherit", env: { ...process.env, HOST: WEB_HOST, PORT: String(WEB_PORT) } });
+    background("web", process.execPath, ["server.js"], { cwd: APP_DIR, stdio: "inherit", env: { ...process.env, HOST: WEB_HOST, PORT: String(WEB_PORT), RPC_URL } });
     console.log(`\nPaprika is running: http://${WEB_HOST}:${WEB_PORT}/   (chain: ${RPC_URL})\nPress Ctrl-C to stop.`);
   } else {
     console.log(`\napp/server.js not found: chain and contracts are up (${RPC_URL}); the web UI is not started.\nTry \`node cli.js demo\`. Press Ctrl-C to stop.`);
