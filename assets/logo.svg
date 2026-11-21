@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Paprika logo">
+  <!-- card with the app's offset shadow -->
+  <rect x="40" y="52" width="440" height="440" rx="72" fill="#14123a"/>
+  <rect x="32" y="32" width="440" height="440" rx="72" fill="#f8f6f1" stroke="#14123a" stroke-width="12"/>
+  <!-- photo frame corners -->
+  <g fill="none" stroke="#14123a" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M104 160 V112 H152"/>
+    <path d="M352 112 H400 V160"/>
+    <path d="M104 344 V392 H152"/>
+    <path d="M400 344 V392 H352"/>
+  </g>
+  <!-- the paprika: a long pepper with a curved tip -->
+  <path d="M196 176
+           C 230 160, 300 158, 326 186
+           C 350 214, 336 262, 310 302
+           C 286 340, 252 372, 206 390
+           C 184 398, 168 386, 178 370
+           C 196 342, 196 316, 184 286
+           C 168 246, 160 196, 196 176 Z"
+        fill="#e4472f" stroke="#14123a" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M206 208 C 196 236, 204 268, 214 292" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="12" stroke-linecap="round"/>
+  <!-- stem -->
+  <path d="M262 168 C 262 144, 276 124, 304 116" fill="none" stroke="#14123a" stroke-width="12" stroke-linecap="round"/>
+  <path d="M216 178 C 236 156, 290 154, 312 178 C 290 190, 238 192, 216 178 Z" fill="#3f9a5b" stroke="#14123a" stroke-width="10" stroke-linejoin="round"/>
+  <!-- verified badge -->
+  <circle cx="352" cy="352" r="56" fill="#c9f2d6" stroke="#14123a" stroke-width="12"/>
+  <path d="M326 352 L346 372 L380 334" fill="none" stroke="#14123a" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
