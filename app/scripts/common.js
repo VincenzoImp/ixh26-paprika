@@ -1,6 +1,7 @@
 // Shared helpers for the start scripts: paths, the RPC probe, the PID file and child-process handling.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -87,4 +88,69 @@ export function writePid(name, pid) {
 export function killGroup(pid, signal = "SIGTERM") {
   try { process.kill(-pid, signal); return true; } catch { /* not a group leader or already gone */ }
   try { process.kill(pid, signal); return true; } catch { return false; }
+}
+
+/** True if something accepts TCP connections on host:port (e.g. a web server already running). */
+export function portBusy(port, host = "127.0.0.1") {
+  return new Promise((resolve) => {
+    const sock = net.connect({ port, host });
+    sock.setTimeout(800);
+    sock.once("connect", () => { sock.destroy(); resolve(true); });
+    sock.once("timeout", () => { sock.destroy(); resolve(false); });
+    sock.once("error", () => resolve(false));
+  });
+}
+
+// One JSON-RPC call (no ethers needed in the scripts).
+export async function rpc(method, params = [], url = RPC_URL) {
+  const res = await fetch(url, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(3000),
+  });
+  const j = await res.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+
+/**
+ * The deployment of this instance if it is live on the chain at RPC_URL: the deployment file exists and Paprika's
+ * code is at its address. Returns the parsed deployment, or null (no file, chain down, or a fresh chain).
+ */
+export async function liveDeployment() {
+  for (const file of [WEB_DEPLOYMENT_FILE, DEPLOYMENT_FILE]) {
+    if (!fs.existsSync(file)) continue;
+    try {
+      const d = JSON.parse(fs.readFileSync(file, "utf8"));
+      const code = await rpc("eth_getCode", [d.addresses.paprika, "latest"]);
+      if (code && code !== "0x") return d;
+    } catch { /* unreadable file or chain down */ }
+  }
+  return null;
+}
+
+/**
+ * PIDs of Hardhat nodes started from ../contract that listen on exactly `port` (argv "--port <port>", compared as a
+ * whole word, so port 944 never matches 9445). Reads /proc; returns [] where /proc is not available.
+ */
+export function hardhatNodePids(port) {
+  const out = [];
+  let entries = [];
+  try { entries = fs.readdirSync("/proc"); } catch { return out; }
+  for (const d of entries) {
+    if (!/^\d+$/.test(d) || Number(d) === process.pid) continue;
+    let argv;
+    try { argv = fs.readFileSync(`/proc/${d}/cmdline`, "utf8").split("\0"); } catch { continue; }
+    const i = argv.indexOf("--port");
+    if (argv.some((a) => a.endsWith("hardhat")) && argv.includes("node") && i >= 0 && argv[i + 1] === String(port)) out.push(Number(d));
+  }
+  return out;
+}
+
+/** For a non-default port: deletes the per-port files of this instance (deployment copies, pids, CLI state). */
+export function cleanupInstanceFiles() {
+  if (!SUFFIX) return [];
+  const removed = [];
+  const candidates = [WEB_DEPLOYMENT_FILE, DEPLOYMENT_FILE, PID_FILE, path.join(STATE_DIR, `chain${SUFFIX}.log`)];
+  for (const f of candidates) if (fs.existsSync(f)) { fs.rmSync(f, { force: true }); removed.push(f); }
+  return removed;
 }

@@ -554,6 +554,38 @@ export async function refund(ctx, role, { photoHash, keyId }) {
   return { txHash: r.hash };
 }
 
+/**
+ * State of a commitment (reads only): { exists, live, claimant, committedAt, committedBlock, revealDeadline,
+ * expired } (times in chain seconds). A live commitment can be revealed until revealDeadline; after that it is
+ * expired and anyone can forfeit it (forfeitCommitment).
+ */
+export async function commitmentStatus(ctx, commitment) {
+  const k = await read(ctx.contracts.paprika.commits(commitment));
+  const exists = k.claimant !== ethers.ZeroAddress;
+  const committedAt = Number(k.committedAt);
+  const revealDeadline = exists ? committedAt + ctx.params.revealWindow : 0;
+  const now = Number(await latestTimestamp(ctx));
+  return {
+    exists, live: k.live, claimant: k.claimant, committedAt, committedBlock: Number(k.committedBlock), revealDeadline,
+    // A transaction is mined at least one second after the latest block: past the deadline means "too late".
+    expired: exists && k.live && now + 1 > revealDeadline,
+  };
+}
+
+/**
+ * Forfeits a commitment that was not revealed within REVEAL_WINDOW: sends Paprika.forfeitCommit(commitment) from
+ * `role` (anyone may call it). The commitment's bond B goes to the burn address 0x...dEaD; nobody gets it.
+ * Checks first that the commitment is live and its reveal period is over.
+ */
+export async function forfeitCommitment(ctx, role, commitment) {
+  const st = await commitmentStatus(ctx, commitment);
+  if (!st.exists) throw new Error("no such commitment on this chain");
+  if (!st.live) throw new Error("this commitment was already revealed or forfeited");
+  if (!st.expired) throw new Error(`the reveal is still open until ${new Date(st.revealDeadline * 1000).toISOString()}: reveal it instead`);
+  const r = await send(ctx, role, ctx.contracts.paprika, "forfeitCommit", [commitment], "Paprika.forfeitCommit");
+  return { txHash: r.hash, burned: ctx.params.bond };
+}
+
 /** Moves all credit of `role` from Paprika to its wallet, as WETH. Sends Paprika.withdrawCredit. Reverts "no credit" if zero. */
 export async function withdrawCredit(ctx, role) {
   const { paprika } = ctx.contracts;

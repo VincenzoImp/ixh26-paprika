@@ -16,15 +16,33 @@
 // between a commit and its reveal, PHOTO_WINDOW about 15; the accused photo's own window is extended by the contract.
 import fs from "node:fs";
 import path from "node:path";
-import { CONTRACT_DIR, DEPLOYMENT_FILE, HARDHAT_BIN, RPC_URL, WEB_DEPLOYMENT_FILE, ensureContractDeps, rpcAlive, run } from "./common.js";
+import { CONTRACT_DIR, DEPLOYMENT_FILE, HARDHAT_BIN, RPC_URL, WEB_DEPLOYMENT_FILE, ensureContractDeps, liveDeployment, rpcAlive, run } from "./common.js";
 
 const DEFAULTS = { BOND: "1", FINAL_FEE: "0.5", PHASE_LENGTH: "60", PHOTO_WINDOW: "3600", REVEAL_WINDOW: "900", LIVENESS: "7200", STAKE: "1000000" };
 
-export async function deploy() {
+// Checks a parameter before Hardhat sees it: a positive decimal number (whole numbers for times and rolls).
+function checkParam(k, v) {
+  const integer = ["PHASE_LENGTH", "PHOTO_WINDOW", "REVEAL_WINDOW", "LIVENESS", "MAX_ROLLS"].includes(k);
+  const ok = integer ? /^\d+$/.test(v) && Number(v) > 0 : /^\d+(\.\d+)?$/.test(v) && Number(v) > 0;
+  if (!ok) throw new Error(`${k}=${v} is not valid: use a positive ${integer ? "whole number of seconds" : "number"}`);
+}
+
+/**
+ * Deploys on the node at RPC_URL. Refuses when this instance's deployment is already live on that chain (it would
+ * replace the contracts under a running demo), unless force is true (`npm run deploy -- --force`).
+ */
+export async function deploy({ force = false } = {}) {
   if (!(await rpcAlive())) throw new Error(`no node at ${RPC_URL}: start it with \`npm run chain\``);
+  const live = await liveDeployment();
+  if (live && !force) {
+    throw new Error(`Paprika is already deployed on ${RPC_URL} (Paprika ${live.addresses.paprika}); a new deployment ` +
+      "would reset every open page and saved state. Use `npm run deploy -- --force` to replace it anyway.");
+  }
   await ensureContractDeps();
   const env = { ...process.env, RPC_URL };
   for (const [k, v] of Object.entries(DEFAULTS)) if (!env[k]) env[k] = v;
+  for (const k of [...Object.keys(DEFAULTS), "MAX_ROLLS"]) if (env[k]) checkParam(k, env[k]);
+  if (Number(env.BOND) < 2 * Number(env.FINAL_FEE)) throw new Error(`BOND=${env.BOND} is below UMA's minimum bond 2 x FINAL_FEE = ${2 * Number(env.FINAL_FEE)}`);
   console.log(`Deploying: BOND=${env.BOND} FINAL_FEE=${env.FINAL_FEE} PHASE_LENGTH=${env.PHASE_LENGTH}s PHOTO_WINDOW=${env.PHOTO_WINDOW}s REVEAL_WINDOW=${env.REVEAL_WINDOW}s LIVENESS=${env.LIVENESS}s STAKE=${env.STAKE} on ${RPC_URL}`);
   await run(HARDHAT_BIN, ["run", "scripts/deploy-local.js", "--network", "localhost"], { cwd: CONTRACT_DIR, env });
   fs.mkdirSync(path.dirname(WEB_DEPLOYMENT_FILE), { recursive: true });
@@ -33,5 +51,5 @@ export async function deploy() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  deploy().catch((e) => { console.error(`Deploy failed: ${e.message}`); process.exit(1); });
+  deploy({ force: process.argv.includes("--force") }).catch((e) => { console.error(`Deploy failed: ${e.message}`); process.exit(1); });
 }

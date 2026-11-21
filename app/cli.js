@@ -1,30 +1,35 @@
 #!/usr/bin/env node
 // Paprika command-line tool: drives the protocol on the local chain from a terminal, one step per command,
-// and `demo` runs the whole story of impl/mock/DEMO.md end to end with assertions (the back-end smoke check).
+// and `demo` runs the whole demo story (docs/demo.md) end to end with assertions (the back-end smoke check).
 //
 //   node cli.js <command> [args]          (see `node cli.js help`)
 //
-// State kept between commands (device key, last commitment and salt, last UMA assertion id) lives in
-// app/.state/ (git-ignored). It is reset automatically when the Paprika address changes (new deployment).
-// Environment: RPC_PORT (default 8545) or RPC_URL, PAPRIKA_DEPLOYMENT (path of the deployment JSON). With a port
-// other than 8545 the CLI reads ../contract/deployments/local-<port>.json and keeps its state in .state/*-<port>.json.
+// State kept between commands (device key, pending commitments with their salts, last UMA assertion id) lives in
+// app/.state/cli/<id>/ (git-ignored), one folder per deployment fingerprint (chain id + Paprika address + block-1
+// hash). The state of another chain or deployment is never deleted or overwritten.
+// Environment: RPC_PORT (default 8545) or RPC_URL; PAPRIKA_DEPLOYMENT (path of a deployment JSON: its rpcUrl is used
+// unless RPC_PORT or RPC_URL is set). With a port other than 8545 the CLI reads
+// ../contract/deployments/local-<port>.json. CLI_DEMO_OUTPUT: where `demo` saves its run.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ethers } from "ethers";
 import { createDevice, exportDevice, importDevice, sha256 } from "./lib/device.js";
 import {
-  advanceTime, attestPhoto, balances, chainInfo, commitAccusation, connect, credits, formatToken, listRecords,
+  advanceTime, attestPhoto, balances, chainInfo, commitAccusation, commitmentStatus, connect, credits,
+  deploymentFingerprint, forfeitCommitment, formatToken, listRecords,
   listAccusations, onActivity, refund, registerDevice, revealAccusation, revokeKey, umaVote, unwrap, verifyPhoto, withdrawCredit,
 } from "./lib/paprika.js";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = path.join(APP_DIR, ".state");
 const RPC_PORT = Number(process.env.RPC_PORT || (process.env.RPC_URL ? new URL(process.env.RPC_URL).port : 0) || 8545);
+const RPC_URL_SET = Boolean(process.env.RPC_URL || process.env.RPC_PORT);
 const RPC_URL = process.env.RPC_URL || `http://127.0.0.1:${RPC_PORT}`;
-const SUFFIX = RPC_PORT === 8545 ? "" : `-${RPC_PORT}`;   // one state per local chain instance
-const STATE_FILE = path.join(STATE_DIR, `cli-state${SUFFIX}.json`);
-const DEVICE_FILE = path.join(STATE_DIR, `device${SUFFIX}.json`);
+const SUFFIX = RPC_PORT === 8545 ? "" : `-${RPC_PORT}`;   // per-port deployment file name
+// Set in main() once the deployment fingerprint is known: .state/cli/<id>/state.json and device.json.
+let STATE_FILE = null;
+let DEVICE_FILE = null;
 const DEPLOYMENT_CANDIDATES = [
   process.env.PAPRIKA_DEPLOYMENT,
   path.join(APP_DIR, "..", "contract", "deployments", `local${SUFFIX}.json`),
@@ -47,18 +52,24 @@ const HELP = `Paprika CLI (local chain only)
   withdraw <photographer|accuser|operator> withdraw the role's credit from Paprika (as WETH)
   unwrap <role> [amount]                   turn the role's WETH back into ETH (all of it by default)
   revoke                                   revoke the saved device key (photographer)
+  forfeit [#]                              burn the bond of an expired commitment (not revealed in time)
   advance <seconds> [--force]              move the chain clock forward (demo control); refused while an
                                            accusation is open (vote first), unless --force
   balances                                 WETH balances, credits and ETH of the roles
   demo                                     run the whole demo story with checks (exit code 1 on any mismatch);
-                                           also writes the run to app/output/cli-demo.txt
+                                           on port 8545 it saves the run to app/output/cli-demo.txt
+                                           (CLI_DEMO_OUTPUT=<file> chooses another file)
 `;
 
 // ------------------------------------------------------------------ setup and state
 
 function loadDeployment() {
   for (const file of DEPLOYMENT_CANDIDATES) {
-    if (fs.existsSync(file)) return { file, deployment: JSON.parse(fs.readFileSync(file, "utf8")) };
+    if (!fs.existsSync(file)) continue;
+    const deployment = JSON.parse(fs.readFileSync(file, "utf8"));
+    // An explicit PAPRIKA_DEPLOYMENT talks to the chain it names, unless RPC_PORT / RPC_URL say otherwise.
+    const rpcUrl = file === process.env.PAPRIKA_DEPLOYMENT && !RPC_URL_SET && deployment.rpcUrl ? deployment.rpcUrl : RPC_URL;
+    return { file, deployment, rpcUrl };
   }
   throw new Error("no deployment JSON found: run `npm run deploy` first");
 }
@@ -66,23 +77,20 @@ function loadDeployment() {
 // Identity of "this chain + this deployment": the Paprika address alone is not enough, because a fresh Hardhat
 // chain deploys to the same addresses; the hash of block 1 changes with every new chain (it includes a timestamp).
 async function deploymentId(ctx) {
-  let b1;
-  try { b1 = await ctx.provider.getBlock(1); } catch { throw new Error(`cannot reach the local chain at ${ctx.rpcUrl}: run \`npm run chain\` (or \`npm start\`)`); }
-  return `${ctx.addresses.paprika}@${b1 ? b1.hash : "none"}`;
+  try { return await deploymentFingerprint(ctx); } catch { throw new Error(`cannot reach the local chain at ${ctx.rpcUrl}: run \`npm run chain\` (or \`npm start\`)`); }
 }
 
-function loadState(id) {
-  let s = {};
-  try { s = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch { /* first run */ }
-  if (s.deployment !== id) {
-    // New deployment (or new chain): earlier device registration and accusations do not exist there.
-    s = { deployment: id };
-    fs.rmSync(DEVICE_FILE, { force: true });
-  }
-  return s;
+// Chooses the state folder of this deployment (one per fingerprint) and loads its state. Nothing else is touched.
+async function loadState(fingerprint) {
+  const id = (await sha256(new TextEncoder().encode(fingerprint))).slice(2, 18);
+  const dir = path.join(STATE_DIR, "cli", id);
+  STATE_FILE = path.join(dir, "state.json");
+  DEVICE_FILE = path.join(dir, "device.json");
+  try { return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch { return { deployment: fingerprint }; }
 }
 function saveState(s) {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
+  if (!STATE_FILE) return;
+  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
 }
 async function loadDevice() {
@@ -111,7 +119,15 @@ function pendingCommits(state) {
   return state.commits;
 }
 function describeCommit(c, i) {
-  return `#${i + 1}  photo ${short(c.photoHash)}  key ${short(c.keyId)}  evidence "${c.evidence ?? "?"}"  committed ${c.committedAt ?? "?"}`;
+  const t = c.chain ? `committed ${when(c.chain.committedAt)} (chain time), reveal by ${when(c.chain.revealDeadline)}${c.chain.expired ? " - EXPIRED: forfeit it with `forfeit " + (i + 1) + "`" : ""}` : "";
+  return `#${i + 1}  photo ${short(c.photoHash)}  key ${short(c.keyId)}  evidence "${c.evidence ?? "?"}"  ${t}`;
+}
+// Adds the chain-side status (times, expired) to each pending commitment; drops those no longer live.
+async function refreshCommits(ctx, state) {
+  const list = pendingCommits(state);
+  for (const c of list) c.chain = await commitmentStatus(ctx, c.commitment);
+  state.commits = list.filter((c) => c.chain.exists && c.chain.live);
+  return state.commits;
 }
 
 function option(args, name) {
@@ -179,7 +195,7 @@ const commands = {
     console.log(`params     B = ${formatToken(ctx, p.bond)}, challenge period ${p.photoWindow} s, reveal period ${p.revealWindow} s, UMA fee share ${p.feeShare}`);
     for (const [k, v] of Object.entries(ctx.accounts)) console.log(`${k.padEnd(13)}${v}`);
     console.log(`device     ${fs.existsSync(DEVICE_FILE) ? (await loadDevice()).keyId : "none (run register)"}`);
-    const pending = pendingCommits(state);
+    const pending = await refreshCommits(ctx, state);
     if (pending.length) { console.log("pending commitments (reveal with accuse-reveal [#|file]):"); pending.forEach((c, i) => console.log(`  ${describeCommit(c, i)}`)); }
     for (const a of (await listAccusations(ctx)).filter((x) => x.open)) console.log(`open accusation ${a.assertionId} on photo ${short(a.photoHash)} (vote with: vote <true|false>)`);
     await commands.balances(ctx);
@@ -188,10 +204,11 @@ const commands = {
   async register(ctx, _args, state) {
     const device = await createDevice();
     const r = await registerDevice(ctx, "photographer", device);
-    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.mkdirSync(path.dirname(DEVICE_FILE), { recursive: true });
+    if (fs.existsSync(DEVICE_FILE)) fs.renameSync(DEVICE_FILE, DEVICE_FILE.replace(/\.json$/, `-${Date.now()}.json`));   // keep older keys
     fs.writeFileSync(DEVICE_FILE, JSON.stringify(await exportDevice(device), null, 2));
     state.keyId = r.keyId;
-    console.log(`Device registered for free. keyId ${r.keyId} (saved in app/.state/device.json)`);
+    console.log(`Device registered for free. keyId ${r.keyId} (saved in ${path.relative(APP_DIR, DEVICE_FILE)})`);
   },
 
   async attest(ctx, args, state) {
@@ -223,14 +240,16 @@ const commands = {
     }
     const r = await commitAccusation(ctx, "accuser", { photoHash, keyId, evidence });
     const list = pendingCommits(state);
-    list.push({ photoHash, keyId, evidence, evidenceHash: r.evidenceHash, salt: r.salt, commitment: r.commitment, file: args[0], committedAt: new Date().toISOString() });
+    list.push({ photoHash, keyId, evidence, evidenceHash: r.evidenceHash, salt: r.salt, commitment: r.commitment, file: args[0] });
+    const st = await commitmentStatus(ctx, r.commitment);
+    console.log(`  committed at ${when(st.committedAt)} (chain time); reveal by ${when(st.revealDeadline)}.`);
     console.log(`Accusation committed (#${list.length}): only the hash ${r.commitment} is on chain. Bond ${formatToken(ctx, ctx.params.bond)}.`);
     console.log(`  salt and evidence hash saved in app/.state/ for the reveal (${list.length} pending).`);
     if (r.warning) console.log(`  Warning: ${r.warning}.`);
   },
 
   async "accuse-reveal"(ctx, args, state) {
-    const list = pendingCommits(state);
+    const list = await refreshCommits(ctx, state);
     if (!list.length) throw new Error("no pending commitment: run accuse-commit first");
     let i;
     if (!args[0]) {
@@ -245,6 +264,7 @@ const commands = {
     if (!(i >= 0 && i < list.length)) throw new Error(`no such pending commitment: ${args[0]}\n  ${list.map(describeCommit).join("\n  ")}`);
     const c = list[i];
     console.log(`Revealing ${describeCommit(c, i)}`);
+    if (c.chain?.expired) throw new Error(`too late: the reveal period of #${i + 1} ended at ${when(c.chain.revealDeadline)}; the bond can only be forfeited (forfeit ${i + 1})`);
     const r = await revealAccusation(ctx, "accuser", c);
     list.splice(i, 1);
     if (r.bondReturned) { console.log(`No new accusation (${r.reason}): the bond is credited back to the accuser (withdraw accuser).`); return; }
@@ -258,8 +278,7 @@ const commands = {
     const open = (await listAccusations(ctx)).filter((a) => a.open);
     let id = args[1];
     if (!id) {
-      if (state.lastAssertion && open.some((a) => a.assertionId === state.lastAssertion)) id = state.lastAssertion;
-      else if (open.length === 1) id = open[0].assertionId;
+      if (open.length === 1) id = open[0].assertionId;
       else if (!open.length) throw new Error("no open accusation to vote on (reveal one with accuse-reveal first)");
       else throw new Error(`${open.length} open accusations; choose one: vote <true|false> <assertionId>\n  ${open.map((a) => `${a.assertionId}  photo ${short(a.photoHash)}`).join("\n  ")}`);
     }
@@ -272,8 +291,11 @@ const commands = {
 
   async refund(ctx, args, state) {
     const photoHash = await sha256(readFile(args[0]));
-    const recs = (await verifyPhoto(ctx, photoHash)).filter((r) => r.state === "attested");
-    if (!recs.length) throw new Error("no attested record of this photo to refund");
+    const all = await verifyPhoto(ctx, photoHash);
+    if (!all.length) throw new Error("no record of this photo: nothing to refund");
+    const recs = all.filter((r) => r.state === "attested");
+    // None refundable: let the library say why (already refunded, proven fake, under accusation).
+    if (!recs.length) await refund(ctx, "photographer", { photoHash, keyId: all[0].keyId });
     for (const r of recs) {
       await refund(ctx, "photographer", { photoHash, keyId: r.keyId });
       console.log(`Deposit refunded (credited to ${r.depositor}) for key ${short(r.keyId)}.`);
@@ -301,6 +323,20 @@ const commands = {
     console.log(`Chain clock moved forward ${s} s. Now ${when(r.timestamp)}.`);
   },
 
+  async forfeit(ctx, args, state) {
+    const list = await refreshCommits(ctx, state);
+    const expired = list.map((c, i) => [c, i]).filter(([c]) => c.chain.expired);
+    if (!expired.length) throw new Error("no expired commitment to forfeit (status lists the pending ones)");
+    let pick = expired[0];
+    if (args[0]) pick = expired.find(([, i]) => String(i + 1) === args[0].replace("#", ""));
+    else if (expired.length > 1) throw new Error(`${expired.length} expired commitments; choose one: forfeit <#>`);
+    if (!pick) throw new Error(`#${args[0]} is not an expired commitment`);
+    const [c, i] = pick;
+    const r = await forfeitCommitment(ctx, "accuser", c.commitment);
+    list.splice(i, 1);
+    console.log(`Commitment #${i + 1} forfeited: its bond ${formatToken(ctx, r.burned)} went to the burn address (tx ${r.txHash}).`);
+  },
+
   async balances(ctx) {
     const m = await money(ctx);
     for (const [k, v] of Object.entries(m)) console.log(`  ${k.padEnd(20)} ${formatToken(ctx, v)}`);
@@ -311,6 +347,7 @@ const commands = {
   async unwrap(ctx, args) {
     const role = args[0];
     if (!["photographer", "accuser", "operator"].includes(role)) throw new Error("usage: unwrap <role> [amount]");
+    if (args[1] !== undefined && !(/^\d+(\.\d+)?$/.test(args[1]) && Number(args[1]) > 0)) throw new Error(`amount must be a positive number of WETH, got "${args[1]}"`);
     const r = await unwrap(ctx, role, args[1] ? ethers.parseUnits(args[1], ctx.params.tokenDecimals) : undefined);
     console.log(`Unwrapped ${formatToken(ctx, r.amount)} into ETH for the ${role}.`);
   },
@@ -323,10 +360,10 @@ const NO_MONEY = new Set(["status", "verify", "balances", "advance", "demo", "he
 
 // ------------------------------------------------------------------ demo (smoke check)
 
-// Runs the click path of impl/mock/DEMO.md, plus the optional "fake proven" and "revoke key" endings.
+// Runs the click path of docs/demo.md, plus the optional "fake proven" and "revoke key" endings.
 // Each step prints what happened and checks the expected outcome; any mismatch exits with code 1.
 async function runDemo(ctx) {
-  // Everything the demo prints is also written to app/output/cli-demo.txt (a saved run).
+  // Everything the demo prints is also saved (see below).
   const lines = [];
   const log0 = console.log;
   console.log = (...a) => { lines.push(a.join(" ")); log0(...a); };
@@ -334,8 +371,12 @@ async function runDemo(ctx) {
     await runDemoSteps(ctx);
   } finally {
     console.log = log0;
-    fs.mkdirSync(path.join(APP_DIR, "output"), { recursive: true });
-    fs.writeFileSync(path.join(APP_DIR, "output", "cli-demo.txt"), `# node cli.js demo  (${new Date().toISOString()}, ${ctx.rpcUrl})\n${lines.join("\n")}\n`);
+    // Saved only for the default instance, or where CLI_DEMO_OUTPUT says: test runs on other ports leave it alone.
+    const out = process.env.CLI_DEMO_OUTPUT || (new URL(ctx.rpcUrl).port === "8545" ? path.join(APP_DIR, "output", "cli-demo.txt") : null);
+    if (out) {
+      fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+      fs.writeFileSync(out, `# node cli.js demo  (${new Date().toISOString()}, ${ctx.rpcUrl})\n${lines.join("\n")}\n`);
+    }
   }
 }
 
@@ -457,7 +498,7 @@ async function runDemoSteps(ctx) {
       console.log(`   accuser net over steps 5-7: -${formatToken(ctx, B)}`);
     });
 
-    await step("8. Advance time by one challenge period -> Refund", async (before) => {
+    await step("8. Advance time past the challenge and reveal periods -> Refund", async (before) => {
       const [rec] = await verifyPhoto(ctx, photo1Hash);
       let early = null;
       try { await refund(ctx, "photographer", { photoHash: photo1Hash, keyId: deviceA.keyId }); } catch (e) { early = e.message; }
@@ -554,9 +595,9 @@ async function main() {
   const [cmd, ...args] = process.argv.slice(2);
   if (!cmd || cmd === "help" || cmd === "--help") { console.log(HELP); process.exit(0); }
   if (!commands[cmd]) { console.error(`Unknown command: ${cmd}\n`); console.error(HELP); process.exit(1); }
-  const { deployment } = loadDeployment();
-  const ctx = connect({ rpcUrl: RPC_URL, deployment });
-  const state = loadState(await deploymentId(ctx));
+  const { deployment, rpcUrl } = loadDeployment();
+  const ctx = connect({ rpcUrl, deployment });
+  const state = await loadState(await deploymentId(ctx));
   onActivity(ctx, (a) => { if (cmd !== "demo") console.log(`  tx ${a.txHash}  block ${a.blockNumber}  ${a.role}: ${a.call}`); });
   const before = NO_MONEY.has(cmd) ? null : await money(ctx);
   try {

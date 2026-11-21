@@ -21,8 +21,15 @@ npm run chain        # Hardhat node of ../contract on 127.0.0.1:8545 (hardfork o
 npm run deploy       # UMA + token + Paprika; writes ../contract/deployments/local.json and web/deployment.json
 npm run web          # node server.js on 127.0.0.1:5173
 npm run demo:cli     # node cli.js demo: the whole demo story with checks
-npm run stop         # kills leftover chain / web processes of this instance
+npm run stop         # stops the default instance (8545); `npm run stop -- 8546` stops only the one on 8546
 ```
+
+`npm start` refuses to run when its instance already runs (the chain already has this instance's Paprika, or the
+web port is busy). It prints "Paprika is already running at ..." and changes nothing. `npm run deploy` also refuses
+to deploy over a live deployment; `npm run deploy -- --force` replaces it (every open page then resets). If the web
+server exits, `npm start` restarts it and keeps the chain. If the chain exits, everything stops: the chain lives in
+memory, so its state is lost. `npm run stop` matches the port exactly (944 never stops 9445) and, for a non-default
+port, deletes that instance's per-port files.
 
 The chain lives in memory. A restart starts from block 0, so you must deploy again.
 
@@ -53,8 +60,8 @@ The scripts then print a warning: the page relays JSON-RPC to a node whose accou
 | `scripts/start.js` | `npm start`. Chain in the background (log in `.state/chain.log`), wait for the RPC, deploy, web. |
 | `scripts/stop.js` | `npm run stop`. |
 | `scripts/common.js` | Paths, RPC probe, PID file. |
-| `output/cli-demo.txt` | Output of the last `node cli.js demo` run. The demo writes it. |
-| `.state/` | CLI state (device key, pending commitments with their salts, last assertion id) and PIDs. Git-ignored. |
+| `output/cli-demo.txt` | A saved `node cli.js demo` run. The demo writes it on port 8545 only, or where `CLI_DEMO_OUTPUT` says. |
+| `.state/` | PIDs, and the CLI state in `.state/cli/<id>/` (device key, pending commitments with their salts), one folder per deployment fingerprint. The CLI never deletes or overwrites the state of another chain. Git-ignored. |
 
 ## Deploy parameters
 
@@ -102,14 +109,17 @@ node cli.js refund <file>                            refund the deposit after th
 node cli.js withdraw <role>                          withdraw the role's credit (as WETH)
 node cli.js unwrap <role> [amount]                   turn the role's WETH back into ETH
 node cli.js revoke                                   revoke the device key
+node cli.js forfeit [#]                              burn the bond of a commitment not revealed in time
 node cli.js advance <seconds> [--force]              move the chain clock forward (refused while an accusation is open)
 node cli.js balances                                 WETH balances, credits and ETH
 node cli.js demo                                     the whole demo, with checks
 ```
 
 Each command prints the transaction hashes and the money that moved. `RPC_PORT` (or `RPC_URL`) and `PAPRIKA_DEPLOYMENT`
-(path of the deployment JSON) override the defaults. Several commitments can be pending at once: `status` lists them,
-and `accuse-reveal` names the one it reveals. `vote` picks the open accusation (or asks you to choose).
+(path of the deployment JSON; the CLI then uses its `rpcUrl` unless `RPC_PORT` or `RPC_URL` is set) override the
+defaults. Several commitments can be pending at once: `status` lists them,
+with chain times and the reveal deadline, and `accuse-reveal` names the one it reveals. An expired one can only be
+forfeited (`forfeit`). `vote` takes the only open accusation; with several open it lists them and asks for an id.
 
 ## Library notes (`lib/paprika.js`)
 
@@ -137,6 +147,9 @@ and `accuse-reveal` names the one it reveals. `vote` picks the open accusation (
 - `listAccusations(ctx)` returns every accusation from the chain events: `{ assertionId, photoHash, keyId, claimant,
   evidenceHash, openedAt, blockNumber, txHash, open, outcome }`, with `outcome` = `pending`, `fake-proven` or
   `rejected`. Use it to find an open accusation again after a reload.
+- `commitmentStatus(ctx, commitment)` returns `{ exists, live, claimant, committedAt, committedBlock,
+  revealDeadline, expired }` (chain seconds). `forfeitCommitment(ctx, role, commitment)` sends `forfeitCommit` for an
+  expired commitment (anyone may); the bond goes to the burn address. It returns `{ txHash, burned }`.
 - `deploymentFingerprint(ctx)` returns `"<chainId>:<paprika>:<hash of block 1>"` (or `...:no-contract`). A restarted
   chain or a new deployment gives a new value.
 - `verifyPhoto` entries also carry `photoHash` and `recordedBeforeFlag`. `device.status` is `none`, `active` or
