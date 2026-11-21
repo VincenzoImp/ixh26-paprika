@@ -168,12 +168,17 @@ async function accuse(photo, fake) {
   await t("select-accuse-photo").selectOption(`${photo.photoHash}|${photo.keyId}`);
   await t("input-evidence").fill("https://example.org/e2e-evidence");
   await clickOk("commit", "btn-commit");
+  await t("tab-photographer").click();
+  await check("B1: advance time disabled after commit", !(await t("btn-advance-time").isEnabled()));
+  await check("B1: advance time reason shown", /accusation is open/i.test(await text("advance-why")));
+  await t("tab-accuser").click();
   const afterCommit = await money();   // the bond B is now locked in Paprika (wrapped from ETH if needed)
   await eq("commit: chain record still attested (hidden commit)", (await chainRecord(photo.photoHash, photo.keyId)).state, "attested");
   await clickOk("reveal", "btn-reveal");
   const m = await money();
   await eq("reveal: chain record accused", (await chainRecord(photo.photoHash, photo.keyId)).state, "accused");
   await eq("reveal: UMA OOv3 holds 2 x B", m.oo, 2n * ctx.params.bond);
+  await check("B1: advance time disabled while the vote is pending", !(await t("btn-advance-time").isEnabled()));
   await clickOk(fake ? "vote fake" : "vote not fake", fake ? "btn-vote-fake" : "btn-vote-not-fake");
   return afterCommit;
 }
@@ -188,6 +193,23 @@ async function story() {
   await page.waitForTimeout(800);
   await idle();
   await check("page connects (no fatal message)", !(await t("fatal-message").isVisible()));
+  // B6: the server serves the deployment of THIS chain at /deployment.json.
+  const served = await (await fetch(`${BASE}/deployment.json`)).json();
+  await eq("B6: /deployment.json is this chain's deployment", served.addresses.paprika.toLowerCase(), ctx.addresses.paprika.toLowerCase());
+  // M2: /rpc forwards only the methods the page needs.
+  const bad = await fetch(`${BASE}/rpc`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hardhat_setBalance", params: [ctx.accounts.accuser, "0x1"] }) });
+  await eq("M2: /rpc refuses hardhat_setBalance", bad.status, 403);
+  // Layout: no horizontal scroll at 1440, 1280, 1024; the explainer is not under the footer.
+  for (const w of [1440, 1280, 1024]) {
+    await page.setViewportSize({ width: w, height: 900 });
+    await page.waitForTimeout(200);
+    await check(`layout ${w}px: no horizontal scroll`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    if (w > 1100) await check(`layout ${w}px: explainer above the footer`, await page.evaluate(() =>
+      document.querySelector('[data-testid="explainer"]').getBoundingClientRect().bottom <= document.querySelector("footer").getBoundingClientRect().top + 1));
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await check("F1: parameters always visible", await t("param-photo-window").isVisible() && await t("param-fee").isVisible());
   await eq("param B shown", (await t("param-bond").textContent()).trim(), fmt(B));
   await headerMatchesChain("start");
 
@@ -213,10 +235,35 @@ async function story() {
   await eq("attest: My photos row state", await t("deposit-row").first().getAttribute("data-state"), "attested");
   await check("attest: refund button disabled before the period", !(await t("btn-refund").first().isEnabled()));
   const file1 = await downloadLast(0);
+  // M3: the same photo cannot be attested twice by the same key, and a forced click sends nothing.
+  await check("M3: re-attest button disabled", !(await t("btn-attest").isEnabled()));
+  await check("M3: re-attest reason shown", /already attested/i.test(await text("attest-why")));
+  const ra0 = await money();
+  await t("btn-attest").evaluate((b) => { b.disabled = false; b.click(); });
+  await page.waitForTimeout(150); await idle();
+  const raErr = (await t("error-banner").isVisible()) ? await text("error-message") : "";
+  if (raErr) await t("btn-dismiss-error").click();
+  const ra1 = await money();
+  await check("M3: forced re-attest refused before any transaction", /already attested/i.test(raErr), raErr);
+  await check("M3: forced re-attest spends nothing", ra0.photographer === ra1.photographer && ra0.paprika === ra1.paprika);
+  // M6: an empty file is refused; a non-image is accepted with a warning.
+  await t("input-capture-file").setInputFiles({ name: "empty.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(0) });
+  await page.waitForTimeout(150); await idle();
+  await check("M6: empty file refused (capture)", (await t("error-banner").isVisible()) && /empty/i.test(await text("error-message")));
+  if (await t("error-banner").isVisible()) await t("btn-dismiss-error").click();
+  await t("input-capture-file").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not a photo") });
+  await page.waitForTimeout(150); await idle();
+  await check("M6: non-image warned (capture)", (await t("capture-warning").isVisible()) && /not look like an image/i.test(await text("capture-warning")));
+  await t("tab-verifier").click();
+  await t("input-verify-file").setInputFiles({ name: "empty.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(0) });
+  await page.waitForTimeout(150); await idle();
+  await check("M6: empty file refused (verifier)", (await t("error-banner").isVisible()) && /empty/i.test(await text("error-message")));
+  if (await t("error-banner").isVisible()) await t("btn-dismiss-error").click();
 
   // 3. Verify -> attested
   await verifyFile(file1);
   await eq("verify: verdict attested", await verdict(), "attested");
+  await check("F2: 'Not shown: that a camera took this photo' visible", /Not shown: that a camera took this photo/.test(await text("verify-not-shown")));
   await check("verify: honest sentence names block a", (await text("verify-honest-sentence")).includes(String(r1.anchorBlock)));
   await t("tab-verifier").click();
   await clickOk("verify last attested", "btn-verify-last");
@@ -264,6 +311,12 @@ async function story() {
   await eq("refund: My photos row refunded", await t("deposit-row").first().getAttribute("data-state"), "refunded");
   await verifyFile(file1);
   await eq("verify after refund: unchallenged", await verdict(), "unchallenged");
+  await check("F2: refunded after a rejected accusation reads 'Not proven fake'", /Not proven fake/.test(await text("verify-title")));
+  // B4: a refunded photo is not offered to the accuser, and the reason is shown.
+  await t("tab-accuser").click();
+  const opts1 = await t("select-accuse-photo").locator("option").evaluateAll((os) => os.map((o) => o.value));
+  await check("B4: refunded photo not offered", !opts1.some((v) => v.startsWith(photo1.photoHash)), opts1.join(","));
+  await check("B4: reason for not offering shown", /refunded/.test(await text("accuse-not-accusable")));
 
   // Second photo: proven fake
   const photo2 = await attestSample();
@@ -282,6 +335,8 @@ async function story() {
   await t("tab-accuser").click();
   await clickOk("withdraw accuser credit", "btn-withdraw-accuser");
   await eq("withdraw accuser: credit 0 (chain)", (await money()).cAcc, 0n);
+  const opts2 = await t("select-accuse-photo").locator("option").evaluateAll((os) => os.map((o) => o.value));
+  await check("B4: proven-fake photo not offered", !opts2.some((v) => v.startsWith(photo2.photoHash)), opts2.join(","));
   await click("btn-accuse-verify");
   await eq("verifier: proven fake", await verdict(), "fake");
   await t("tab-photographer").click();
@@ -317,6 +372,58 @@ async function story() {
 
   // timeline lists transactions
   await check("activity log has rows", (await t("activity-row").count()) > 10);
+
+  // Camera path with Chromium's fake camera: selfie -> still -> attest -> download -> verify.
+  await t("tab-photographer").click();
+  await clickOk("key 3", "btn-generate-key");
+  await clickOk("register key 3", "btn-register");
+  await clickOk("start camera", "btn-start-camera");
+  await check("camera: live preview with Take a selfie", await t("btn-take-photo").isVisible());
+  await clickOk("take a selfie", "btn-take-photo");
+  await check("camera: still shown, Sign & attest enabled", await t("btn-attest").isEnabled());
+  await check("camera: Retake offered", await t("btn-retake").isVisible());
+  await check("camera: mirror preview off by default", !(await t("toggle-mirror").isChecked()));
+  await clickOk("attest selfie", "btn-attest");
+  const selfie = await page.evaluate(() => ({ photoHash: window.paprikaState.attested?.photoHash, keyId: window.paprikaState.attested?.keyId }));
+  await eq("camera: selfie attested (chain)", (await chainRecord(selfie.photoHash, selfie.keyId))?.state, "attested");
+  const nRows = await t("btn-download").count();
+  const selfieFile = await downloadLast(nRows - 1);
+  await verifyFile(selfieFile);
+  await eq("camera: downloaded selfie verifies as attested", await verdict(), "attested");
+
+  // B2: reload after commit keeps the commitment; the reveal still works.
+  await t("tab-accuser").click();
+  if (await t("btn-accuse-new").isEnabled()) await click("btn-accuse-new");
+  await t("select-accuse-photo").selectOption(`${selfie.photoHash}|${selfie.keyId}`);
+  await clickOk("commit (selfie)", "btn-commit");
+  await page.reload(); await page.waitForTimeout(800); await idle();
+  await t("tab-accuser").click();
+  await check("B2: after reload, reveal is still possible", await t("btn-reveal").isEnabled());
+  await check("B2: after reload, the reveal countdown is shown", /Reveal before/.test(await text("reveal-deadline")));
+  await clickOk("reveal after reload", "btn-reveal");
+  await eq("B2: reveal after reload: chain record accused", (await chainRecord(selfie.photoHash, selfie.keyId)).state, "accused");
+  // B3: reload after reveal, and a fresh browser, both offer the vote.
+  await page.reload(); await page.waitForTimeout(800); await idle();
+  await t("tab-accuser").click();
+  await check("B3: after reload, the vote is offered", await t("btn-vote-not-fake").isEnabled());
+  const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const p2 = await fresh.newPage();
+  await p2.goto(BASE + "/#accuser"); await p2.waitForTimeout(1000);
+  await p2.waitForFunction(() => document.querySelector('[data-testid="busy-indicator"]')?.classList.contains("hidden"), null, { timeout: 60000 });
+  await check("B3: a fresh browser rebuilds the open accusation and offers the vote", await p2.getByTestId("btn-vote-not-fake").isEnabled());
+  await check("B1: a fresh browser also blocks the time skip", !(await p2.getByTestId("btn-advance-time").isEnabled()));
+  await fresh.close();
+  await clickOk("vote not fake (after reloads)", "btn-vote-not-fake");
+  await eq("B3: vote after reloads: outcome shown", await t("settle-outcome").getAttribute("data-outcome"), "not-proven");
+  await eq("B3: vote after reloads: chain record attested again", (await chainRecord(selfie.photoHash, selfie.keyId)).state, "attested");
+  await t("tab-photographer").click();
+  await check("B1: advance time enabled again after the vote", await t("btn-advance-time").isEnabled());
+
+  // M4: a restarted or redeployed chain is detected (simulated: another stored fingerprint), local state cleared.
+  await page.evaluate(() => localStorage.setItem("paprika-fingerprint", "another-chain"));
+  await page.reload(); await page.waitForTimeout(800); await idle();
+  await check("M4: chain change announced", (await t("error-banner").isVisible()) && /restarted or Paprika was redeployed/.test(await text("error-message")));
+  await eq("M4: saved device key cleared", await t("device-status").getAttribute("data-status"), "none");
 }
 
 // ------------------------------------------------------------------ main
@@ -330,8 +437,9 @@ try {
   lib = await import(path.join(APP, "lib", "paprika.js"));
   ctx = lib.connect({ rpcUrl: `http://127.0.0.1:${RPC_PORT}`, deployment });
 
-  browser = await chromium.launch({ headless: !process.env.HEADED });
+  browser = await chromium.launch({ headless: !process.env.HEADED, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  await context.grantPermissions(["camera"], { origin: BASE });
   page = await context.newPage();
   page.on("pageerror", (e) => consoleErrors.push("pageerror: " + e.message));
   page.on("console", (m) => { if (m.type() === "error") consoleErrors.push("console: " + m.text()); });
